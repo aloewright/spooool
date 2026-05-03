@@ -4,9 +4,11 @@ import {
   escapeXml,
   renderRobotsTxt,
   renderSitemap,
+  renderSitemapIndex,
   seoRoutes,
   toW3CDate,
   truncateForSitemap,
+  videoSitemapPageCount,
   type SeoEnv,
 } from './seo';
 
@@ -221,6 +223,7 @@ describe('seoRoutes — /robots.txt', () => {
 interface FakePrepared {
   bind: (...values: unknown[]) => FakePrepared;
   all: () => Promise<{ results: unknown[] }>;
+  first: () => Promise<unknown>;
 }
 
 interface FakeVideoRow {
@@ -234,13 +237,32 @@ interface FakeVideoRow {
 function fakeDB(rows: {
   videos: Array<FakeVideoRow>;
   channels: Array<{ username: string; updated_at: string }>;
+  totalVideos?: number;
 }): D1Database {
   const stmt = (sql: string): FakePrepared => {
     const trimmed = sql.replace(/\s+/g, ' ').trim();
+    const isCount = trimmed.startsWith('SELECT COUNT(*)');
     const isVideos = trimmed.startsWith('SELECT id, title, description, thumbnail_url, updated_at FROM videos');
+    let bindArgs: unknown[] = [];
     const api: FakePrepared = {
-      bind: () => api,
-      all: async () => ({ results: isVideos ? rows.videos : rows.channels }),
+      bind: (...values: unknown[]) => {
+        bindArgs = values;
+        return api;
+      },
+      all: async () => {
+        if (isVideos) {
+          const [limit, offset] = bindArgs as [number, number];
+          if (typeof offset === 'number') {
+            return { results: rows.videos.slice(offset, offset + limit) };
+          }
+          return { results: rows.videos };
+        }
+        return { results: rows.channels };
+      },
+      first: async () => {
+        if (isCount) return { n: rows.totalVideos ?? rows.videos.length };
+        return null;
+      },
     };
     return api;
   };
@@ -315,5 +337,138 @@ describe('seoRoutes — /sitemap.xml', () => {
     // v2 has no thumbnail → it appears as a plain <url> entry, not a <video:video>.
     expect(body).toContain('<loc>http://localhost/watch/v2</loc>');
     expect(body).not.toMatch(/<video:title>No thumb<\/video:title>/);
+  });
+});
+
+describe('renderSitemapIndex', () => {
+  it('emits a valid sitemapindex envelope', () => {
+    const xml = renderSitemapIndex([{ loc: 'https://x.test/sitemap-videos-1.xml' }]);
+    expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
+    expect(xml).toContain('<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
+    expect(xml).toContain('<sitemap>');
+    expect(xml).toContain('<loc>https://x.test/sitemap-videos-1.xml</loc>');
+    expect(xml.trimEnd().endsWith('</sitemapindex>')).toBe(true);
+  });
+
+  it('emits optional <lastmod> when provided', () => {
+    const xml = renderSitemapIndex([
+      { loc: 'https://x.test/sitemap-videos-1.xml', lastmod: '2026-04-30T12:00:00Z' },
+    ]);
+    expect(xml).toContain('<lastmod>2026-04-30T12:00:00Z</lastmod>');
+  });
+
+  it('escapes XML metacharacters in entry locs', () => {
+    const xml = renderSitemapIndex([{ loc: 'https://x.test/?a=1&b=2' }]);
+    expect(xml).toContain('<loc>https://x.test/?a=1&amp;b=2</loc>');
+  });
+});
+
+describe('videoSitemapPageCount', () => {
+  it('returns 0 when there are no videos', () => {
+    expect(videoSitemapPageCount(0)).toBe(0);
+  });
+
+  it('returns 1 when total fits in a single page', () => {
+    expect(videoSitemapPageCount(1)).toBe(1);
+    expect(videoSitemapPageCount(5000)).toBe(1);
+  });
+
+  it('rounds up partial pages', () => {
+    expect(videoSitemapPageCount(5001)).toBe(2);
+    expect(videoSitemapPageCount(10000)).toBe(2);
+    expect(videoSitemapPageCount(10001)).toBe(3);
+  });
+
+  it('honors a custom per-page size', () => {
+    expect(videoSitemapPageCount(250, 100)).toBe(3);
+  });
+});
+
+describe('seoRoutes — paginated /sitemap.xml', () => {
+  it('returns a single urlset (not an index) when total ≤ page size', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({
+        videos: [{ id: 'v1', updated_at: '2026-04-30 00:00:00' }],
+        channels: [],
+        totalVideos: 1,
+      }),
+    };
+    const res = await seoRoutes.request('/sitemap.xml', {}, env);
+    const body = await res.text();
+    expect(body).toContain('<urlset');
+    expect(body).not.toContain('<sitemapindex');
+    expect(body).toContain('<loc>http://localhost/watch/v1</loc>');
+  });
+
+  it('returns a sitemapindex pointing at static + per-page video files when total exceeds page size', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({
+        videos: [],
+        channels: [],
+        totalVideos: 12_345,
+      }),
+    };
+    const res = await seoRoutes.request('/sitemap.xml', {}, env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('application/xml');
+    const body = await res.text();
+    expect(body).toContain('<sitemapindex');
+    expect(body).toContain('<loc>http://localhost/sitemap-static.xml</loc>');
+    expect(body).toContain('<loc>http://localhost/sitemap-videos-1.xml</loc>');
+    expect(body).toContain('<loc>http://localhost/sitemap-videos-2.xml</loc>');
+    expect(body).toContain('<loc>http://localhost/sitemap-videos-3.xml</loc>');
+    expect(body).not.toContain('<loc>http://localhost/sitemap-videos-4.xml</loc>');
+  });
+});
+
+describe('seoRoutes — /sitemap-static.xml', () => {
+  it('contains home, search, and channel URLs (no video URLs)', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({
+        videos: [{ id: 'v1', updated_at: '2026-04-30 00:00:00' }],
+        channels: [{ username: 'alice', updated_at: '2026-04-30 12:00:00' }],
+      }),
+    };
+    const res = await seoRoutes.request('/sitemap-static.xml', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<loc>http://localhost/</loc>');
+    expect(body).toContain('<loc>http://localhost/search</loc>');
+    expect(body).toContain('<loc>http://localhost/channel/alice</loc>');
+    expect(body).not.toContain('/watch/v1');
+  });
+});
+
+describe('seoRoutes — /sitemap-videos-:page.xml (wildcard route)', () => {
+  it('serves a urlset of videos for the requested page', async () => {
+    const videos = Array.from({ length: 12 }, (_, i) => ({
+      id: `v${i + 1}`,
+      updated_at: '2026-04-30 00:00:00',
+    }));
+    const env: SeoEnv = { DB: fakeDB({ videos, channels: [], totalVideos: 12 }) };
+    const res = await seoRoutes.request('/sitemap-videos-1.xml', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<urlset');
+    expect(body).toContain('<loc>http://localhost/watch/v1</loc>');
+    expect(body).not.toContain('<loc>http://localhost/</loc>');
+    expect(body).not.toContain('<loc>http://localhost/search</loc>');
+  });
+
+  it('returns 400 when the page param is non-numeric', async () => {
+    const env: SeoEnv = { DB: fakeDB({ videos: [], channels: [], totalVideos: 5 }) };
+    const res = await seoRoutes.request('/sitemap-videos-foo.xml', {}, env);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 for zero / negative pages', async () => {
+    const env: SeoEnv = { DB: fakeDB({ videos: [], channels: [], totalVideos: 5 }) };
+    expect((await seoRoutes.request('/sitemap-videos-0.xml', {}, env)).status).toBe(400);
+  });
+
+  it('returns 404 when page is past the last page', async () => {
+    const env: SeoEnv = { DB: fakeDB({ videos: [], channels: [], totalVideos: 5 }) };
+    const res = await seoRoutes.request('/sitemap-videos-99.xml', {}, env);
+    expect(res.status).toBe(404);
   });
 });

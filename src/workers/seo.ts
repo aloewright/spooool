@@ -19,7 +19,10 @@ export interface SitemapUrl {
   video?: VideoSitemapEntry;
 }
 
-const MAX_VIDEO_URLS = 5000;
+// Videos per sitemap page. The sitemap protocol caps a urlset at 50,000 URLs
+// and 50 MB; 5,000 keeps each file small enough that crawlers can fetch it
+// quickly while still covering ~99% of catalogs in a single sitemap.
+const VIDEOS_PER_SITEMAP_PAGE = 5000;
 const MAX_CHANNEL_URLS = 1000;
 const SITEMAP_CACHE_SECONDS = 3600;
 const ROBOTS_CACHE_SECONDS = 86400;
@@ -63,6 +66,32 @@ export function toW3CDate(value: string | null | undefined): string | undefined 
 export function truncateForSitemap(value: string, max: number): string {
   if (value.length <= max) return value;
   return value.slice(0, max);
+}
+
+export interface SitemapIndexEntry {
+  loc: string;
+  lastmod?: string;
+}
+
+export function renderSitemapIndex(entries: SitemapIndexEntry[]): string {
+  const lines: string[] = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+  ];
+  for (const e of entries) {
+    lines.push('  <sitemap>');
+    lines.push(`    <loc>${escapeXml(e.loc)}</loc>`);
+    if (e.lastmod) lines.push(`    <lastmod>${escapeXml(e.lastmod)}</lastmod>`);
+    lines.push('  </sitemap>');
+  }
+  lines.push('</sitemapindex>');
+  lines.push('');
+  return lines.join('\n');
+}
+
+export function videoSitemapPageCount(total: number, perPage: number = VIDEOS_PER_SITEMAP_PAGE): number {
+  if (total <= 0) return 0;
+  return Math.ceil(total / perPage);
 }
 
 export function renderSitemap(urls: SitemapUrl[]): string {
@@ -139,20 +168,24 @@ export function buildVideoSitemapEntry(args: {
   };
 }
 
-seoRoutes.get('/sitemap.xml', async (c) => {
-  const origin = new URL(c.req.url).origin;
-
-  const [videoRows, channelRows] = await Promise.all([
-    c.env.DB.prepare(
+async function loadVideoPage(db: D1Database, page: number): Promise<SitemapVideoRow[]> {
+  const offset = (page - 1) * VIDEOS_PER_SITEMAP_PAGE;
+  const result = await db
+    .prepare(
       `SELECT id, title, description, thumbnail_url, updated_at FROM videos
        WHERE deleted_at IS NULL AND hidden_at IS NULL AND status = 'ready'
          AND (dmca_status IS NULL OR dmca_status != 'disabled')
        ORDER BY updated_at DESC
-       LIMIT ?`,
+       LIMIT ? OFFSET ?`,
     )
-      .bind(MAX_VIDEO_URLS)
-      .all<SitemapVideoRow>(),
-    c.env.DB.prepare(
+    .bind(VIDEOS_PER_SITEMAP_PAGE, offset)
+    .all<SitemapVideoRow>();
+  return result.results ?? [];
+}
+
+async function loadChannelRows(db: D1Database): Promise<{ username: string; updated_at: string }[]> {
+  const result = await db
+    .prepare(
       `SELECT u.username AS username, MAX(v.updated_at) AS updated_at
        FROM user u
        JOIN videos v ON v.user_id = u.id
@@ -163,25 +196,28 @@ seoRoutes.get('/sitemap.xml', async (c) => {
        ORDER BY updated_at DESC
        LIMIT ?`,
     )
-      .bind(MAX_CHANNEL_URLS)
-      .all<{ username: string; updated_at: string }>(),
-  ]);
+    .bind(MAX_CHANNEL_URLS)
+    .all<{ username: string; updated_at: string }>();
+  return result.results ?? [];
+}
 
+async function countReadyVideos(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM videos
+       WHERE deleted_at IS NULL AND hidden_at IS NULL AND status = 'ready'
+         AND (dmca_status IS NULL OR dmca_status != 'disabled')`,
+    )
+    .first<{ n: number }>();
+  return Number(row?.n ?? 0);
+}
+
+function buildStaticUrls(origin: string, channelRows: { username: string; updated_at: string }[]): SitemapUrl[] {
   const urls: SitemapUrl[] = [
     { loc: `${origin}/`, changefreq: 'hourly', priority: 1.0 },
     { loc: `${origin}/search`, changefreq: 'daily', priority: 0.8 },
   ];
-
-  for (const row of videoRows.results ?? []) {
-    urls.push({
-      loc: `${origin}/watch/${encodeURIComponent(row.id)}`,
-      lastmod: toW3CDate(row.updated_at),
-      changefreq: 'weekly',
-      priority: 0.7,
-      video: buildVideoSitemapEntry({ origin, row }),
-    });
-  }
-  for (const row of channelRows.results ?? []) {
+  for (const row of channelRows) {
     urls.push({
       loc: `${origin}/channel/${encodeURIComponent(row.username)}`,
       lastmod: toW3CDate(row.updated_at),
@@ -189,12 +225,74 @@ seoRoutes.get('/sitemap.xml', async (c) => {
       priority: 0.6,
     });
   }
+  return urls;
+}
 
-  return new Response(renderSitemap(urls), {
+function buildVideoUrls(origin: string, videoRows: SitemapVideoRow[]): SitemapUrl[] {
+  return videoRows.map((row) => ({
+    loc: `${origin}/watch/${encodeURIComponent(row.id)}`,
+    lastmod: toW3CDate(row.updated_at),
+    changefreq: 'weekly' as const,
+    priority: 0.7,
+    video: buildVideoSitemapEntry({ origin, row }),
+  }));
+}
+
+const sitemapResponse = (xml: string): Response =>
+  new Response(xml, {
     status: 200,
     headers: {
       'Content-Type': 'application/xml; charset=utf-8',
       'Cache-Control': `public, max-age=${SITEMAP_CACHE_SECONDS}`,
     },
   });
+
+seoRoutes.get('/sitemap.xml', async (c) => {
+  const origin = new URL(c.req.url).origin;
+  const total = await countReadyVideos(c.env.DB);
+
+  // Single-page (legacy) layout — keeps small catalogs in one fetch.
+  if (total <= VIDEOS_PER_SITEMAP_PAGE) {
+    const [videoRows, channelRows] = await Promise.all([
+      loadVideoPage(c.env.DB, 1),
+      loadChannelRows(c.env.DB),
+    ]);
+    return sitemapResponse(
+      renderSitemap([...buildStaticUrls(origin, channelRows), ...buildVideoUrls(origin, videoRows)]),
+    );
+  }
+
+  // Paginated layout — emit a sitemap index. Crawlers fetch each child.
+  const pages = videoSitemapPageCount(total);
+  const entries: SitemapIndexEntry[] = [{ loc: `${origin}/sitemap-static.xml` }];
+  for (let i = 1; i <= pages; i++) {
+    entries.push({ loc: `${origin}/sitemap-videos-${i}.xml` });
+  }
+  return sitemapResponse(renderSitemapIndex(entries));
+});
+
+seoRoutes.get('/sitemap-static.xml', async (c) => {
+  const origin = new URL(c.req.url).origin;
+  const channelRows = await loadChannelRows(c.env.DB);
+  return sitemapResponse(renderSitemap(buildStaticUrls(origin, channelRows)));
+});
+
+// Hono's `:param` matcher (and its `{regex}` constraint) doesn't reliably
+// distinguish a literal `.xml` suffix on the same path segment, so we extract
+// the page number from `c.req.path` directly. Wildcard route guarantees the
+// handler runs for any /sitemap-videos-* path so we can return a precise 400.
+const SITEMAP_VIDEOS_PATTERN = /^\/sitemap-videos-([1-9]\d*)\.xml$/;
+
+seoRoutes.get('/sitemap-videos-*', async (c) => {
+  const origin = new URL(c.req.url).origin;
+  const match = SITEMAP_VIDEOS_PATTERN.exec(new URL(c.req.url).pathname);
+  if (!match) return c.json({ error: 'Invalid page' }, 400);
+  const page = Number.parseInt(match[1], 10);
+  const total = await countReadyVideos(c.env.DB);
+  const pages = videoSitemapPageCount(total);
+  if (page > pages) {
+    return c.json({ error: 'Page out of range' }, 404);
+  }
+  const videoRows = await loadVideoPage(c.env.DB, page);
+  return sitemapResponse(renderSitemap(buildVideoUrls(origin, videoRows)));
 });

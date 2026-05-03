@@ -9,6 +9,7 @@ import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
+import { healthRoutes } from './health';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
@@ -59,6 +60,10 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+
+// /api/health is a public liveness probe — no auth, no CSRF body checks
+// (the global CSRF middleware exempts safe methods, so GET passes through).
+app.route('/', healthRoutes);
 
 app.all('/api/auth/*', async (c) => {
   const auth = createAuth(c.env);

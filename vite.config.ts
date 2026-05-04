@@ -16,6 +16,9 @@ export default defineConfig({
           // ALO-204: hls.js is only loaded when the watch page mounts, so
           // isolate it from the eager vendor chunk.
           if (id.includes('hls.js')) return 'hls';
+          // ALO-166: PostHog is dynamic-imported from main.tsx after first
+          // paint; isolate so the eager vendor chunk stays small.
+          if (id.includes('posthog-js')) return 'posthog';
           if (id.includes('react-router')) return 'react-router';
           if (id.includes('react-dom')) return 'react-dom';
           if (id.includes('/react/')) return 'react';

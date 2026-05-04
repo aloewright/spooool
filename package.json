@@ -37,6 +37,7 @@
     "hls.js": "^1.6.16",
     "hono": "^4.12.9",
     "jose": "^6.2.2",
+    "posthog-js": "^1.372.8",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.30.3",

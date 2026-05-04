@@ -25,3 +25,11 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 void import('./lib/rum')
   .then(({ startRum }) => startRum())
   .catch(() => undefined);
+
+// ALO-166: lazy-load PostHog as well so it doesn't drag posthog-js (~180KB
+// raw / ~60KB gz) into the eager vendor chunk. autocapture / pageview
+// timers register on first user interaction, well after the lazy chunk
+// arrives.
+void import('./lib/analytics')
+  .then(({ initAnalytics }) => initAnalytics())
+  .catch(() => undefined);

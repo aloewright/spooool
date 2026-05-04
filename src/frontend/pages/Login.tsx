@@ -21,11 +21,20 @@ export function Login(): JSX.Element {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { error: signInError } = await signIn.email({ email, password });
+    const { data, error: signInError } = await signIn.email({ email, password });
     setSubmitting(false);
     if (signInError) {
       setError(signInError.message ?? 'Sign in failed');
       return;
+    }
+    // ALO-166 / observability: re-identify the visitor so PostHog rejoins
+    // sessions across devices / cookie clears. track() is intentionally
+    // skipped for login — signups are the funnel event we care about.
+    const userId = data?.user?.id;
+    if (userId) {
+      void import('../lib/analytics').then(({ identify }) => {
+        identify(userId);
+      });
     }
     navigate(next, { replace: true });
   }

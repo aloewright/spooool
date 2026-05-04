@@ -4,6 +4,16 @@ compatibility_date = "2024-03-29"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
+# ALO-166 / observability: persist console.log + uncaught errors in
+# Cloudflare's Workers Logs store (3-day retention on the free plan;
+# unlimited on Workers Paid). Without this `wrangler tail` is the only
+# way to see logs and they vanish the moment you disconnect.
+[observability.logs]
+enabled = true
+# Sample successful traffic so high-QPS routes don't dominate quota.
+# Errors / non-2xx responses always log regardless of sample rate.
+head_sampling_rate = 0.2
+
 # Static Frontend Assets (built by Vite → dist/)
 [assets]
 directory = "./dist"
@@ -25,6 +35,14 @@ run_worker_first = [
 [[r2_buckets]]
 binding = "VIDEOS"
 bucket_name = "cloudflare-tube-videos"
+
+# R2 Bucket - Logpush sink (created via scripts/setup-logpush.sh).
+# Logpush jobs themselves are account-level resources and aren't
+# wrangler-managed, but the destination bucket needs to exist before
+# the job is created.
+[[r2_buckets]]
+binding = "LOGS"
+bucket_name = "cloudflare-tube-logs"
 
 # D1 Database - Metadata, Users, Comments
 [[d1_databases]]
@@ -108,5 +126,7 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
 # LOOPS_API_KEY           (ALO-143 — REST key from app.loops.so/settings/api; lifecycle email is fail-open without it)
 #
-# Frontend env vars (set in .env.production or CI):
+# Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)
+# VITE_POSTHOG_KEY        (ALO-166 — PostHog project API key, e.g. phc_...)
+# VITE_POSTHOG_HOST       (ALO-166 — defaults to https://us.i.posthog.com; override for self-hosted)

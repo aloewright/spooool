@@ -22,7 +22,7 @@ export function Signup(): JSX.Element {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
-    const { error: signUpError } = await signUp.email({ email, password, name });
+    const { data, error: signUpError } = await signUp.email({ email, password, name });
     setSubmitting(false);
     if (signUpError) {
       setError(signUpError.message ?? 'Sign up failed');
@@ -38,6 +38,16 @@ export function Signup(): JSX.Element {
       body: JSON.stringify({ isNewSignup: true }),
       keepalive: true,
     }).catch(() => undefined);
+    // ALO-166 / observability: stamp the visitor with their user id so
+    // PostHog stitches pre-signup activity to the new account, then emit
+    // the signup event for funnel analytics.
+    const newUserId = data?.user?.id;
+    if (newUserId) {
+      void import('../lib/analytics').then(({ identify, track }) => {
+        identify(newUserId, { signup_source: 'email_password' });
+        track('signup_completed', { method: 'email_password' });
+      });
+    }
     navigate(next, { replace: true });
   }
 

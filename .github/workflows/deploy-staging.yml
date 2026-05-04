@@ -35,29 +35,51 @@ jobs:
           npm run type-check
           npm test -- --run
 
-      - name: Build frontend
-        run: npm run build
+      # Quality gates above don't need secrets; the build does so it can
+      # bake VITE_SENTRY_DSN / VITE_POSTHOG_KEY into the bundle.
+      - name: Install Doppler CLI (build env)
+        if: ${{ secrets.DOPPLER_TOKEN_STAGING != '' }}
+        uses: dopplerhq/cli-action@v3
 
-      # Skip deploy step if Cloudflare secrets haven't been configured yet —
-      # the workflow stays green so the gate is informational until staging
-      # bindings are provisioned (see ALO-172 follow-up for resource IDs).
-      - name: Check Cloudflare credentials
+      - name: Build frontend (with Doppler-injected VITE_* vars)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
+        run: |
+          if [ -n "$DOPPLER_TOKEN" ]; then
+            doppler run -- npm run build
+          else
+            echo "::warning ::No DOPPLER_TOKEN_STAGING — building without VITE_SENTRY_DSN / VITE_POSTHOG_KEY"
+            npm run build
+          fi
+
+      # ALO-166: secrets are sourced from Doppler — set DOPPLER_TOKEN as a
+      # repo secret with read access to the spooool/staging config. The
+      # token can be a per-environment service token (rotates independently)
+      # or the org service-token. The workflow stays green if DOPPLER_TOKEN
+      # is missing — useful while the Doppler workspace is being set up —
+      # but emits a warning so we notice.
+      - name: Check Doppler credentials
         id: creds
         env:
-          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
         run: |
-          if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_ACCOUNT_ID" ]; then
+          if [ -n "$DOPPLER_TOKEN" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::warning ::Cloudflare deploy secrets missing — skipping wrangler deploy. Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in repo Secrets."
+            echo "::warning ::DOPPLER_TOKEN_STAGING missing — skipping wrangler deploy. Set it in repo Secrets, scoped to spooool/staging in Doppler."
           fi
 
-      - name: Deploy worker (staging)
+      - name: Install Doppler CLI
         if: steps.creds.outputs.configured == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          environment: staging
+        uses: dopplerhq/cli-action@v3
+
+      - name: Deploy worker (staging) via Doppler
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
+        # `doppler run` injects every secret from the bound config (project +
+        # config name come from doppler.yaml) into the wrangler environment.
+        # wrangler-action would clobber that env, so we invoke wrangler
+        # directly inside the doppler shell.
+        run: doppler run -- npx wrangler deploy --env staging

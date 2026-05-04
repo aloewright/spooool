@@ -612,6 +612,42 @@ export function Watch(): JSX.Element {
         </button>
         {id ? <ReportButton targetType="video" targetId={id} /> : null}
       </div>
+      {/* ALO-158: web-intent links — no third-party SDKs, no tracking. The
+          share URL omits ?t= so a re-watch starts from 0 by default. */}
+      <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+        <span className="ds-meta">Share to:</span>
+        {(() => {
+          const shareUrl =
+            typeof window !== 'undefined' ? `${window.location.origin}/watch/${id ?? ''}` : '';
+          const shareTitle = video.title;
+          const enc = encodeURIComponent;
+          const links: Array<{ label: string; href: string }> = [
+            {
+              label: 'Twitter',
+              href: `https://twitter.com/intent/tweet?url=${enc(shareUrl)}&text=${enc(shareTitle)}`,
+            },
+            {
+              label: 'Facebook',
+              href: `https://www.facebook.com/sharer/sharer.php?u=${enc(shareUrl)}`,
+            },
+            {
+              label: 'Reddit',
+              href: `https://www.reddit.com/submit?url=${enc(shareUrl)}&title=${enc(shareTitle)}`,
+            },
+          ];
+          return links.map((l) => (
+            <a
+              key={l.label}
+              className="btn btn--ghost btn--sm"
+              href={l.href}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {l.label}
+            </a>
+          ));
+        })()}
+      </div>
       {likeError ? <p className="status-error">{likeError}</p> : null}
       {subError ? <p className="status-error">{subError}</p> : null}
       <p className="ds-meta">

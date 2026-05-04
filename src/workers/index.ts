@@ -13,6 +13,7 @@ import { healthRoutes } from './health';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
+import { ogMetaRoutes } from './og-meta';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -46,6 +47,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string };
+  // Cloudflare static assets binding (auto-injected when [assets] is set in
+  // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
+  // it with per-video OG tags.
+  ASSETS: { fetch: (req: Request) => Promise<Response> };
 };
 
 type Variables = {
@@ -127,6 +132,10 @@ app.route('/', videoRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
+// /watch/:id is intercepted to inject per-video OG tags before falling
+// through to the SPA HTML (ALO-158). Mounted last so /api/* and other
+// dynamic routes always win.
+app.route('/', ogMetaRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
 

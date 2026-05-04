@@ -13,6 +13,13 @@ import { healthRoutes } from './health';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
+import {
+  AUTH_WRITE_BUCKET,
+  clientIp,
+  rateLimit,
+  rateLimitHeaders,
+} from './rate-limit';
+import { RateLimiterDO } from './rate-limit-do';
 import { rolesRoutes } from './roles';
 import { securityHeaders } from './security-headers';
 import { rumRoutes } from './rum';
@@ -67,6 +74,21 @@ app.post('/api/webhooks/stream', handleStreamWebhook());
 app.route('/', healthRoutes);
 
 app.all('/api/auth/*', async (c) => {
+  // ALO-168: per-IP rate limit on state-changing auth calls (sign-in, sign-up,
+  // password reset, etc.). GET requests like /api/auth/get-session pass
+  // through — they're idempotent and hit better-auth's session cache.
+  const method = c.req.method.toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    const ip = clientIp(c.req.raw);
+    const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: AUTH_WRITE_BUCKET, identity: ip });
+    if (!rl.allowed) {
+      return c.json(
+        { error: 'Too many auth requests. Try again shortly.' },
+        429,
+        rateLimitHeaders(rl),
+      );
+    }
+  }
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
@@ -104,7 +126,7 @@ app.route('/', videoRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 
-export { ChannelSubscriberDO };
+export { ChannelSubscriberDO, RateLimiterDO };
 
 const workerHandlers = {
   fetch: app.fetch,

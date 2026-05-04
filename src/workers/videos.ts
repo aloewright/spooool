@@ -3,6 +3,11 @@ import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
 import {
+  UPLOAD_INIT_BUCKET,
+  rateLimit,
+  rateLimitHeaders,
+} from './rate-limit';
+import {
   MAX_VIDEO_BYTES,
   parseChunkMetadataFromFormData,
   validateChunkShape,
@@ -27,6 +32,7 @@ export interface VideoRoutesEnv {
   CACHE: KVNamespace;
   SESSIONS: KVNamespace;
   CHANNEL_SUBSCRIBER_DO?: DurableObjectNamespace;
+  RATE_LIMITER?: DurableObjectNamespace;
   VIDEO_ENCODING: Queue;
   ANALYTICS?: AnalyticsEngineDataset;
 }
@@ -340,6 +346,21 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   }
 
   if (chunkIndex === 0) {
+    // ALO-168: per-user rate limit on the init step only. Subsequent chunks of
+    // the same upload pass freely so a long upload doesn't fail mid-stream
+    // because of bucket exhaustion.
+    const rl = await rateLimit({
+      ns: env.RATE_LIMITER,
+      bucket: UPLOAD_INIT_BUCKET,
+      identity: `u:${user.id}`,
+    });
+    if (!rl.allowed) {
+      return c.json(
+        { error: 'Upload rate limit exceeded. Try again shortly.' },
+        429,
+        rateLimitHeaders(rl),
+      );
+    }
     const initialError = validateInitialFile({
       fileName: rawFile.name,
       mimeType: rawFile.type,

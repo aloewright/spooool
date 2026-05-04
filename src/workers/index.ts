@@ -10,6 +10,7 @@ import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
 import { healthRoutes } from './health';
+import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
@@ -47,6 +48,9 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string };
+  // Loops (loops.so) REST API key (ALO-143). When unset, lifecycle calls
+  // fail-open — the contact / event is just skipped.
+  LOOPS_API_KEY?: string;
   // Cloudflare static assets binding (auto-injected when [assets] is set in
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.
@@ -128,6 +132,7 @@ app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);
 app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
+app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);

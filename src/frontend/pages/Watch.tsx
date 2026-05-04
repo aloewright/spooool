@@ -1,13 +1,10 @@
-import videojs from 'video.js';
-import type Player from 'video.js/dist/types/player';
-import 'video.js/dist/video-js.css';
-import '../styles/videojs-strand.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
 import { ReportButton } from '../components/ReportButton';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
+import { createNativePlayer, type NativePlayer } from '../lib/native-player';
 import { keyToPlayerAction } from '../lib/player-keys';
 import {
   clearStoredPosition,
@@ -77,7 +74,7 @@ export function Watch(): JSX.Element {
   // null = nothing to resume; number = seconds we'd resume at.
   const [resumeOffer, setResumeOffer] = useState<number | null>(null);
   const videoEl = useRef<HTMLVideoElement | null>(null);
-  const playerRef = useRef<Player | null>(null);
+  const playerRef = useRef<NativePlayer | null>(null);
 
   // ALO-147: ?t= deep link wins over a stored resume position.
   const startAt = useMemo(
@@ -272,16 +269,14 @@ export function Watch(): JSX.Element {
   }, [id, likeBusy, session]);
 
   useEffect(() => {
-    if (!videoEl.current || !playbackSource) {
+    const el = videoEl.current;
+    if (!el || !playbackSource) {
       return;
     }
 
     playerRef.current?.dispose();
-    playerRef.current = videojs(videoEl.current, {
-      controls: true,
-      fluid: true,
-      sources: [playbackSource],
-    });
+    el.controls = true;
+    playerRef.current = createNativePlayer(el, playbackSource);
 
     return () => {
       playerRef.current?.dispose();
@@ -301,9 +296,9 @@ export function Watch(): JSX.Element {
       applied = true;
       const p = playerRef.current;
       if (!p) return;
-      const duration = typeof p.duration === 'function' ? p.duration() ?? null : null;
+      const duration = p.duration();
       const stored = loadStoredPosition(id, window.localStorage);
-      const resumable = shouldResumeAt(stored, duration);
+      const resumable = shouldResumeAt(stored, duration > 0 ? duration : null);
       if (startAt == null && !watchFromStart && resumable != null && resumable > 0) {
         setResumeOffer(resumable);
       }
@@ -315,8 +310,8 @@ export function Watch(): JSX.Element {
             ? null
             : resumable;
       if (target != null && target > 0) {
-        const safe = duration != null && duration > 0 ? Math.min(target, duration - 1) : target;
-        p.currentTime(safe);
+        const safe = duration > 0 ? Math.min(target, duration - 1) : target;
+        p.setCurrentTime(safe);
       }
     };
     player.on('loadedmetadata', onLoaded);
@@ -337,9 +332,8 @@ export function Watch(): JSX.Element {
     const p0 = player; // captured; survives playerRef being nulled on dispose
     const persist = (): void => {
       const p = playerRef.current ?? p0;
-      if (!p || typeof p.currentTime !== 'function') return;
-      const t = p.currentTime() ?? 0;
-      saveStoredPosition(id, t, window.localStorage);
+      if (!p) return;
+      saveStoredPosition(id, p.currentTime(), window.localStorage);
     };
     const tick = (): void => {
       const p = playerRef.current;
@@ -380,19 +374,19 @@ export function Watch(): JSX.Element {
           }
           return;
         case 'seek-relative': {
-          const duration = typeof p.duration === 'function' ? p.duration() ?? 0 : 0;
-          const current = typeof p.currentTime === 'function' ? p.currentTime() ?? 0 : 0;
+          const duration = p.duration();
+          const current = p.currentTime();
           const next = Math.max(0, duration > 0 ? Math.min(current + action.seconds, duration) : current + action.seconds);
-          p.currentTime(next);
+          p.setCurrentTime(next);
           return;
         }
         case 'seek-percent': {
           // ALO-212: digit keys jump to a fraction of duration. Skip when
           // duration is unknown (live or pre-metadata) so we don't seek to NaN.
-          const duration = typeof p.duration === 'function' ? p.duration() ?? 0 : 0;
-          if (!Number.isFinite(duration) || duration <= 0) return;
+          const duration = p.duration();
+          if (duration <= 0) return;
           const target = Math.min(duration - 1, (duration * action.percent) / 100);
-          p.currentTime(Math.max(0, target));
+          p.setCurrentTime(Math.max(0, target));
           return;
         }
         case 'toggle-fullscreen':
@@ -403,7 +397,7 @@ export function Watch(): JSX.Element {
           }
           return;
         case 'toggle-mute':
-          p.muted(!p.muted());
+          p.setMuted(!p.muted());
           return;
       }
     };
@@ -445,7 +439,7 @@ export function Watch(): JSX.Element {
       const delta = Math.min(60, Math.max(0, (now - lastTick) / 1000));
       lastTick = now;
       if (delta < 1) return;
-      const position = typeof p.currentTime === 'function' ? p.currentTime() ?? 0 : 0;
+      const position = p.currentTime();
       void fetch(`/api/videos/${encodeURIComponent(id)}/heartbeat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -474,15 +468,15 @@ export function Watch(): JSX.Element {
     clearStoredPosition(id, window.localStorage);
     setResumeOffer(null);
     const p = playerRef.current;
-    if (p && typeof p.currentTime === 'function') {
-      p.currentTime(0);
+    if (p) {
+      p.setCurrentTime(0);
     }
   }, [id]);
 
   const shareAtCurrentTime = useCallback(async (): Promise<void> => {
     const p = playerRef.current;
     if (!p) return;
-    const t = typeof p.currentTime === 'function' ? Math.floor(p.currentTime() ?? 0) : 0;
+    const t = Math.floor(p.currentTime());
     const url = new URL(window.location.href);
     if (t > 0) {
       url.searchParams.set('t', formatTimeParam(t));
@@ -531,7 +525,13 @@ export function Watch(): JSX.Element {
           boxShadow: 'var(--shadow-card)',
         }}
       >
-        <video ref={videoEl} className="video-js vjs-big-play-centered vjs-strand" />
+        <video
+          ref={videoEl}
+          className="native-player"
+          playsInline
+          preload="metadata"
+          style={{ width: '100%', display: 'block', background: 'black' }}
+        />
       </div>
       {resumeOffer != null && (
         <div

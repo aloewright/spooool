@@ -6,14 +6,16 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
-    // Drop the warning threshold; with manualChunks below the largest
-    // chunk should be the videojs one (~700KB) which we lazy-load on /watch.
-    chunkSizeWarningLimit: 800,
+    // Threshold is informational; with manualChunks below the largest async
+    // chunk is the watch-page bundle including hls.js (~150KB raw / ~40KB gz).
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id: string): string | undefined {
           if (!id.includes('node_modules')) return undefined;
-          if (id.includes('video.js') || id.includes('@videojs')) return 'videojs';
+          // ALO-204: hls.js is only loaded when the watch page mounts, so
+          // isolate it from the eager vendor chunk.
+          if (id.includes('hls.js')) return 'hls';
           if (id.includes('react-router')) return 'react-router';
           if (id.includes('react-dom')) return 'react-dom';
           if (id.includes('/react/')) return 'react';

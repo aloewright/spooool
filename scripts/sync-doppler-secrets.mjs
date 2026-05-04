@@ -28,7 +28,8 @@
 //     into CI logs.
 //
 // Required env:
-//   DOPPLER_TOKEN          service token scoped to the right project+config.
+//   DOPPLER_TOKEN          service token scoped to the right project+config
+//                          (currently `quickapp/<env>`; see doppler.yaml).
 //                          Service tokens are config-scoped, so the script
 //                          doesn't need DOPPLER_PROJECT / DOPPLER_CONFIG.
 //

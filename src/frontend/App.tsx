@@ -4,9 +4,11 @@ import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
 
-// Route-level code splitting: each page (and the video.js it depends on for
+// Route-level code splitting: each page (and the hls.js it depends on for
 // /watch) is fetched only when navigated to. Cuts the initial JS payload on
-// the home route from ~275KB gz to the React-vendor + Home shell. See ALO-199.
+// the home route from ~275KB gz to the React-vendor + Home shell. See ALO-199
+// (and ALO-204 for the video.js → hls.js swap that took the watch chunk from
+// ~570KB raw to ~150KB raw).
 const Watch = lazy(() => import('./pages/Watch').then((m) => ({ default: m.Watch })));
 const Upload = lazy(() => import('./pages/Upload').then((m) => ({ default: m.Upload })));
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));

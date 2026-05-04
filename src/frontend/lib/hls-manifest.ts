@@ -1,6 +1,7 @@
 // ALO-142: small parser for HLS master playlists, used as a sanity check that
 // Cloudflare Stream is returning multiple ABR variants. Real ABR switching is
-// handled by videojs-http-streaming inside video.js at runtime.
+// handled by hls.js (ALO-204) at runtime — or by Safari's native HLS stack on
+// browsers where `canPlayType('application/vnd.apple.mpegurl')` is non-empty.
 
 export interface HlsVariant {
   bandwidth: number;

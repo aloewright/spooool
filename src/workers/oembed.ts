@@ -8,8 +8,6 @@ export interface OembedEnv {
 const querySchema = z.object({
   url: z.string().url(),
   format: z.enum(['json']).optional().default('json'),
-  maxwidth: z.coerce.number().int().positive().max(7680).optional(),
-  maxheight: z.coerce.number().int().positive().max(4320).optional(),
 });
 
 // oEmbed `type: "link"` is intentional. The site-wide CSP sets
@@ -26,6 +24,7 @@ const THUMBNAIL_HEIGHT = 720;
 interface VideoRow {
   id: string;
   title: string;
+  status: string | null;
   thumbnail_url: string | null;
   channel_name: string | null;
   channel_username: string | null;
@@ -36,8 +35,8 @@ interface VideoRow {
 
 // Pull the watch ID out of a URL when it matches the same host + /watch/:id
 // shape the SPA renders. Returns null on any mismatch — wrong host, wrong
-// path, multiple segments, etc. — so we never serve oEmbed for arbitrary
-// pages.
+// path, multiple segments, malformed percent-encoding, or an embedded slash —
+// so we never serve oEmbed for arbitrary pages and never 500 on user input.
 export function extractWatchId(rawUrl: string, expectedHost: string): string | null {
   let parsed: URL;
   try {
@@ -48,8 +47,16 @@ export function extractWatchId(rawUrl: string, expectedHost: string): string | n
   if (parsed.host.toLowerCase() !== expectedHost.toLowerCase()) return null;
   const segments = parsed.pathname.split('/').filter((s) => s.length > 0);
   if (segments.length !== 2 || segments[0] !== 'watch') return null;
-  const id = decodeURIComponent(segments[1]);
+  let id: string;
+  try {
+    id = decodeURIComponent(segments[1]);
+  } catch {
+    // Malformed percent-encoding (e.g. `%E0%A4%A`) would otherwise throw a
+    // URIError and surface as a 500 on a public endpoint.
+    return null;
+  }
   if (id.length === 0 || id.length > 128) return null;
+  if (id.includes('/')) return null;
   return id;
 }
 
@@ -110,7 +117,7 @@ oembedRoutes.get('/api/oembed', async (c) => {
   }
 
   const video = await c.env.DB.prepare(
-    `SELECT v.id, v.title, v.thumbnail_url,
+    `SELECT v.id, v.title, v.status, v.thumbnail_url,
             v.hidden_at, v.dmca_status, v.deleted_at,
             u.name AS channel_name, u.username AS channel_username
      FROM videos v
@@ -120,7 +127,8 @@ oembedRoutes.get('/api/oembed', async (c) => {
     .bind(videoId)
     .first<VideoRow>();
 
-  if (!video || video.deleted_at) {
+  if (!video || video.deleted_at || video.status !== 'ready') {
+    // Don't surface metadata for videos still processing or in an error state.
     return c.json({ error: 'Video not found' }, 404);
   }
   if (video.hidden_at || video.dmca_status === 'disabled') {

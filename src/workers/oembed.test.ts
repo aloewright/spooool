@@ -41,6 +41,15 @@ describe('extractWatchId', () => {
     const long = 'a'.repeat(200);
     expect(extractWatchId(`https://spooool.com/watch/${long}`, 'spooool.com')).toBeNull();
   });
+
+  it('returns null instead of throwing on malformed percent-encoding', () => {
+    expect(extractWatchId('https://spooool.com/watch/%E0%A4%A', 'spooool.com')).toBeNull();
+    expect(extractWatchId('https://spooool.com/watch/%FF', 'spooool.com')).toBeNull();
+  });
+
+  it('rejects ids that decode to contain a slash', () => {
+    expect(extractWatchId('https://spooool.com/watch/abc%2Fdef', 'spooool.com')).toBeNull();
+  });
 });
 
 describe('buildOembedLinkResponse', () => {
@@ -162,6 +171,7 @@ describe('oembedRoutes — /api/oembed', () => {
       DB: fakeDB({
         id: 'abc',
         title: 'T',
+        status: 'ready',
         thumbnail_url: null,
         channel_name: 'A',
         channel_username: 'a',
@@ -181,6 +191,7 @@ describe('oembedRoutes — /api/oembed', () => {
       DB: fakeDB({
         id: 'abc',
         title: 'T',
+        status: 'ready',
         thumbnail_url: null,
         channel_name: 'A',
         channel_username: 'a',
@@ -197,11 +208,46 @@ describe('oembedRoutes — /api/oembed', () => {
     expect(dmcaRes.status).toBe(404);
   });
 
+  it('hides videos that are not yet ready', async () => {
+    for (const status of ['processing', 'failed', null]) {
+      const env: OembedEnv = {
+        DB: fakeDB({
+          id: 'abc',
+          title: 'T',
+          status,
+          thumbnail_url: null,
+          channel_name: 'A',
+          channel_username: 'a',
+          hidden_at: null,
+          dmca_status: null,
+          deleted_at: null,
+        }),
+      };
+      const res = await oembedRoutes.request(
+        '/api/oembed?url=http%3A%2F%2Flocalhost%2Fwatch%2Fabc',
+        {},
+        env,
+      );
+      expect(res.status).toBe(404);
+    }
+  });
+
+  it('rejects unsupported format values without 500ing', async () => {
+    const env: OembedEnv = { DB: fakeDB(null) };
+    const res = await oembedRoutes.request(
+      '/api/oembed?url=http%3A%2F%2Flocalhost%2Fwatch%2Fabc&format=xml',
+      {},
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('returns a link-type oEmbed payload for a public video', async () => {
     const env: OembedEnv = {
       DB: fakeDB({
         id: 'abc',
         title: 'Hello',
+        status: 'ready',
         thumbnail_url: 'https://thumbs.example/abc.jpg',
         channel_name: 'Alice',
         channel_username: 'alice',

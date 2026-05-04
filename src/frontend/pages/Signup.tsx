@@ -28,6 +28,16 @@ export function Signup(): JSX.Element {
       setError(signUpError.message ?? 'Sign up failed');
       return;
     }
+    // ALO-143: best-effort lifecycle sync to Loops. Fire-and-forget — a
+    // missing API key, a network blip, or a Loops 5xx must never block the
+    // post-signup navigation. The endpoint itself is idempotent.
+    void fetch('/api/lifecycle/sync', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isNewSignup: true }),
+      keepalive: true,
+    }).catch(() => undefined);
     navigate(next, { replace: true });
   }
 

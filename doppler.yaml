@@ -1,4 +1,7 @@
-# ALO-166: Doppler project layout for spooool.
+# ALO-166: Doppler project layout for spooool. Currently sharing the
+# existing `quickapp` Doppler project — the worker is still named `spooool`
+# in wrangler.toml; the Doppler project name is just where the secrets
+# live and can be migrated to its own project later.
 #
 # CI **does not** use the Doppler CLI — it pulls secrets directly from the
 # Doppler v3 REST API via scripts/sync-doppler-secrets.mjs, which keeps the
@@ -6,8 +9,8 @@
 # kept for local-dev convenience: `doppler run -- npm run dev` still works
 # if you have the CLI installed.
 #
-# Project layout:
-#   spooool                   ← project name
+# Project layout (in Doppler):
+#   quickapp                  ← shared project (rename to `spooool` later if desired)
 #     ├─ dev                  local development (`doppler run -- npm run dev`)
 #     ├─ staging              staging deploy (push to main → workflow runs)
 #     └─ production           prod deploy (manual workflow_dispatch)
@@ -41,12 +44,12 @@
 #     scripts/sync-doppler-secrets.mjs needs adjusting.
 #
 # CI repo secrets:
-#   DOPPLER_TOKEN_STAGING       service token scoped to spooool/staging
-#   DOPPLER_TOKEN_PROD          service token scoped to spooool/production
+#   DOPPLER_TOKEN_STAGING       service token scoped to quickapp/staging
+#   DOPPLER_TOKEN_PROD          service token scoped to quickapp/production
 #
 # Service tokens are read-only by default and config-scoped — generate them
 # from Doppler → Project → Access → Service Tokens.
 
 setup:
-  project: spooool
+  project: quickapp
   config: dev

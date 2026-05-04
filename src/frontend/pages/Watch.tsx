@@ -107,6 +107,20 @@ export function Watch(): JSX.Element {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 
+  // ALO-145: record this watch in the signed-in user's history. Fire-and-forget;
+  // failures are silent so a hiccup against /api/users/me/history can't disrupt
+  // playback. Anonymous users are skipped — there's no row to UPSERT for them.
+  useEffect(() => {
+    if (!id || !session?.user) return;
+    void fetch('/api/users/me/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videoId: id }),
+      credentials: 'same-origin',
+      keepalive: true,
+    }).catch(() => undefined);
+  }, [id, session?.user]);
+
   useEffect(() => {
     if (!id) return;
     let cancelled = false;

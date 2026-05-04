@@ -35,6 +35,10 @@ export function renderRobotsTxt(origin: string): string {
   return [
     'User-agent: *',
     'Allow: /',
+    // /api/oembed is a public discovery endpoint — keep it crawlable so
+    // link unfurlers that respect robots.txt aren't blocked by the broader
+    // /api/ disallow.
+    'Allow: /api/oembed',
     'Disallow: /admin',
     'Disallow: /api/',
     'Disallow: /account',
@@ -68,8 +72,12 @@ export function toW3CDate(value: string | null | undefined): string | undefined 
 }
 
 export function truncateForSitemap(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return value.slice(0, max);
+  // Iterate code points so a supplementary character (emoji, CJK extension,
+  // etc.) at the boundary doesn't get severed into a lone surrogate. Lone
+  // surrogates are forbidden in XML 1.0/1.1 and would invalidate the sitemap.
+  const chars = [...value];
+  if (chars.length <= max) return value;
+  return chars.slice(0, max).join('');
 }
 
 export interface SitemapIndexEntry {
@@ -151,7 +159,7 @@ seoRoutes.get('/robots.txt', (c) => {
 interface SitemapVideoRow {
   id: string;
   title: string;
-  description: string;
+  description: string | null;
   thumbnail_url: string | null;
   updated_at: string;
 }

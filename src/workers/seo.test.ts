@@ -175,6 +175,26 @@ describe('truncateForSitemap', () => {
   it('slices to the cap when longer', () => {
     expect(truncateForSitemap('abcdef', 3)).toBe('abc');
   });
+
+  it('counts and slices on code points so surrogate pairs survive', () => {
+    // The "🎬" emoji is a single user-perceived character but two UTF-16 code
+    // units. Slicing to 3 code points should keep all three emoji intact.
+    expect(truncateForSitemap('🎬🎬🎬🎬', 3)).toBe('🎬🎬🎬');
+  });
+
+  it('does not emit a lone surrogate at the boundary', () => {
+    // If `slice` operated on UTF-16 code units, slicing "🎬🎬" to length 3
+    // would leave a lone high surrogate. Code-point slicing yields one full
+    // emoji instead.
+    const out = truncateForSitemap('🎬🎬', 1);
+    expect([...out].length).toBe(1);
+    // No lone surrogate (D800-DFFF) remains.
+    for (const ch of out) {
+      const code = ch.codePointAt(0) ?? 0;
+      const isLoneSurrogate = code >= 0xd800 && code <= 0xdfff;
+      expect(isLoneSurrogate).toBe(false);
+    }
+  });
 });
 
 describe('buildVideoSitemapEntry', () => {
@@ -221,6 +241,13 @@ describe('seoRoutes — /robots.txt', () => {
     expect(res.headers.get('cache-control')).toContain('max-age=86400');
     const body = await res.text();
     expect(body).toContain('Sitemap: http://localhost/sitemap.xml');
+    // /api/oembed must be crawlable so link unfurlers can reach it; the
+    // explicit Allow line has to precede the broader /api/ disallow.
+    const lines = body.split('\n');
+    const allowOembed = lines.findIndex((l) => l.trim() === 'Allow: /api/oembed');
+    const disallowApi = lines.findIndex((l) => l.trim() === 'Disallow: /api/');
+    expect(allowOembed).toBeGreaterThan(-1);
+    expect(disallowApi).toBeGreaterThan(allowOembed);
   });
 });
 

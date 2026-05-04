@@ -19,51 +19,62 @@ function makeFakeKV(initial: Record<string, string> = {}): KVNamespace {
   } as unknown as KVNamespace;
 }
 
+function makeRateLimitedKV(): KVNamespace {
+  return {
+    get: async () => null,
+    put: async () => {
+      throw new Error('429: KV rate limit');
+    },
+    delete: async () => {},
+  } as unknown as KVNamespace;
+}
+
 describe('trendingCacheKey', () => {
   it('encodes both version and limit', () => {
-    expect(trendingCacheKey(3, 12)).toBe('trending:v3:limit=12');
+    expect(trendingCacheKey('abc123', 12)).toBe('trending:vabc123:limit=12');
   });
 
   it('produces distinct keys for different versions', () => {
-    expect(trendingCacheKey(1, 12)).not.toBe(trendingCacheKey(2, 12));
+    expect(trendingCacheKey('a', 12)).not.toBe(trendingCacheKey('b', 12));
   });
 });
 
 describe('getTrendingCacheVersion', () => {
-  it('returns 1 when the version key has never been written', async () => {
+  it("returns '1' when the version key has never been written", async () => {
     const cache = makeFakeKV();
-    expect(await getTrendingCacheVersion(cache)).toBe(1);
+    expect(await getTrendingCacheVersion(cache)).toBe('1');
   });
 
-  it('returns the parsed integer when the key holds a positive number', async () => {
-    const cache = makeFakeKV({ 'trending:version': '7' });
-    expect(await getTrendingCacheVersion(cache)).toBe(7);
-  });
-
-  it('falls back to 1 when the stored value is malformed', async () => {
-    const cache = makeFakeKV({ 'trending:version': 'not-a-number' });
-    expect(await getTrendingCacheVersion(cache)).toBe(1);
-  });
-
-  it('falls back to 1 when the stored value is non-positive', async () => {
-    const cache = makeFakeKV({ 'trending:version': '0' });
-    expect(await getTrendingCacheVersion(cache)).toBe(1);
+  it('returns the stored value as-is', async () => {
+    const cache = makeFakeKV({ 'trending:version': '1700000000000-deadbeef' });
+    expect(await getTrendingCacheVersion(cache)).toBe('1700000000000-deadbeef');
   });
 });
 
 describe('bumpTrendingCacheVersion', () => {
-  it('writes 2 the first time it runs and returns the new version', async () => {
+  it('writes a fresh unique value and returns it', async () => {
     const cache = makeFakeKV();
     const next = await bumpTrendingCacheVersion(cache);
-    expect(next).toBe(2);
-    expect(await getTrendingCacheVersion(cache)).toBe(2);
+    expect(next).toMatch(/^\d+-[0-9a-f]{8}$/);
+    expect(await getTrendingCacheVersion(cache)).toBe(next);
   });
 
-  it('monotonically increments on every call', async () => {
-    const cache = makeFakeKV({ 'trending:version': '5' });
-    expect(await bumpTrendingCacheVersion(cache)).toBe(6);
-    expect(await bumpTrendingCacheVersion(cache)).toBe(7);
-    expect(await getTrendingCacheVersion(cache)).toBe(7);
+  it('produces a distinct value on every call (no read-modify-write race)', async () => {
+    const cache = makeFakeKV();
+    const a = await bumpTrendingCacheVersion(cache);
+    const b = await bumpTrendingCacheVersion(cache);
+    expect(a).not.toBe(b);
+  });
+
+  it('produces distinct values across concurrent bumps', async () => {
+    const cache = makeFakeKV();
+    const results = await Promise.all([
+      bumpTrendingCacheVersion(cache),
+      bumpTrendingCacheVersion(cache),
+      bumpTrendingCacheVersion(cache),
+      bumpTrendingCacheVersion(cache),
+    ]);
+    expect(new Set(results).size).toBe(results.length);
   });
 
   it('invalidates the prior cache key by emitting a new one', async () => {
@@ -72,6 +83,11 @@ describe('bumpTrendingCacheVersion', () => {
     await bumpTrendingCacheVersion(cache);
     const after = await getTrendingCacheVersion(cache);
     expect(trendingCacheKey(before, 12)).not.toBe(trendingCacheKey(after, 12));
+  });
+
+  it('swallows KV rate-limit errors so the request path stays alive', async () => {
+    const cache = makeRateLimitedKV();
+    await expect(bumpTrendingCacheVersion(cache)).resolves.toMatch(/^\d+-[0-9a-f]{8}$/);
   });
 });
 

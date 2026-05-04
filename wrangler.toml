@@ -10,7 +10,16 @@ directory = "./dist"
 not_found_handling = "single-page-application"
 # /robots.txt and /sitemap.xml are dynamic worker responses; without listing
 # them here the SPA fallback would shadow them with index.html.
-run_worker_first = ["/api/*", "/robots.txt", "/sitemap.xml", "/sitemap-static.xml", "/sitemap-videos-*.xml"]
+run_worker_first = [
+  "/api/*",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/sitemap-static.xml",
+  "/sitemap-videos-*.xml",
+  # ALO-158: intercept /watch/:id so the worker can inject per-video OG /
+  # Twitter card meta tags via HTMLRewriter before serving the SPA HTML.
+  "/watch/*",
+]
 
 # R2 Bucket - Video Storage
 [[r2_buckets]]

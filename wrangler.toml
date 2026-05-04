@@ -47,6 +47,11 @@ queue = "video-encoding"
 binding = "ANALYTICS"
 dataset = "spooool_video_analytics"
 
+# Deploy-version metadata exposed to the worker as { id, tag } so /api/health
+# can report which build is live without a separate WORKER_VERSION secret.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
 # Durable Object — channel subscriber fan-out (ALO-156)
 [[durable_objects.bindings]]
 name = "CHANNEL_SUBSCRIBER_DO"

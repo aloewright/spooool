@@ -5,6 +5,7 @@ import '../styles/videojs-strand.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
+import { ReportButton } from '../components/ReportButton';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
 import { keyToPlayerAction } from '../lib/player-keys';
@@ -609,6 +610,7 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
+        {id ? <ReportButton targetType="video" targetId={id} /> : null}
       </div>
       {likeError ? <p className="status-error">{likeError}</p> : null}
       {subError ? <p className="status-error">{subError}</p> : null}

@@ -3,9 +3,10 @@ import type Player from 'video.js/dist/types/player';
 import 'video.js/dist/video-js.css';
 import '../styles/videojs-strand.css';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
 import { useSession } from '../lib/auth-client';
+import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
 import { keyToPlayerAction } from '../lib/player-keys';
 import {
   clearStoredPosition,
@@ -43,10 +44,25 @@ type VideoResponse = {
 
 type PlaybackSource = { src: string; type: string } | null;
 
+type UpNextVideo = {
+  id: string;
+  title: string;
+  thumbnail_url?: string | null;
+  channel_name?: string | null;
+  view_count: number;
+};
+
 export function Watch(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { data: session } = useSession();
+  const [upNext, setUpNext] = useState<UpNextVideo[]>([]);
+  const [autoAdvance, setAutoAdvance] = useState<boolean>(false);
+  // Latest values held in refs so the player 'ended' handler — registered
+  // once per id — can read them without re-binding on every state tick.
+  const upNextRef = useRef<UpNextVideo[]>([]);
+  const autoAdvanceRef = useRef<boolean>(false);
   const [video, setVideo] = useState<VideoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [likes, setLikes] = useState<{ count: number; liked: boolean } | null>(null);
@@ -120,6 +136,51 @@ export function Watch(): JSX.Element {
       keepalive: true,
     }).catch(() => undefined);
   }, [id, session?.user]);
+
+  // ALO-153: load the up-next list (currently sourced from /trending until
+  // ALO-152 adds true related-video recommendations). Filter out the video
+  // currently being watched so we don't show "this video" as the next one.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void fetch('/api/videos/trending?limit=12')
+      .then(async (r) => {
+        if (!r.ok) throw new Error('failed');
+        return (await r.json()) as { videos: UpNextVideo[] };
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const filtered = data.videos.filter((v) => v.id !== id).slice(0, 8);
+        setUpNext(filtered);
+        upNextRef.current = filtered;
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUpNext([]);
+          upNextRef.current = [];
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  // Hydrate the auto-advance toggle from localStorage once on mount and keep
+  // a ref in sync for the 'ended' handler.
+  useEffect(() => {
+    const v = loadAutoAdvance();
+    setAutoAdvance(v);
+    autoAdvanceRef.current = v;
+  }, []);
+
+  const toggleAutoAdvance = useCallback((): void => {
+    setAutoAdvance((prev) => {
+      const next = !prev;
+      autoAdvanceRef.current = next;
+      saveAutoAdvance(next);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -349,6 +410,24 @@ export function Watch(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, [playbackSource]);
 
+  // ALO-153: when the current video ends and auto-advance is on, navigate to
+  // the first up-next entry. Reads from refs so we don't rebind the listener
+  // every time autoAdvance / upNext change.
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!id || !player) return;
+    const onEnded = (): void => {
+      if (!autoAdvanceRef.current) return;
+      const next = upNextRef.current[0];
+      if (!next) return;
+      navigate(`/watch/${next.id}`);
+    };
+    player.on('ended', onEnded);
+    return () => {
+      player.off('ended', onEnded);
+    };
+  }, [id, navigate, playbackSource]);
+
   useEffect(() => {
     const player = playerRef.current;
     if (!id || !player) return;
@@ -536,6 +615,76 @@ export function Watch(): JSX.Element {
       <p className="ds-meta">
         Shortcuts: space/k play · j/l ±10s · ←/→ ±5s · 0–9 jump · f fullscreen · m mute
       </p>
+      {upNext.length > 0 ? (
+        <section className="stack-sm" aria-label="Up next">
+          <div
+            className="row"
+            style={{ alignItems: 'baseline', justifyContent: 'space-between' }}
+          >
+            <h2 className="ds-h3" style={{ margin: 0 }}>Up next</h2>
+            <label
+              className="ds-meta"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 'var(--space-1)',
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={autoAdvance}
+                onChange={toggleAutoAdvance}
+                aria-label="Auto-advance to the next video when this one ends"
+              />
+              Autoplay
+            </label>
+          </div>
+          <ul
+            className="stack-sm"
+            style={{ listStyle: 'none', padding: 0, margin: 0 }}
+          >
+            {upNext.map((v) => (
+              <li key={v.id}>
+                <Link
+                  to={`/watch/${v.id}`}
+                  className="row"
+                  style={{
+                    gap: 'var(--space-2)',
+                    alignItems: 'flex-start',
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    padding: 'var(--space-1)',
+                    borderRadius: 'var(--radius-md)',
+                  }}
+                >
+                  {v.thumbnail_url ? (
+                    <img
+                      src={v.thumbnail_url}
+                      alt=""
+                      loading="lazy"
+                      decoding="async"
+                      style={{
+                        width: 160,
+                        aspectRatio: '16/9',
+                        objectFit: 'cover',
+                        borderRadius: 'var(--radius-sm)',
+                        flexShrink: 0,
+                      }}
+                    />
+                  ) : null}
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600 }}>{v.title}</div>
+                    <div className="ds-meta" style={{ marginTop: 2 }}>
+                      {v.channel_name ?? 'Unknown channel'} · {v.view_count} views
+                    </div>
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       {id ? <Comments videoId={id} /> : null}
     </main>
   );

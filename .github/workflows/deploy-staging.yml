@@ -35,27 +35,13 @@ jobs:
           npm run type-check
           npm test -- --run
 
-      # Quality gates above don't need secrets. The build needs VITE_*
-      # vars baked into the bundle — pull them from Doppler into a
-      # .env.production.local file Vite picks up automatically.
-      - name: Hydrate VITE_* vars from Doppler
-        if: ${{ secrets.DOPPLER_TOKEN_STAGING != '' }}
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
-        run: node scripts/sync-doppler-secrets.mjs write-build-env
-
-      - name: Build frontend
-        run: |
-          if [ ! -f .env.production.local ]; then
-            echo "::warning ::No .env.production.local — building without VITE_SENTRY_DSN / VITE_POSTHOG_KEY"
-          fi
-          npm run build
-
       # ALO-166: secrets are pulled directly from the Doppler v3 REST API by
       # scripts/sync-doppler-secrets.mjs — no Doppler CLI installed at
       # deploy time. DOPPLER_TOKEN_STAGING is a service token scoped to the
-      # spooool/staging config; if it's missing the deploy stays soft-fail
-      # so unprovisioned forks / first-time setups don't error.
+      # quickapp/staging config; if it's missing the build still runs
+      # (without VITE_*) and the deploy is skipped — keeps unprovisioned
+      # forks green. `secrets.*` can't be referenced in step-level `if:`
+      # expressions, so we project it through a step output.
       - name: Check Doppler credentials
         id: creds
         env:
@@ -67,6 +53,21 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning ::DOPPLER_TOKEN_STAGING missing — skipping wrangler deploy."
           fi
+
+      # The build needs VITE_* baked into the bundle — pull them from
+      # Doppler into a .env.production.local file Vite picks up automatically.
+      - name: Hydrate VITE_* vars from Doppler
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
+        run: node scripts/sync-doppler-secrets.mjs write-build-env
+
+      - name: Build frontend
+        run: |
+          if [ ! -f .env.production.local ]; then
+            echo "::warning ::No .env.production.local — building without VITE_SENTRY_DSN / VITE_POSTHOG_KEY"
+          fi
+          npm run build
 
       # Sync any non-VITE / non-CF secrets from Doppler into the worker's
       # secret store. Idempotent: re-running with the same values is a no-op.

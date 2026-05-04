@@ -1,0 +1,38 @@
+# ALO-166: Doppler project layout for spooool. Run `doppler setup` once
+# in this directory to bind the local checkout to your Doppler workspace,
+# or set DOPPLER_TOKEN at the env / CI level.
+#
+# Project layout:
+#   spooool                   ← project name
+#     ├─ dev                  local development (`doppler run -- npm run dev`)
+#     ├─ staging              staging deploy (CI workflow_dispatch path)
+#     └─ production           prod deploy (manual workflow_dispatch path)
+#
+# Each config holds these secrets:
+#   CLOUDFLARE_API_TOKEN          required for wrangler deploy + logpush setup
+#   CLOUDFLARE_ACCOUNT_ID         required for wrangler deploy
+#   BETTER_AUTH_SECRET            random 32+ byte string
+#   BETTER_AUTH_URL               public origin
+#   CF_STREAM_API_TOKEN
+#   CF_STREAM_WEBHOOK_SECRET
+#   STREAM_ENABLED                "true" to route uploads through Stream
+#   SENTRY_DSN                    worker-side Sentry DSN
+#   SENTRY_AUTH_TOKEN             upload sourcemaps on build
+#   VITE_SENTRY_DSN               browser-side Sentry DSN (mirror of above; can differ)
+#   VITE_POSTHOG_KEY              browser-side PostHog project API key
+#   VITE_POSTHOG_HOST             "https://us.i.posthog.com" (cloud) or self-hosted URL
+#   LOOPS_API_KEY                 transactional email
+#   STRIPE_SECRET_KEY             monetization (when E6 lands)
+#   STRIPE_WEBHOOK_SECRET
+#
+# To wire a new secret: add it to the appropriate Doppler config in the
+# dashboard, no repo changes needed. To consume it locally:
+#
+#   doppler run -- npm run dev
+#   doppler run -- npm run deploy
+#
+# CI uses the dopplerhq/cli-action GitHub Action (see .github/workflows/).
+
+setup:
+  project: spooool
+  config: dev

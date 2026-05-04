@@ -40,27 +40,28 @@ jobs:
           npm run type-check
           npm test -- --run
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Check Cloudflare credentials
-        id: creds
+      # ALO-166: prod secrets sourced from Doppler. DOPPLER_TOKEN_PROD must
+      # be set as a repo secret, scoped to the spooool/production config.
+      # Unlike staging this is a hard fail — prod can't deploy without
+      # secrets configured.
+      - name: Check Doppler credentials
         env:
-          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
         run: |
-          if [ -n "$CF_API_TOKEN" ] && [ -n "$CF_ACCOUNT_ID" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::error ::Production deploy requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets."
+          if [ -z "$DOPPLER_TOKEN" ]; then
+            echo "::error ::Production deploy requires DOPPLER_TOKEN_PROD secret (Doppler service token scoped to spooool/production)."
             exit 1
           fi
 
-      - name: Deploy worker (production)
-        if: steps.creds.outputs.configured == 'true'
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          environment: production
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Build frontend (with Doppler-injected VITE_* vars)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: doppler run -- npm run build
+
+      - name: Deploy worker (production) via Doppler
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: doppler run -- npx wrangler deploy --env production

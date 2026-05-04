@@ -99,6 +99,9 @@ function HeaderNav(): JSX.Element {
         type="button"
         className="btn btn--ghost btn--sm"
         onClick={() => {
+          // ALO-166: tear down the PostHog identity before navigating so
+          // the next visitor on a shared device starts a fresh session.
+          void import('./lib/analytics').then(({ reset }) => reset());
           void signOut().then(() => navigate('/', { replace: true }));
         }}
       >

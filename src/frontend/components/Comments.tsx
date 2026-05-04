@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
+import { ReportButton } from './ReportButton';
 
 interface Reply {
   id: string;
@@ -328,6 +329,8 @@ export function Comments({ videoId }: { videoId: string }): JSX.Element {
                       Delete
                     </button>
                   </>
+                ) : myId !== c.user_id ? (
+                  <ReportButton targetType="comment" targetId={c.id} />
                 ) : null}
                 {c.reply_count > 0 ? (
                   <span className="ds-meta">{c.reply_count} replies</span>
@@ -437,6 +440,10 @@ export function Comments({ videoId }: { videoId: string }): JSX.Element {
                           >
                             Delete
                           </button>
+                        </div>
+                      ) : myId !== r.user_id ? (
+                        <div className="row" style={{ gap: 'var(--space-2)' }}>
+                          <ReportButton targetType="comment" targetId={r.id} />
                         </div>
                       ) : null}
                     </li>

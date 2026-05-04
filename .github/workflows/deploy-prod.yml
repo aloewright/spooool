@@ -40,10 +40,9 @@ jobs:
           npm run type-check
           npm test -- --run
 
-      # ALO-166: prod secrets sourced from Doppler. DOPPLER_TOKEN_PROD must
-      # be set as a repo secret, scoped to the spooool/production config.
-      # Unlike staging this is a hard fail — prod can't deploy without
-      # secrets configured.
+      # ALO-166: prod secrets pulled from the Doppler v3 REST API —
+      # DOPPLER_TOKEN_PROD is a service token scoped to spooool/production.
+      # Hard fail when missing; prod can't deploy without secrets.
       - name: Check Doppler credentials
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
@@ -53,15 +52,22 @@ jobs:
             exit 1
           fi
 
-      - name: Install Doppler CLI
-        uses: dopplerhq/cli-action@v3
-
-      - name: Build frontend (with Doppler-injected VITE_* vars)
+      - name: Hydrate VITE_* vars from Doppler
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
-        run: doppler run -- npm run build
+        run: node scripts/sync-doppler-secrets.mjs write-build-env
 
-      - name: Deploy worker (production) via Doppler
+      - name: Build frontend
+        run: npm run build
+
+      - name: Sync worker secrets from Doppler
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
-        run: doppler run -- npx wrangler deploy --env production
+        run: node scripts/sync-doppler-secrets.mjs sync-worker-secrets --env=production
+
+      - name: Deploy worker (production)
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          npx wrangler deploy --env production

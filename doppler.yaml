@@ -1,37 +1,51 @@
-# ALO-166: Doppler project layout for spooool. Run `doppler setup` once
-# in this directory to bind the local checkout to your Doppler workspace,
-# or set DOPPLER_TOKEN at the env / CI level.
+# ALO-166: Doppler project layout for spooool.
+#
+# CI **does not** use the Doppler CLI — it pulls secrets directly from the
+# Doppler v3 REST API via scripts/sync-doppler-secrets.mjs, which keeps the
+# CI image lean and removes one binary from the trust chain. This file is
+# kept for local-dev convenience: `doppler run -- npm run dev` still works
+# if you have the CLI installed.
 #
 # Project layout:
 #   spooool                   ← project name
 #     ├─ dev                  local development (`doppler run -- npm run dev`)
-#     ├─ staging              staging deploy (CI workflow_dispatch path)
-#     └─ production           prod deploy (manual workflow_dispatch path)
+#     ├─ staging              staging deploy (push to main → workflow runs)
+#     └─ production           prod deploy (manual workflow_dispatch)
 #
-# Each config holds these secrets:
+# Per-config secrets (the script splits on these prefixes):
+#
+#   # CI/CD only — never forwarded to the worker runtime:
 #   CLOUDFLARE_API_TOKEN          required for wrangler deploy + logpush setup
 #   CLOUDFLARE_ACCOUNT_ID         required for wrangler deploy
+#
+#   # Worker secrets — synced via `wrangler secret bulk`:
 #   BETTER_AUTH_SECRET            random 32+ byte string
 #   BETTER_AUTH_URL               public origin
 #   CF_STREAM_API_TOKEN
 #   CF_STREAM_WEBHOOK_SECRET
 #   STREAM_ENABLED                "true" to route uploads through Stream
 #   SENTRY_DSN                    worker-side Sentry DSN
-#   SENTRY_AUTH_TOKEN             upload sourcemaps on build
-#   VITE_SENTRY_DSN               browser-side Sentry DSN (mirror of above; can differ)
-#   VITE_POSTHOG_KEY              browser-side PostHog project API key
-#   VITE_POSTHOG_HOST             "https://us.i.posthog.com" (cloud) or self-hosted URL
+#   SENTRY_AUTH_TOKEN             upload sourcemaps on build (also read by build)
 #   LOOPS_API_KEY                 transactional email
 #   STRIPE_SECRET_KEY             monetization (when E6 lands)
 #   STRIPE_WEBHOOK_SECRET
 #
-# To wire a new secret: add it to the appropriate Doppler config in the
-# dashboard, no repo changes needed. To consume it locally:
+#   # Frontend env — written to .env.production.local, baked into the bundle:
+#   VITE_SENTRY_DSN               browser-side Sentry DSN
+#   VITE_POSTHOG_KEY              browser-side PostHog project API key
+#   VITE_POSTHOG_HOST             "https://us.i.posthog.com" (cloud) or self-hosted URL
 #
-#   doppler run -- npm run dev
-#   doppler run -- npm run deploy
+# Adding a new secret:
+#   - Add it under the appropriate config(s) in the Doppler dashboard.
+#   - No repo changes needed unless the prefix logic in
+#     scripts/sync-doppler-secrets.mjs needs adjusting.
 #
-# CI uses the dopplerhq/cli-action GitHub Action (see .github/workflows/).
+# CI repo secrets:
+#   DOPPLER_TOKEN_STAGING       service token scoped to spooool/staging
+#   DOPPLER_TOKEN_PROD          service token scoped to spooool/production
+#
+# Service tokens are read-only by default and config-scoped — generate them
+# from Doppler → Project → Access → Service Tokens.
 
 setup:
   project: spooool

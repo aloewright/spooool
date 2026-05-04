@@ -30,6 +30,7 @@ import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
+import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
 
 type SessionUser = {
@@ -123,6 +124,7 @@ app.route('/', rolesRoutes);
 app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
 app.route('/', videoRoutes);
+app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 

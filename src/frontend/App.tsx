@@ -45,6 +45,16 @@ type TrendingVideo = {
   recent_views?: number;
 };
 
+type HistoryItem = {
+  video_id: string;
+  watched_at: string;
+  title: string;
+  thumbnail_url: string | null;
+  view_count: number;
+  channel_name: string | null;
+  channel_username: string | null;
+};
+
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   return (
     <Link to="/" aria-label="spooool" className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}>
@@ -179,9 +189,40 @@ function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
   );
 }
 
+function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
+  return (
+    <Link to={`/watch/${item.video_id}`} className="suggestion-card">
+      {item.thumbnail_url ? (
+        <img
+          src={item.thumbnail_url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          style={{
+            width: '100%',
+            aspectRatio: '16/9',
+            objectFit: 'cover',
+            borderRadius: 8,
+            marginBottom: 'var(--space-2)',
+          }}
+        />
+      ) : (
+        <VideoPlaceholderIcon />
+      )}
+      <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
+      <div className="ds-meta" style={{ marginTop: 4 }}>
+        {item.channel_name ?? 'Unknown channel'} · {item.view_count} views
+      </div>
+    </Link>
+  );
+}
+
 function Home(): JSX.Element {
+  const { data: session } = useSession();
   const [trending, setTrending] = useState<TrendingVideo[] | null>(null);
   const [trendingError, setTrendingError] = useState<string | null>(null);
+  const [history, setHistory] = useState<HistoryItem[] | null>(null);
+  const [clearing, setClearing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,6 +248,43 @@ function Home(): JSX.Element {
     };
   }, []);
 
+  // ALO-145: load the signed-in user's recent watch history. Skipped when
+  // anonymous so the unauth Home stays a single round-trip.
+  useEffect(() => {
+    if (!session?.user) {
+      setHistory(null);
+      return;
+    }
+    let cancelled = false;
+    void fetch('/api/users/me/history?limit=8', { credentials: 'same-origin' })
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Failed to load history');
+        return (await r.json()) as { items: HistoryItem[] };
+      })
+      .then((data) => {
+        if (!cancelled) setHistory(data.items);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user]);
+
+  const clearHistory = async (): Promise<void> => {
+    setClearing(true);
+    try {
+      const res = await fetch('/api/users/me/history', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (res.ok) setHistory([]);
+    } finally {
+      setClearing(false);
+    }
+  };
+
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
       <section
@@ -223,6 +301,33 @@ function Home(): JSX.Element {
           A video host that respects your time. Upload, stream, share — no friction.
         </p>
       </section>
+
+      {session?.user && history !== null && history.length > 0 ? (
+        <section className="stack-sm" aria-label="Continue watching">
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+            <h2 className="ds-h3" style={{ margin: 0 }}>Continue watching</h2>
+            <button
+              type="button"
+              className="ds-btn ds-btn--ghost ds-btn--sm"
+              onClick={() => void clearHistory()}
+              disabled={clearing}
+            >
+              {clearing ? 'Clearing…' : 'Clear history'}
+            </button>
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              gap: 'var(--space-3)',
+            }}
+          >
+            {history.map((item) => (
+              <HistoryCard key={item.video_id} item={item} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="stack-sm" aria-label="Trending">
         <h2 className="ds-h3" style={{ margin: 0 }}>Trending this week</h2>

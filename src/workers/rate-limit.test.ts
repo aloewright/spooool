@@ -31,10 +31,10 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
 
 describe('rateLimit', () => {
   it('passes the bucket config to the DO via JSON body', async () => {
-    let captured: { capacity?: unknown; refillPerSecond?: unknown } | null = null;
+    const captured: Array<{ capacity?: unknown; refillPerSecond?: unknown }> = [];
     const stub: FakeStub = {
       fetch: async (_url, init) => {
-        captured = JSON.parse((init?.body as string) ?? '{}');
+        captured.push(JSON.parse((init?.body as string) ?? '{}'));
         return jsonResponse({
           allowed: true,
           remaining: 9,
@@ -48,9 +48,9 @@ describe('rateLimit', () => {
     expect(result.allowed).toBe(true);
     expect(result.remaining).toBe(9);
     expect(result.limit).toBe(10);
-    expect(captured).not.toBeNull();
-    expect(captured?.capacity).toBe(AUTH_WRITE_BUCKET.capacity);
-    expect(captured?.refillPerSecond).toBe(AUTH_WRITE_BUCKET.refillPerSecond);
+    expect(captured).toHaveLength(1);
+    expect(captured[0].capacity).toBe(AUTH_WRITE_BUCKET.capacity);
+    expect(captured[0].refillPerSecond).toBe(AUTH_WRITE_BUCKET.refillPerSecond);
   });
 
   it('addresses the DO with bucket-name + identity composite key', async () => {

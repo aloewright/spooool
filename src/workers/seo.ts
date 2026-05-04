@@ -37,6 +37,10 @@ export function renderRobotsTxt(origin: string): string {
     'Allow: /',
     'Disallow: /admin',
     'Disallow: /api/',
+    'Disallow: /account',
+    'Disallow: /upload',
+    'Disallow: /login',
+    'Disallow: /signup',
     `Sitemap: ${origin}/sitemap.xml`,
     '',
   ].join('\n');
@@ -212,6 +216,21 @@ async function countReadyVideos(db: D1Database): Promise<number> {
   return Number(row?.n ?? 0);
 }
 
+// Catalog-wide lastmod for the sitemap index. Adding any new video bumps
+// MAX(updated_at), which shifts every page's contents (page 1 grows, the
+// tail spills into page 2, etc.), so a single shared value is honest:
+// "if this changed, every page may have changed."
+async function loadCatalogLastMod(db: D1Database): Promise<string | undefined> {
+  const row = await db
+    .prepare(
+      `SELECT MAX(updated_at) AS lastmod FROM videos
+       WHERE deleted_at IS NULL AND hidden_at IS NULL AND status = 'ready'
+         AND (dmca_status IS NULL OR dmca_status != 'disabled')`,
+    )
+    .first<{ lastmod: string | null }>();
+  return toW3CDate(row?.lastmod ?? null);
+}
+
 function buildStaticUrls(origin: string, channelRows: { username: string; updated_at: string }[]): SitemapUrl[] {
   const urls: SitemapUrl[] = [
     { loc: `${origin}/`, changefreq: 'hourly', priority: 1.0 },
@@ -264,9 +283,10 @@ seoRoutes.get('/sitemap.xml', async (c) => {
 
   // Paginated layout — emit a sitemap index. Crawlers fetch each child.
   const pages = videoSitemapPageCount(total);
-  const entries: SitemapIndexEntry[] = [{ loc: `${origin}/sitemap-static.xml` }];
+  const lastmod = await loadCatalogLastMod(c.env.DB);
+  const entries: SitemapIndexEntry[] = [{ loc: `${origin}/sitemap-static.xml`, lastmod }];
   for (let i = 1; i <= pages; i++) {
-    entries.push({ loc: `${origin}/sitemap-videos-${i}.xml` });
+    entries.push({ loc: `${origin}/sitemap-videos-${i}.xml`, lastmod });
   }
   return sitemapResponse(renderSitemapIndex(entries));
 });

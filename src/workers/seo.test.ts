@@ -13,11 +13,15 @@ import {
 } from './seo';
 
 describe('renderRobotsTxt', () => {
-  it('disallows /admin and /api/, exposes the sitemap', () => {
+  it('disallows /admin, /api/, and the auth-only routes; exposes the sitemap', () => {
     const out = renderRobotsTxt('https://spooool.com');
     expect(out).toContain('User-agent: *');
     expect(out).toContain('Disallow: /admin');
     expect(out).toContain('Disallow: /api/');
+    expect(out).toContain('Disallow: /account');
+    expect(out).toContain('Disallow: /upload');
+    expect(out).toContain('Disallow: /login');
+    expect(out).toContain('Disallow: /signup');
     expect(out).toContain('Allow: /');
     expect(out).toContain('Sitemap: https://spooool.com/sitemap.xml');
   });
@@ -238,10 +242,12 @@ function fakeDB(rows: {
   videos: Array<FakeVideoRow>;
   channels: Array<{ username: string; updated_at: string }>;
   totalVideos?: number;
+  catalogLastMod?: string | null;
 }): D1Database {
   const stmt = (sql: string): FakePrepared => {
     const trimmed = sql.replace(/\s+/g, ' ').trim();
     const isCount = trimmed.startsWith('SELECT COUNT(*)');
+    const isMaxUpdated = trimmed.startsWith('SELECT MAX(updated_at)');
     const isVideos = trimmed.startsWith('SELECT id, title, description, thumbnail_url, updated_at FROM videos');
     let bindArgs: unknown[] = [];
     const api: FakePrepared = {
@@ -261,6 +267,7 @@ function fakeDB(rows: {
       },
       first: async () => {
         if (isCount) return { n: rows.totalVideos ?? rows.videos.length };
+        if (isMaxUpdated) return { lastmod: rows.catalogLastMod ?? null };
         return null;
       },
     };
@@ -418,6 +425,36 @@ describe('seoRoutes — paginated /sitemap.xml', () => {
     expect(body).toContain('<loc>http://localhost/sitemap-videos-2.xml</loc>');
     expect(body).toContain('<loc>http://localhost/sitemap-videos-3.xml</loc>');
     expect(body).not.toContain('<loc>http://localhost/sitemap-videos-4.xml</loc>');
+  });
+
+  it('emits the catalog-wide MAX(updated_at) as <lastmod> on every sitemapindex entry', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({
+        videos: [],
+        channels: [],
+        totalVideos: 7_500,
+        catalogLastMod: '2026-04-30 12:34:56',
+      }),
+    };
+    const res = await seoRoutes.request('/sitemap.xml', {}, env);
+    const body = await res.text();
+    // Two child sitemaps (static + 2 video pages) each get the same lastmod.
+    expect(body.match(/<lastmod>2026-04-30T12:34:56Z<\/lastmod>/g)).toHaveLength(3);
+  });
+
+  it('omits <lastmod> on the sitemapindex when MAX(updated_at) is null (empty catalog edge case)', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({
+        videos: [],
+        channels: [],
+        totalVideos: 6_000,
+        catalogLastMod: null,
+      }),
+    };
+    const res = await seoRoutes.request('/sitemap.xml', {}, env);
+    const body = await res.text();
+    expect(body).toContain('<sitemapindex');
+    expect(body).not.toContain('<lastmod>');
   });
 });
 

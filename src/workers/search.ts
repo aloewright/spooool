@@ -1,8 +1,19 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import {
+  SEARCH_BUCKET,
+  clientIp,
+  rateLimit,
+  rateLimitHeaders,
+} from './rate-limit';
 
 export interface SearchEnv {
   DB: D1Database;
+  RATE_LIMITER?: DurableObjectNamespace;
+}
+
+interface SearchVariables {
+  user: { id: string } | null;
 }
 
 const searchQuerySchema = z.object({
@@ -27,9 +38,19 @@ export function buildFtsQuery(raw: string): string | null {
   return tokens.map((t) => `"${t}"*`).join(' ');
 }
 
-export const searchRoutes = new Hono<{ Bindings: SearchEnv }>();
+export const searchRoutes = new Hono<{ Bindings: SearchEnv; Variables: SearchVariables }>();
 
 searchRoutes.get('/api/videos/search', async (c) => {
+  // ALO-168: per-user when signed in (more permissive — same identity across
+  // NATs); per-IP otherwise. Search is a low-cost read but a tight loop can
+  // still hammer FTS5.
+  const user = c.get('user');
+  const identity = user ? `u:${user.id}` : `ip:${clientIp(c.req.raw)}`;
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: SEARCH_BUCKET, identity });
+  if (!rl.allowed) {
+    return c.json({ error: 'Search rate limit exceeded.' }, 429, rateLimitHeaders(rl));
+  }
+
   const parsed = searchQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);

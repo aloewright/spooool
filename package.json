@@ -22,10 +22,8 @@
     "db:migrate": "wrangler d1 migrations apply cloudflare-tube-prod",
     "db:migrate:staging": "wrangler d1 migrations apply cloudflare-tube-staging --env staging",
     "db:seed": "node scripts/seed-db.js",
-    "cache:clear": "wrangler kv:key delete --namespace-id=$KV_NAMESPACE_ID '*' --path='/'",
     "worker:tail": "wrangler tail",
-    "worker:logs": "wrangler tail --format json | jq .",
-    "analytics:view": "wrangler analytics-engine query"
+    "worker:logs": "wrangler tail --format json | jq ."
   },
   "dependencies": {
     "@cloudflare/kumo": "^1.16.0",

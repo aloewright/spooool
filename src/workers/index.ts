@@ -37,6 +37,7 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   ALLOWED_ORIGINS?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
+  CF_VERSION_METADATA?: { id: string; tag?: string };
 };
 
 type Variables = {

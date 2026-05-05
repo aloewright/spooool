@@ -22,6 +22,13 @@ const searchQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(50).default(20),
 });
 
+// Typeahead is a much smaller payload than full search, capped lower so
+// keystroke-frequent calls don't flood D1.
+const suggestQuerySchema = z.object({
+  q: z.string().trim().min(1).max(64),
+  limit: z.coerce.number().int().positive().max(10).default(6),
+});
+
 // Convert a free-text query into a safe FTS5 MATCH expression.
 // - Tokenizes on whitespace
 // - Strips characters that have meaning in FTS5 syntax (`*`, `:`, `"`, `(`, `)`, `^`)
@@ -78,4 +85,46 @@ searchRoutes.get('/api/videos/search', async (c) => {
     .all();
 
   return c.json({ q, page, limit, videos: results });
+});
+
+// /api/videos/search/suggest — typeahead suggestions for the search bar.
+// Returns a tight projection (id, title, channel) ranked by FTS5 relevance.
+// Rate-limited via the same SEARCH_BUCKET as full search since both hit
+// the FTS index; per-keystroke calls would otherwise dwarf full searches.
+searchRoutes.get('/api/videos/search/suggest', async (c) => {
+  const user = c.get('user');
+  const identity = user ? `u:${user.id}` : `ip:${clientIp(c.req.raw)}`;
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: SEARCH_BUCKET, identity });
+  if (!rl.allowed) {
+    return c.json({ error: 'Search rate limit exceeded.' }, 429, rateLimitHeaders(rl));
+  }
+
+  const parsed = suggestQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);
+  }
+  const { q, limit } = parsed.data;
+  const ftsQuery = buildFtsQuery(q);
+  if (!ftsQuery) {
+    return c.json({ q, limit, suggestions: [] });
+  }
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT v.id, v.title, v.thumbnail_url,
+            u.name AS channel_name, u.username AS channel_username,
+            videos_fts.rank AS rank
+     FROM videos_fts
+     JOIN videos v ON v.id = videos_fts.video_id
+     LEFT JOIN user u ON u.id = v.user_id
+     WHERE videos_fts MATCH ?1
+       AND v.deleted_at IS NULL AND v.hidden_at IS NULL
+       AND v.status = 'ready'
+       AND (v.dmca_status IS NULL OR v.dmca_status != 'disabled')
+     ORDER BY rank
+     LIMIT ?2`,
+  )
+    .bind(ftsQuery, limit)
+    .all();
+
+  return c.json({ q, limit, suggestions: results });
 });

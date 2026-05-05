@@ -135,22 +135,23 @@ export function Watch(): JSX.Element {
     }).catch(() => undefined);
   }, [id, session?.user]);
 
-  // ALO-153: load the up-next list (currently sourced from /trending until
-  // ALO-152 adds true related-video recommendations). Filter out the video
-  // currently being watched so we don't show "this video" as the next one.
+  // ALO-152/153: load the up-next list from the related-videos endpoint
+  // (same-channel + title FTS + trending top-up). The endpoint already
+  // excludes the source id, so no client-side filter is needed; cap to 8
+  // to keep the sidebar tight.
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    void fetch('/api/videos/trending?limit=12')
+    void fetch(`/api/videos/${encodeURIComponent(id)}/related?limit=12`)
       .then(async (r) => {
         if (!r.ok) throw new Error('failed');
         return (await r.json()) as { videos: UpNextVideo[] };
       })
       .then((data) => {
         if (cancelled) return;
-        const filtered = data.videos.filter((v) => v.id !== id).slice(0, 8);
-        setUpNext(filtered);
-        upNextRef.current = filtered;
+        const next = data.videos.slice(0, 8);
+        setUpNext(next);
+        upNextRef.current = next;
       })
       .catch(() => {
         if (!cancelled) {

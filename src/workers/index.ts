@@ -22,6 +22,7 @@ import {
   rateLimitHeaders,
 } from './rate-limit';
 import { RateLimiterDO } from './rate-limit-do';
+import { relatedRoutes } from './related';
 import { rolesRoutes } from './roles';
 import { securityHeaders } from './security-headers';
 import { rumRoutes } from './rum';
@@ -134,6 +135,7 @@ app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
+app.route('/', relatedRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);

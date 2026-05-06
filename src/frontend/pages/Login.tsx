@@ -81,6 +81,9 @@ export function Login(): JSX.Element {
             {submitting ? 'Signing in…' : 'Sign in'}
           </button>
         </div>
+        <div className="row" style={{ justifyContent: 'flex-end' }}>
+          <Link to="/forgot-password" className="ds-meta">Forgot your password?</Link>
+        </div>
       </form>
 
       {error ? <p className="status-error">{error}</p> : null}

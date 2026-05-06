@@ -25,6 +25,7 @@ const AdminRoles = lazy(() =>
 const AccountSettings = lazy(() =>
   import('./pages/AccountSettings').then((m) => ({ default: m.AccountSettings })),
 );
+const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
 const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
 const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
@@ -450,6 +451,7 @@ export default function App(): JSX.Element {
           />
           <Route path="/channel/:username" element={<Channel />} />
           <Route path="/search" element={<Search />} />
+          <Route path="/tag/:slug" element={<Tag />} />
           <Route
             path="/admin/moderation"
             element={

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
+import { ActiveSessions } from '../components/ActiveSessions';
 
 interface AccountInfo {
   id: string;
@@ -219,6 +220,8 @@ export function AccountSettings(): JSX.Element {
           </button>
         </form>
       </section>
+
+      <ActiveSessions />
 
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">

@@ -55,4 +55,19 @@ describe('D1 migrations', () => {
     expect(sql).toMatch(/ALTER TABLE videos ADD COLUMN dmca_status/);
     expect(sql).toMatch(/ALTER TABLE videos ADD COLUMN dmca_restore_eligible_at/);
   });
+
+  it('0016_video_tags adds tags + video_tags tables and indexes (ALO-151)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0016_video_tags.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS tags/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS video_tags/);
+    expect(sql).toMatch(/idx_video_tags_tag\s+ON\s+video_tags\(tag_slug\)/i);
+    expect(sql).toMatch(/idx_video_tags_video\s+ON\s+video_tags\(video_id\)/i);
+  });
+
+  it('schema.sql mirrors the tag tables from 0016', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS tags');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
+    expect(schema).toContain('idx_video_tags_tag');
+  });
 });

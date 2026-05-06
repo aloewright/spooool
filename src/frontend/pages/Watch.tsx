@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
 import { ReportButton } from '../components/ReportButton';
+import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
 import { createNativePlayer, type NativePlayer } from '../lib/native-player';
@@ -576,6 +577,7 @@ export function Watch(): JSX.Element {
         </div>
       </div>
       <p>{video.description}</p>
+      <VideoTags videoId={video.id} />
       <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
         <button
           type="button"

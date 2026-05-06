@@ -157,3 +157,21 @@ CREATE INDEX IF NOT EXISTS idx_moderation_actions_target ON moderation_actions(t
 CREATE INDEX IF NOT EXISTS idx_dmca_claims_status ON dmca_claims(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_dmca_claims_video ON dmca_claims(video_id);
 CREATE INDEX IF NOT EXISTS idx_dmca_counter_claim ON dmca_counter_notices(claim_id);
+
+CREATE TABLE IF NOT EXISTS tags (
+  slug TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS video_tags (
+  video_id TEXT NOT NULL,
+  tag_slug TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (video_id, tag_slug),
+  FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+  FOREIGN KEY (tag_slug) REFERENCES tags(slug) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_slug);
+CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);

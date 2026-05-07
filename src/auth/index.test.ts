@@ -14,6 +14,15 @@ type CapturedOptions = {
       token: string;
     }) => Promise<void>;
   };
+  emailVerification?: {
+    sendOnSignUp?: boolean;
+    autoSignInAfterVerification?: boolean;
+    sendVerificationEmail?: (args: {
+      user: { id: string; email: string };
+      url: string;
+      token: string;
+    }) => Promise<void>;
+  };
 };
 
 const captured: { options?: CapturedOptions } = {};
@@ -98,5 +107,32 @@ describe('createAuth', () => {
         token: 't',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('configures email verification with sendOnSignUp + auto sign-in', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(captured.options?.emailVerification?.sendOnSignUp).toBe(true);
+    expect(captured.options?.emailVerification?.autoSignInAfterVerification).toBe(true);
+    expect(typeof captured.options?.emailVerification?.sendVerificationEmail).toBe('function');
+  });
+
+  it('sendVerificationEmail forwards to Loops with the verify url', async () => {
+    createAuth({ DB: {} as D1Database, LOOPS_API_KEY: 'k' });
+    const cb = captured.options?.emailVerification?.sendVerificationEmail;
+    if (!cb) throw new Error('sendVerificationEmail callback missing');
+    await cb({
+      user: { id: 'u1', email: 'a@b.com' },
+      url: 'https://x/verify?token=tok',
+      token: 'tok',
+    });
+    expect(sendEventSpy).toHaveBeenCalledTimes(1);
+    expect(sendEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ LOOPS_API_KEY: 'k' }),
+      expect.objectContaining({
+        email: 'a@b.com',
+        eventName: 'email_verification',
+        eventProperties: { verifyUrl: 'https://x/verify?token=tok', userId: 'u1' },
+      }),
+    );
   });
 });

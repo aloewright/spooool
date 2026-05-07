@@ -37,7 +37,7 @@ export interface VideoRoutesEnv {
   ANALYTICS?: AnalyticsEngineDataset;
 }
 
-type SessionUser = { id: string; email: string; name: string } | null;
+type SessionUser = { id: string; email: string; name: string; emailVerified?: boolean } | null;
 type VideoRoutesVariables = { user: SessionUser };
 
 type CachedVideoMeta = {
@@ -308,6 +308,15 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   const user = c.get('user');
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401);
+  }
+  // ALO-128: gate uploads on a verified email so freshly-signed-up accounts
+  // can't immediately push content. The frontend keys off the `code` field
+  // to render the "verify your email" banner.
+  if (user.emailVerified === false) {
+    return c.json(
+      { error: 'Verify your email before uploading.', code: 'email_unverified' },
+      403,
+    );
   }
 
   const formData = await c.req.formData();

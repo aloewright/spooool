@@ -31,6 +31,24 @@ export function createAuth(env: AuthEnv) {
         });
       },
     },
+    // ALO-128: email verification. better-auth issues a single-use token,
+    // builds the verify URL, and delegates delivery to us. We forward to
+    // Loops as an `email_verification` event; the lifecycle automation in
+    // Loops renders + sends the actual email. `sendOnSignUp` triggers the
+    // first email automatically when a new account is created. Sensitive
+    // actions (uploads) are gated separately at the API boundary by
+    // checking `user.emailVerified`.
+    emailVerification: {
+      sendOnSignUp: true,
+      autoSignInAfterVerification: true,
+      sendVerificationEmail: async ({ user, url }) => {
+        await sendEvent(env, {
+          email: user.email,
+          eventName: 'email_verification',
+          eventProperties: { verifyUrl: url, userId: user.id },
+        });
+      },
+    },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,

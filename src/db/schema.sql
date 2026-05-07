@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS videos (
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   r2_key TEXT NOT NULL,
+  bytes INTEGER NOT NULL DEFAULT 0,
   stream_video_id TEXT,
   status TEXT NOT NULL DEFAULT 'uploaded',
   view_count INTEGER NOT NULL DEFAULT 0,

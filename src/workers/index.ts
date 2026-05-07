@@ -41,6 +41,7 @@ type SessionUser = {
   id: string;
   email: string;
   name: string;
+  emailVerified: boolean;
 };
 
 type EnvBindings = AuthEnv & VideoRoutesEnv & {
@@ -108,8 +109,18 @@ app.all('/api/auth/*', async (c) => {
 app.use('/api/*', async (c, next) => {
   const auth = createAuth(c.env);
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  let sessionUser = session ? (session.user as SessionUser) : null;
-  if (sessionUser) {
+  let sessionUser: SessionUser | null = null;
+  if (session) {
+    const u = session.user as { id: string; email: string; name: string; emailVerified?: unknown };
+    sessionUser = {
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      // better-auth stores emailVerified as INTEGER 0/1 in D1; the JS surface
+      // sometimes hands it back as a number. Normalize so callers can rely on
+      // a boolean (ALO-128).
+      emailVerified: u.emailVerified === true || u.emailVerified === 1,
+    };
     const banned = await c.env.DB.prepare('SELECT banned_at FROM user WHERE id = ?')
       .bind(sessionUser.id)
       .first<{ banned_at: number | null }>();

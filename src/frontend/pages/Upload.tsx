@@ -1,4 +1,5 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { useSession } from '../lib/auth-client';
 
 const CHUNK_SIZE = 10 * 1024 * 1024;
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
@@ -83,14 +84,42 @@ async function uploadInChunks(
   return lastResponse;
 }
 
+async function resendVerification(): Promise<{ ok: boolean; error: string | null }> {
+  // ALO-128: ask better-auth to re-issue the verification email. The session
+  // cookie identifies the user, so the body is empty.
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/send-verification-email', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Network error' };
+  }
+  if (res.ok) return { ok: true, error: null };
+  let message = `Request failed (${res.status})`;
+  try {
+    const body = (await res.json()) as { message?: string; error?: string } | null;
+    message = body?.message ?? body?.error ?? message;
+  } catch {
+    // body wasn't JSON
+  }
+  return { ok: false, error: message };
+}
+
 export function Upload(): JSX.Element {
+  const { data: session } = useSession();
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
 
+  const isEmailVerified = session?.user?.emailVerified !== false;
   const isValidFile = useMemo(() => {
     if (!file) {
       return false;
@@ -130,6 +159,30 @@ export function Upload(): JSX.Element {
         <span className="ds-label">Upload</span>
         <h1 className="ds-h2">Add a video</h1>
       </div>
+
+      {!isEmailVerified ? (
+        <div className="card stack-sm" data-testid="verify-banner">
+          <strong>Verify your email to upload.</strong>
+          <p className="ds-meta">
+            We sent a verification link to {session?.user?.email ?? 'your email'}. Click the
+            link, then refresh this page.
+          </p>
+          <div>
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => {
+                void resendVerification().then((r) =>
+                  setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed'),
+                );
+              }}
+            >
+              Resend verification email
+            </button>
+          </div>
+          {resendStatus ? <p className="ds-meta">{resendStatus}</p> : null}
+        </div>
+      ) : null}
 
       <form
         onSubmit={(event) => void onSubmit(event)}
@@ -192,7 +245,7 @@ export function Upload(): JSX.Element {
         </div>
 
         <div>
-          <button type="submit" className="btn" disabled={!isValidFile}>
+          <button type="submit" className="btn" disabled={!isValidFile || !isEmailVerified}>
             Upload
           </button>
         </div>

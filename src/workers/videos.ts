@@ -15,6 +15,7 @@ import {
 } from './upload-validation';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
+import { getStorageUsage, hasRoomFor } from './storage-quota';
 import {
   TRENDING_CACHE_TTL_SECONDS,
   bumpTrendingCacheVersion,
@@ -378,6 +379,22 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     if (initialError) {
       return c.json({ error: initialError.message, code: initialError.code }, 400);
     }
+
+    // ALO-139: precheck the user's storage quota before we pay for the
+    // first R2 write or open a multipart upload. We only know the chunk-0
+    // size at this point — for multipart, completion does the final
+    // authoritative check against the actual total.
+    const usage = await getStorageUsage(env, user.id);
+    if (!hasRoomFor(usage, rawFile.size)) {
+      return c.json(
+        {
+          error: 'Storage quota exceeded.',
+          code: 'storage_quota_exceeded',
+          storage: usage,
+        },
+        413,
+      );
+    }
   }
 
   if (chunkCount === 1) {
@@ -389,10 +406,18 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     });
 
     await env.DB.prepare(
-      `INSERT INTO videos (id, user_id, title, description, r2_key, status, view_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     )
-      .bind(videoId, user.id, metadataParsed.data.title, metadataParsed.data.description, r2Key, 'uploaded')
+      .bind(
+        videoId,
+        user.id,
+        metadataParsed.data.title,
+        metadataParsed.data.description,
+        r2Key,
+        rawFile.size,
+        'uploaded',
+      )
       .run();
 
     await env.VIDEO_ENCODING.send({ videoId, r2Key });
@@ -486,13 +511,43 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     return c.json({ error: 'Missing one or more chunks before completion' }, 400);
   }
 
+  // ALO-139: authoritative quota check at completion. Catches the case
+  // where the first-chunk precheck passed but a parallel upload (or a
+  // very large total via many small chunks) would push the user over.
+  const totalBytes = priorBytes + rawFile.size;
+  const finalUsage = await getStorageUsage(env, user.id);
+  if (!hasRoomFor(finalUsage, totalBytes)) {
+    await multipart.abort().catch(() => {});
+    await Promise.all([
+      env.SESSIONS.delete(mpidKey),
+      env.SESSIONS.delete(metaKey),
+      env.SESSIONS.delete(partsKey),
+    ]);
+    return c.json(
+      {
+        error: 'Storage quota exceeded.',
+        code: 'storage_quota_exceeded',
+        storage: finalUsage,
+      },
+      413,
+    );
+  }
+
   await multipart.complete(completedParts);
 
   await env.DB.prepare(
-    `INSERT INTO videos (id, user_id, title, description, r2_key, status, view_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
   )
-    .bind(uploadMeta.videoId, user.id, uploadMeta.title, uploadMeta.description, uploadMeta.r2Key, 'uploaded')
+    .bind(
+      uploadMeta.videoId,
+      user.id,
+      uploadMeta.title,
+      uploadMeta.description,
+      uploadMeta.r2Key,
+      totalBytes,
+      'uploaded',
+    )
     .run();
 
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });

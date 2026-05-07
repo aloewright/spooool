@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { createAuth, type AuthEnv } from '../auth';
+import { getStorageUsage } from './storage-quota';
 
 export const DELETION_GRACE_DAYS = 30;
 export const DELETION_GRACE_MS = DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000;
@@ -32,18 +33,24 @@ accountRoutes.get('/api/account', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-  const row = await c.env.DB.prepare(
-    `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
-     FROM user WHERE id = ?`,
-  )
-    .bind(user.id)
-    .first<{
-      id: string;
-      email: string;
-      name: string;
-      deletion_requested_at: number | null;
-      deletion_scheduled_for: number | null;
-    }>();
+  const [row, storage] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
+       FROM user WHERE id = ?`,
+    )
+      .bind(user.id)
+      .first<{
+        id: string;
+        email: string;
+        name: string;
+        deletion_requested_at: number | null;
+        deletion_scheduled_for: number | null;
+      }>(),
+    // ALO-139: surface the user's quota + current usage so the account
+    // settings page (and any future creator dashboard) can render a
+    // progress bar without an extra round trip.
+    getStorageUsage(c.env, user.id),
+  ]);
   if (!row) return c.json({ error: 'User not found' }, 404);
 
   return c.json({
@@ -52,6 +59,7 @@ accountRoutes.get('/api/account', async (c) => {
     name: row.name,
     deletionRequestedAt: row.deletion_requested_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    storage,
   });
 });
 

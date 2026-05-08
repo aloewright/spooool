@@ -124,7 +124,9 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # STRIPE_SECRET_KEY
 # STRIPE_WEBHOOK_SECRET
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
-# LOOPS_API_KEY           (ALO-143 — REST key from app.loops.so/settings/api; lifecycle email is fail-open without it)
+# RESEND_API_KEY          (REST key from resend.com/api-keys; lifecycle email is fail-open without it)
+# RESEND_AUDIENCE_ID      (audience to upsert contacts into; contact sync skipped without it)
+# RESEND_FROM             (optional — From header, e.g. "spooool <hello@spooool.com>")
 #
 # Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)

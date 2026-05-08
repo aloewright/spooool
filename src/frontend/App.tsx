@@ -29,6 +29,8 @@ const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
 const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
 const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
+const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
+const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
 const ForgotPassword = lazy(() =>
   import('./pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
 );
@@ -152,12 +154,49 @@ function HeaderSearch(): JSX.Element {
   );
 }
 
+type Theme = 'light' | 'dark';
+
+function getInitialTheme(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  const stored = window.localStorage.getItem('theme');
+  if (stored === 'light' || stored === 'dark') return stored;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function ThemeToggle(): JSX.Element {
+  const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.toggle('dark', theme === 'dark');
+    root.style.colorScheme = theme;
+    window.localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  return (
+    <button
+      type="button"
+      className="btn btn--ghost btn--sm"
+      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+      onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+    >
+      <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>
+        {theme === 'dark' ? '🌞' : '🌙'}
+      </span>
+    </button>
+  );
+}
+
 function AppHeader(): JSX.Element {
   return (
     <header className="app-header">
       <Wordmark size="sm" />
       <HeaderSearch />
-      <HeaderNav />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+        <ThemeToggle />
+        <HeaderNav />
+      </div>
     </header>
   );
 }
@@ -298,6 +337,7 @@ function Home(): JSX.Element {
   };
 
   return (
+    <>
     <main className="app-main app-main--narrow stack-lg fade-in">
       <section
         className="stack-sm"
@@ -399,6 +439,21 @@ function Home(): JSX.Element {
         </div>
       </section>
     </main>
+    <footer
+      className="app-footer ds-meta"
+      style={{
+        display: 'flex',
+        justifyContent: 'center',
+        gap: 'var(--space-4)',
+        padding: 'var(--space-6) var(--space-4)',
+        borderTop: '1px solid var(--border)',
+      }}
+    >
+      <Link to="/legal/tos">Terms of Service</Link>
+      <Link to="/legal/privacy">Privacy Policy</Link>
+      <Link to="/legal/dmca">DMCA</Link>
+    </footer>
+    </>
   );
 }
 
@@ -486,6 +541,8 @@ export default function App(): JSX.Element {
             }
           />
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
+          <Route path="/legal/tos" element={<Tos />} />
+          <Route path="/legal/privacy" element={<Privacy />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

@@ -9,6 +9,16 @@
     <link rel="preload" href="/fonts/Nunito-VariableFont_wght.ttf" as="font" type="font/ttf" crossorigin />
   </head>
   <body>
+    <script>
+      (function () {
+        try {
+          var s = localStorage.getItem('theme');
+          var d = s ? s === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+          if (d) document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = d ? 'dark' : 'light';
+        } catch (e) {}
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/frontend/main.tsx"></script>
   </body>

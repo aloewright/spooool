@@ -51,9 +51,11 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string };
-  // Loops (loops.so) REST API key (ALO-143). When unset, lifecycle calls
-  // fail-open — the contact / event is just skipped.
-  LOOPS_API_KEY?: string;
+  // Resend (resend.com) REST API key. When unset, lifecycle calls
+  // fail-open — the contact / email is just skipped.
+  RESEND_API_KEY?: string;
+  RESEND_AUDIENCE_ID?: string;
+  RESEND_FROM?: string;
   // Cloudflare static assets binding (auto-injected when [assets] is set in
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.

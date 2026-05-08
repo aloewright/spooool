@@ -76,7 +76,7 @@ Audited at the time of writing this doc:
 - `src/auth/` — clean. better-auth handles email/password + OAuth state
   via D1, no model calls.
 - `src/workers/` — clean. The encoding pipeline calls Cloudflare Stream
-  (managed video service, not a model API) and the Loops REST API
+  (managed video service, not a model API) and the Resend REST API
   (transactional email, not a model API).
 - `package.json` — no `openai`, `@anthropic-ai/sdk`, `replicate`,
   `@ai-sdk/*`, `cohere-ai`, `groq-sdk`, or `@google/generative-ai`

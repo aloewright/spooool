@@ -22,8 +22,8 @@ function buildApp(user: SessionUser) {
   return app;
 }
 
-function envFor(LOOPS_API_KEY?: string): LifecycleEnv {
-  return { DB: {} as D1Database, LOOPS_API_KEY };
+function envFor(extra: Partial<LifecycleEnv> = {}): LifecycleEnv {
+  return { DB: {} as D1Database, ...extra };
 }
 
 describe('POST /api/lifecycle/sync', () => {
@@ -36,7 +36,7 @@ describe('POST /api/lifecycle/sync', () => {
     expect(res.status).toBe(401);
   });
 
-  it('reports a skipped contact result when LOOPS_API_KEY is missing', async () => {
+  it('reports a skipped contact result when RESEND_API_KEY is missing', async () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice Wright' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
@@ -48,11 +48,12 @@ describe('POST /api/lifecycle/sync', () => {
     expect(body.event).toBeNull();
   });
 
-  it('upserts the contact with first-name extracted and a userId', async () => {
-    const captured: Array<{ url: string; body: Record<string, unknown> }> = [];
+  it('upserts the contact with first-name extracted', async () => {
+    const captured: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       captured.push({
         url: input.toString(),
+        method: init?.method ?? 'GET',
         body: JSON.parse((init?.body as string) ?? '{}'),
       });
       return new Response('{}', { status: 200 });
@@ -61,20 +62,20 @@ describe('POST /api/lifecycle/sync', () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice Wright' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-      envFor('k_secret'),
+      envFor({ RESEND_API_KEY: 're_k', RESEND_AUDIENCE_ID: 'aud_1' }),
     );
     expect(res.status).toBe(200);
     expect(captured).toHaveLength(1);
-    expect(captured[0].url).toBe('https://app.loops.so/api/v1/contacts/update');
+    expect(captured[0].method).toBe('PATCH');
+    expect(captured[0].url).toBe('https://api.resend.com/audiences/aud_1/contacts/a%40x.test');
     expect(captured[0].body).toMatchObject({
       email: 'a@x.test',
-      firstName: 'Alice',
-      userId: 'u1',
-      subscribed: true,
+      first_name: 'Alice',
+      unsubscribed: false,
     });
   });
 
-  it('also fires the signup event when isNewSignup=true', async () => {
+  it('also sends the welcome email when isNewSignup=true', async () => {
     const captured: Array<{ url: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       captured.push({ url: input.toString() });
@@ -88,17 +89,17 @@ describe('POST /api/lifecycle/sync', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ isNewSignup: true }),
       },
-      envFor('k'),
+      envFor({ RESEND_API_KEY: 'k', RESEND_AUDIENCE_ID: 'aud_1' }),
     );
     expect(res.status).toBe(200);
     const urls = captured.map((c) => c.url);
     expect(urls).toEqual([
-      'https://app.loops.so/api/v1/contacts/update',
-      'https://app.loops.so/api/v1/events/send',
+      'https://api.resend.com/audiences/aud_1/contacts/a%40x.test',
+      'https://api.resend.com/emails',
     ]);
   });
 
-  it('returns 200 even when Loops upsert fails (lifecycle is best-effort)', async () => {
+  it('returns 200 even when Resend upsert fails (lifecycle is best-effort)', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(JSON.stringify({ message: 'internal' }), {
@@ -110,7 +111,7 @@ describe('POST /api/lifecycle/sync', () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-      envFor('k'),
+      envFor({ RESEND_API_KEY: 'k', RESEND_AUDIENCE_ID: 'aud_1' }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {

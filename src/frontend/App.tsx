@@ -341,7 +341,7 @@ function Home(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [navigate, session?.user]);
+  }, [navigate, session?.user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -437,7 +437,7 @@ function Home(): JSX.Element {
               </h2>
               <button
                 type="button"
-                className="ds-btn ds-btn--ghost ds-btn--sm"
+                className="btn btn--ghost btn--sm"
                 onClick={() => void clearHistory()}
                 disabled={clearing}
               >

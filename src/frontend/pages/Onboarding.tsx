@@ -24,6 +24,13 @@ const STEP_TITLES: Record<Step, string> = {
   3: 'Upload your first clip',
 };
 
+// Mirror the server-side rule in src/workers/users.ts so we can short-circuit
+// obvious typos before the round-trip.
+const USERNAME_PATTERN = '[a-z0-9][a-z0-9_-]{1,29}';
+const USERNAME_RE = new RegExp(`^${USERNAME_PATTERN}$`);
+const USERNAME_HINT =
+  'Usernames must be 2–30 characters: lowercase letters, numbers, _ or -, starting with a letter or number.';
+
 async function loadProfile(): Promise<UserProfile> {
   const res = await fetch('/api/users/me', { credentials: 'same-origin' });
   if (!res.ok) throw new Error('Failed to load profile');
@@ -151,6 +158,10 @@ export function Onboarding(): JSX.Element {
       setError('Pick a username to continue, or skip this step.');
       return;
     }
+    if (!USERNAME_RE.test(value)) {
+      setError(USERNAME_HINT);
+      return;
+    }
     setSubmitting(true);
     try {
       const updated = await saveUsername(value);
@@ -214,6 +225,7 @@ export function Onboarding(): JSX.Element {
             className={`onboarding__step ${n === step ? 'onboarding__step--active' : ''} ${
               n < step ? 'onboarding__step--done' : ''
             }`}
+            aria-current={n === step ? 'step' : undefined}
           >
             <span aria-hidden="true">{n}</span>
             <span className="onboarding__step-label">{STEP_TITLES[n as Step]}</span>
@@ -235,10 +247,14 @@ export function Onboarding(): JSX.Element {
               onChange={(e) => setUsername(e.target.value)}
               placeholder="alex_99"
               autoComplete="off"
+              minLength={2}
+              maxLength={30}
+              pattern={USERNAME_PATTERN}
+              title={USERNAME_HINT}
             />
             <span className="ds-meta">
-              Lowercase letters, numbers, _ or -. 2&ndash;30 characters. People will see this on
-              your channel URL.
+              Lowercase letters, numbers, _ or -. 2&ndash;30 characters, starting with a letter or
+              number. People will see this on your channel URL.
             </span>
           </div>
           <div className="row" style={{ justifyContent: 'space-between' }}>
@@ -328,8 +344,16 @@ export function Onboarding(): JSX.Element {
         </section>
       ) : null}
 
-      {error ? <p className="status-error">{error}</p> : null}
-      {status ? <p className="status-ok">{status}</p> : null}
+      {error ? (
+        <p className="status-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      {status ? (
+        <p className="status-ok" role="status" aria-live="polite">
+          {status}
+        </p>
+      ) : null}
     </main>
   );
 }

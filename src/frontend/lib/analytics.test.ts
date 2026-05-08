@@ -3,10 +3,12 @@ import {
   __resetForTests,
   identify,
   initAnalytics,
+  isAnalyticsAllowedFor,
   readAnalyticsConfig,
   reset,
   track,
 } from './analytics';
+import { LEGAL_VERSIONS } from './legal';
 
 vi.mock('posthog-js', () => {
   const mock = {
@@ -67,6 +69,45 @@ describe('initAnalytics', () => {
     initAnalytics(cfg);
     initAnalytics(cfg);
     expect(posthog.init).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('isAnalyticsAllowedFor (consent gate)', () => {
+  it('defaults to allowed when no record exists (non-EU baseline / no decision yet)', () => {
+    expect(isAnalyticsAllowedFor(null)).toBe(true);
+  });
+
+  it('blocks analytics when the visitor has explicitly rejected', () => {
+    expect(
+      isAnalyticsAllowedFor({
+        choice: 'rejected',
+        version: LEGAL_VERSIONS.cookies,
+        decidedAt: '2026-05-08T00:00:00.000Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('allows analytics when the visitor has accepted at the current version', () => {
+    expect(
+      isAnalyticsAllowedFor({
+        choice: 'accepted',
+        version: LEGAL_VERSIONS.cookies,
+        decidedAt: '2026-05-08T00:00:00.000Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('blocks analytics for a stale-version "accepted" record until re-prompt', () => {
+    // Privacy-leaning default: an acceptance against an older policy version
+    // is not considered fresh consent. The EU banner will re-prompt; outside
+    // the EEA we still wait for an explicit re-acceptance after a bump.
+    expect(
+      isAnalyticsAllowedFor({
+        choice: 'accepted',
+        version: '1900-01-01',
+        decidedAt: '1900-01-01T00:00:00.000Z',
+      }),
+    ).toBe(false);
   });
 });
 

@@ -1,5 +1,5 @@
 // LEGAL-REVIEW: this entire workflow needs counsel sign-off before public
-// launch. Do not deploy /legal/dmca to production until reviewed. The
+// launch. Do not deploy /legal/dmca/submit to production until reviewed. The
 // engineering surface (state machine, persistence, 451 response, counter-
 // notice timer) is shipped here; the copy and email templates are placeholders
 // tracked in follow-up issues.
@@ -167,13 +167,14 @@ dmcaRoutes.post('/api/dmca/counter', async (c) => {
     .bind(now, data.claimId)
     .run();
 
-  await c.env.DB.prepare(
-    `UPDATE videos SET dmca_restore_eligible_at = ? WHERE id = ?`,
-  )
+  await c.env.DB.prepare(`UPDATE videos SET dmca_restore_eligible_at = ? WHERE id = ?`)
     .bind(now + COUNTER_NOTICE_WAIT_MS, claim.video_id)
     .run();
 
-  return c.json({ id, claimId: data.claimId, restoreEligibleAt: now + COUNTER_NOTICE_WAIT_MS }, 201);
+  return c.json(
+    { id, claimId: data.claimId, restoreEligibleAt: now + COUNTER_NOTICE_WAIT_MS },
+    201,
+  );
 });
 
 dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
@@ -189,9 +190,7 @@ dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'Invalid decision', details: parsed.error.flatten() }, 400);
   }
-  const claim = await c.env.DB.prepare(
-    'SELECT id, video_id, status FROM dmca_claims WHERE id = ?',
-  )
+  const claim = await c.env.DB.prepare('SELECT id, video_id, status FROM dmca_claims WHERE id = ?')
     .bind(claimId)
     .first<{ id: string; video_id: string; status: string }>();
   if (!claim) return c.json({ error: 'Claim not found' }, 404);
@@ -245,7 +244,10 @@ export interface DmcaSweepEnv {
 
 // Daily sweep: any video whose counter-notice waiting period has elapsed
 // (and has no court-order block) is auto-restored per § 512(g)(2)(C).
-export async function runDmcaRestoreSweep(env: DmcaSweepEnv, nowMs = Date.now()): Promise<string[]> {
+export async function runDmcaRestoreSweep(
+  env: DmcaSweepEnv,
+  nowMs = Date.now(),
+): Promise<string[]> {
   const due = await env.DB.prepare(
     `SELECT v.id AS video_id, c.id AS claim_id
      FROM videos v
@@ -265,9 +267,7 @@ export async function runDmcaRestoreSweep(env: DmcaSweepEnv, nowMs = Date.now())
     )
       .bind(row.video_id)
       .run();
-    await env.DB.prepare(
-      `UPDATE dmca_claims SET status = 'restored', updated_at = ? WHERE id = ?`,
-    )
+    await env.DB.prepare(`UPDATE dmca_claims SET status = 'restored', updated_at = ? WHERE id = ?`)
       .bind(nowMs, row.claim_id)
       .run();
     await env.CACHE.delete(`video:v1:${row.video_id}`);

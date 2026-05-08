@@ -22,14 +22,18 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
 // Lazy-load RUM so it never blocks first paint — web-vitals registers its
 // observers internally with passive listeners. Errors here must never break
 // the app render.
-void import('./lib/rum')
-  .then(({ startRum }) => startRum())
-  .catch(() => undefined);
+void import('./lib/rum').then(({ startRum }) => startRum()).catch(() => undefined);
 
 // ALO-166: lazy-load PostHog as well so it doesn't drag posthog-js (~180KB
 // raw / ~60KB gz) into the eager vendor chunk. autocapture / pageview
 // timers register on first user interaction, well after the lazy chunk
 // arrives.
+//
+// ALO-179: gated by the cookie-consent record — `initAnalyticsIfAllowed`
+// is a no-op when the visitor has rejected analytics. The CookieConsent
+// component re-runs this initialiser via its `onAccept` hook the moment
+// the user opts in, so EU visitors get analytics from the same
+// page-load when they accept.
 void import('./lib/analytics')
-  .then(({ initAnalytics }) => initAnalytics())
+  .then(({ initAnalyticsIfAllowed }) => initAnalyticsIfAllowed())
   .catch(() => undefined);

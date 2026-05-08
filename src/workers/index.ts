@@ -9,18 +9,14 @@ import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
+import { geoRoutes } from './geo';
 import { healthRoutes } from './health';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
-import {
-  AUTH_WRITE_BUCKET,
-  clientIp,
-  rateLimit,
-  rateLimitHeaders,
-} from './rate-limit';
+import { AUTH_WRITE_BUCKET, clientIp, rateLimit, rateLimitHeaders } from './rate-limit';
 import { RateLimiterDO } from './rate-limit-do';
 import { relatedRoutes } from './related';
 import { rolesRoutes } from './roles';
@@ -44,23 +40,24 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
-  RATE_LIMITER?: DurableObjectNamespace;
-  CF_STREAM_WEBHOOK_SECRET?: string;
-  ALLOWED_ORIGINS?: string;
-  ADMIN_EMAILS?: string;
-  SENTRY_DSN?: string;
-  CF_VERSION_METADATA?: { id: string; tag?: string };
-  // Resend (resend.com) REST API key. When unset, lifecycle calls
-  // fail-open — the contact / email is just skipped.
-  RESEND_API_KEY?: string;
-  RESEND_AUDIENCE_ID?: string;
-  RESEND_FROM?: string;
-  // Cloudflare static assets binding (auto-injected when [assets] is set in
-  // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
-  // it with per-video OG tags.
-  ASSETS: { fetch: (req: Request) => Promise<Response> };
-};
+type EnvBindings = AuthEnv &
+  VideoRoutesEnv & {
+    RATE_LIMITER?: DurableObjectNamespace;
+    CF_STREAM_WEBHOOK_SECRET?: string;
+    ALLOWED_ORIGINS?: string;
+    ADMIN_EMAILS?: string;
+    SENTRY_DSN?: string;
+    CF_VERSION_METADATA?: { id: string; tag?: string };
+    // Resend (resend.com) REST API key. When unset, lifecycle calls
+    // fail-open — the contact / email is just skipped.
+    RESEND_API_KEY?: string;
+    RESEND_AUDIENCE_ID?: string;
+    RESEND_FROM?: string;
+    // Cloudflare static assets binding (auto-injected when [assets] is set in
+    // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
+    // it with per-video OG tags.
+    ASSETS: { fetch: (req: Request) => Promise<Response> };
+  };
 
 type Variables = {
   user: SessionUser | null;
@@ -87,6 +84,10 @@ app.post('/api/webhooks/stream', handleStreamWebhook());
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
 app.route('/', healthRoutes);
+// /api/geo is a public read-only echo of the visitor's CF-resolved
+// country. The frontend uses it to decide whether to show the EU
+// cookie-consent banner (ALO-179).
+app.route('/', geoRoutes);
 
 app.all('/api/auth/*', async (c) => {
   // ALO-168: per-IP rate limit on state-changing auth calls (sign-in, sign-up,
@@ -176,7 +177,11 @@ const workerHandlers = {
       }
     }
   },
-  async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: EnvBindings,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     // ALO-132: hard-delete users whose 30-day grace window has elapsed.
     // The cron is configured in wrangler.toml under [triggers] crons.
     ctx.waitUntil(

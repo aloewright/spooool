@@ -328,6 +328,71 @@ code, kbd, pre, samp {
   max-width: 720px;
 }
 
+/* ── Footer ────────────────────────────────────────────────── */
+.app-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-6) var(--space-4);
+  border-top: 1px solid color-mix(in oklch, var(--border), transparent 30%);
+  margin-top: var(--space-8);
+}
+
+.app-footer__nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-4);
+}
+
+.app-footer__copy {
+  text-align: center;
+}
+
+/* ── Cookie consent banner ─────────────────────────────────── */
+.cookie-consent {
+  position: fixed;
+  inset: auto var(--space-4) var(--space-4) var(--space-4);
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.cookie-consent__body {
+  pointer-events: auto;
+  max-width: 720px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid color-mix(in oklch, var(--border), transparent 30%);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-float);
+}
+
+.cookie-consent__actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+@media (min-width: 600px) {
+  .cookie-consent__body {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  .cookie-consent__body > p {
+    flex: 1;
+  }
+}
+
 .stack {
   display: flex;
   flex-direction: column;

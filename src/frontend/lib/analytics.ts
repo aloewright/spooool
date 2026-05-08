@@ -5,8 +5,15 @@
 //   VITE_POSTHOG_KEY is unset).
 // - Calls before init or in non-PROD become no-ops instead of throwing.
 // - Swapping providers later (Plausible, Mixpanel) is a one-file change.
+//
+// ALO-179: callers must also satisfy the consent gate before init runs.
+// `initAnalyticsIfAllowed` skips init when the visitor has explicitly
+// rejected analytics cookies. The EU consent banner persists that choice
+// in localStorage; non-EU visitors default to the legacy DNT-respecting
+// behaviour, which is preserved.
 
 import posthog, { type PostHog } from 'posthog-js';
+import { hasFreshAcceptedConsent, readConsent } from './legal';
 
 let started = false;
 let client: PostHog | null = null;
@@ -76,4 +83,30 @@ export function track(event: string, properties?: Record<string, unknown>): void
 export function __resetForTests(): void {
   started = false;
   client = null;
+}
+
+// ALO-179: pure consent-gate predicate. Allowed only when there is no
+// record (legacy behaviour: respect DNT inside posthog) or when the
+// visitor has freshly accepted against the current cookie-policy version.
+// Rejected and stale records both block — material policy changes require
+// fresh consent under GDPR.
+export function isAnalyticsAllowedFor(record: import('./legal').ConsentRecord | null): boolean {
+  if (record === null) return true;
+  if (record.choice === 'rejected') return false;
+  return hasFreshAcceptedConsent(record);
+}
+
+// Convenience wrapper: reads the current consent record from
+// localStorage and applies the gate.
+export function isAnalyticsAllowed(): boolean {
+  return isAnalyticsAllowedFor(readConsent());
+}
+
+// ALO-179: gated init used by the bootstrap path (main.tsx) and by the
+// cookie banner's onAccept callback. Returns whether init actually ran so
+// callers can chain identify() etc. only after a real start.
+export function initAnalyticsIfAllowed(config: AnalyticsConfig = readAnalyticsConfig()): boolean {
+  if (!isAnalyticsAllowed()) return false;
+  initAnalytics(config);
+  return started;
 }

@@ -1,6 +1,16 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { signOut, useSession } from './lib/auth-client';
+import { AppFooter } from './components/AppFooter';
+import { CookieConsent } from './components/CookieConsent';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
 
@@ -26,11 +36,17 @@ const AccountSettings = lazy(() =>
   import('./pages/AccountSettings').then((m) => ({ default: m.AccountSettings })),
 );
 const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
+const Dmca = lazy(() => import('./pages/Dmca').then((m) => ({ default: m.Dmca })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
-const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
-const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
+const DmcaCounter = lazy(() =>
+  import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })),
+);
+const DmcaNotice = lazy(() =>
+  import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })),
+);
 const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
+const Cookies = lazy(() => import('./pages/Cookies').then((m) => ({ default: m.Cookies })));
 const ForgotPassword = lazy(() =>
   import('./pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
 );
@@ -68,7 +84,11 @@ type HistoryItem = {
 
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   return (
-    <Link to="/" aria-label="spooool" className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}>
+    <Link
+      to="/"
+      aria-label="spooool"
+      className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}
+    >
       spooool
     </Link>
   );
@@ -86,10 +106,14 @@ function HeaderNav(): JSX.Element {
     return (
       <nav className="app-header__nav">
         <Link to="/login">
-          <button type="button" className="btn btn--ghost btn--sm">Sign in</button>
+          <button type="button" className="btn btn--ghost btn--sm">
+            Sign in
+          </button>
         </Link>
         <Link to="/signup">
-          <button type="button" className="btn btn--secondary btn--sm">Sign up</button>
+          <button type="button" className="btn btn--secondary btn--sm">
+            Sign up
+          </button>
         </Link>
       </nav>
     );
@@ -99,10 +123,14 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <span className="ds-meta">{session.user.email}</span>
       <Link to="/upload">
-        <button type="button" className="btn btn--secondary btn--sm">Upload</button>
+        <button type="button" className="btn btn--secondary btn--sm">
+          Upload
+        </button>
       </Link>
       <Link to="/profile">
-        <button type="button" className="btn btn--ghost btn--sm">Profile</button>
+        <button type="button" className="btn btn--ghost btn--sm">
+          Profile
+        </button>
       </Link>
       <button
         type="button"
@@ -207,9 +235,24 @@ const SUGGESTIONS: {
   to: string;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
 }[] = [
-  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
-  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
-  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
+  {
+    title: 'Upload a clip',
+    helper: 'Drop in an MP4, WebM, MOV, or MKV.',
+    to: '/upload',
+    Icon: UploadIcon,
+  },
+  {
+    title: 'Open a channel',
+    helper: 'Visit a creator and skim their library.',
+    to: '/channel/explore',
+    Icon: ChannelIcon,
+  },
+  {
+    title: 'Watch something',
+    helper: 'Jump into a video by id.',
+    to: '/watch/demo',
+    Icon: PlayIcon,
+  },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
@@ -337,7 +380,6 @@ function Home(): JSX.Element {
   };
 
   return (
-    <>
     <main className="app-main app-main--narrow stack-lg fade-in">
       <section
         className="stack-sm"
@@ -356,8 +398,17 @@ function Home(): JSX.Element {
 
       {session?.user && history !== null && history.length > 0 ? (
         <section className="stack-sm" aria-label="Continue watching">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-            <h2 className="ds-h3" style={{ margin: 0 }}>Continue watching</h2>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <h2 className="ds-h3" style={{ margin: 0 }}>
+              Continue watching
+            </h2>
             <button
               type="button"
               className="ds-btn ds-btn--ghost ds-btn--sm"
@@ -382,7 +433,9 @@ function Home(): JSX.Element {
       ) : null}
 
       <section className="stack-sm" aria-label="Trending">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Trending this week</h2>
+        <h2 className="ds-h3" style={{ margin: 0 }}>
+          Trending this week
+        </h2>
         {trendingError ? (
           <p className="status-error">{trendingError}</p>
         ) : trending === null ? (
@@ -405,7 +458,9 @@ function Home(): JSX.Element {
       </section>
 
       <section className="stack-sm" aria-label="Get started">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Start here</h2>
+        <h2 className="ds-h3" style={{ margin: 0 }}>
+          Start here
+        </h2>
         <div
           style={{
             display: 'grid',
@@ -439,21 +494,6 @@ function Home(): JSX.Element {
         </div>
       </section>
     </main>
-    <footer
-      className="app-footer ds-meta"
-      style={{
-        display: 'flex',
-        justifyContent: 'center',
-        gap: 'var(--space-4)',
-        padding: 'var(--space-6) var(--space-4)',
-        borderTop: '1px solid var(--border)',
-      }}
-    >
-      <Link to="/legal/tos">Terms of Service</Link>
-      <Link to="/legal/privacy">Privacy Policy</Link>
-      <Link to="/legal/dmca">DMCA</Link>
-    </footer>
-    </>
   );
 }
 
@@ -531,7 +571,8 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route path="/legal/dmca" element={<DmcaForm />} />
+          <Route path="/legal/dmca" element={<Dmca />} />
+          <Route path="/legal/dmca/submit" element={<DmcaForm />} />
           <Route
             path="/legal/dmca/counter"
             element={
@@ -543,9 +584,20 @@ export default function App(): JSX.Element {
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
+          <Route path="/legal/cookies" element={<Cookies />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      <AppFooter />
+      <CookieConsent
+        onAccept={() => {
+          // ALO-179: kick analytics on the same page-load the EU visitor
+          // accepted, so we don't lose the rest of their session.
+          void import('./lib/analytics').then(({ initAnalyticsIfAllowed }) =>
+            initAnalyticsIfAllowed(),
+          );
+        }}
+      />
     </div>
   );
 }

@@ -25,6 +25,9 @@ const AdminRoles = lazy(() =>
 const AccountSettings = lazy(() =>
   import('./pages/AccountSettings').then((m) => ({ default: m.AccountSettings })),
 );
+const CreatorPayouts = lazy(() =>
+  import('./pages/CreatorPayouts').then((m) => ({ default: m.CreatorPayouts })),
+);
 const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
 const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
@@ -520,6 +523,14 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <AdminRoles />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/creator/payouts"
+            element={
+              <RequireAuth>
+                <CreatorPayouts />
               </RequireAuth>
             }
           />

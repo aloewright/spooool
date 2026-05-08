@@ -15,6 +15,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { payoutsRoutes } from './payouts';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -56,6 +57,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RESEND_API_KEY?: string;
   RESEND_AUDIENCE_ID?: string;
   RESEND_FROM?: string;
+  // ALO-163: Polar API credentials for the creator-payouts dashboard.
+  // When unset the dashboard renders from the local D1 ledger only.
+  POLAR_API_TOKEN?: string;
+  POLAR_API_URL?: string;
   // Cloudflare static assets binding (auto-injected when [assets] is set in
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.
@@ -154,6 +159,7 @@ app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
+app.route('/', payoutsRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.

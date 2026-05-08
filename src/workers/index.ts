@@ -28,6 +28,7 @@ import { securityHeaders } from './security-headers';
 import { rumRoutes } from './rum';
 import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
+import { statusRoutes } from './status';
 import { tagRoutes } from './tags';
 import { handleStreamWebhook } from './stream-webhook';
 import { subscriptionRoutes } from './subscriptions';
@@ -153,6 +154,7 @@ app.route('/', relatedRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
+app.route('/', statusRoutes);
 app.route('/', tagRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other

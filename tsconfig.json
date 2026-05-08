@@ -11,5 +11,5 @@
     "types": ["@cloudflare/workers-types"],
     "noEmit": true
   },
-  "include": ["src/**/*"]
+  "include": ["src/**/*", "tests/integration/**/*"]
 }

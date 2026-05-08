@@ -304,6 +304,79 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   });
 });
 
+// ALO-134: resume endpoint. Lets a client that disconnected mid-upload
+// query which parts have already been received, so it can pick up at the
+// next missing chunkIndex. Manifest lives in KV under the same baseKvKey
+// the chunk handler writes to, with 24h TTL.
+videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
+  const user = c.get('user');
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const uploadId = c.req.param('uploadId');
+  const baseKvKey = `upload:${user.id}:${uploadId}`;
+  const [uploadMetaJson, partsJson] = await Promise.all([
+    c.env.SESSIONS.get(`${baseKvKey}:meta`),
+    c.env.SESSIONS.get(`${baseKvKey}:parts`),
+  ]);
+  if (!uploadMetaJson) {
+    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
+  }
+  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+  const partsMap = partsJson
+    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
+    : {};
+  // Manifest stores R2 part numbers (1-indexed); clients work in 0-indexed
+  // chunkIndex space — translate at the boundary so callers don't have to.
+  const receivedChunks = Object.keys(partsMap)
+    .map((p) => Number(p) - 1)
+    .sort((a, b) => a - b);
+  const receivedBytes = Object.values(partsMap).reduce((sum, p) => sum + p.size, 0);
+  let nextChunkIndex: number | null = null;
+  for (let i = 0; i < uploadMeta.chunkCount; i++) {
+    if (!receivedChunks.includes(i)) {
+      nextChunkIndex = i;
+      break;
+    }
+  }
+  return c.json({
+    uploadId,
+    chunkCount: uploadMeta.chunkCount,
+    receivedChunks,
+    receivedBytes,
+    nextChunkIndex,
+    complete: nextChunkIndex === null,
+  });
+});
+
+videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
+  const user = c.get('user');
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const uploadId = c.req.param('uploadId');
+  const baseKvKey = `upload:${user.id}:${uploadId}`;
+  const mpidKey = `${baseKvKey}:mpid`;
+  const metaKey = `${baseKvKey}:meta`;
+  const partsKey = `${baseKvKey}:parts`;
+  const [multipartUploadId, uploadMetaJson] = await Promise.all([
+    c.env.SESSIONS.get(mpidKey),
+    c.env.SESSIONS.get(metaKey),
+  ]);
+  if (!uploadMetaJson || !multipartUploadId) {
+    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
+  }
+  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+  const multipart = c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
+  await multipart.abort().catch(() => {});
+  await Promise.all([
+    c.env.SESSIONS.delete(mpidKey),
+    c.env.SESSIONS.delete(metaKey),
+    c.env.SESSIONS.delete(partsKey),
+  ]);
+  return c.json({ status: 'aborted', uploadId });
+});
+
 videoRoutes.post('/api/videos/upload', async (c) => {
   const env = c.env;
   const user = c.get('user');

@@ -141,3 +141,105 @@ describe('upload storage-quota gate', () => {
     expect(res.status).toBe(201);
   });
 });
+
+// ALO-134: resume-on-disconnect — clients query the status endpoint to learn
+// which chunks the server already has, then re-POST starting at nextChunkIndex.
+describe('upload resume status (ALO-134)', () => {
+  function fakeEnvWithKv(store: Map<string, string>): VideoRoutesEnv {
+    const sessions = {
+      async get(key: string) {
+        return store.get(key) ?? null;
+      },
+      async put(key: string, value: string) {
+        store.set(key, value);
+      },
+      async delete(key: string) {
+        store.delete(key);
+      },
+    } as unknown as KVNamespace;
+    return {
+      DB: {} as unknown as D1Database,
+      VIDEOS: {} as unknown as R2Bucket,
+      CACHE: {} as unknown as KVNamespace,
+      SESSIONS: sessions,
+      VIDEO_ENCODING: {} as unknown as Queue,
+    };
+  }
+
+  it('returns 404 when no session exists for the uploadId', async () => {
+    const env = fakeEnvWithKv(new Map());
+    const fetcher = mountWithUser(env, { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true });
+    const res = await fetcher('/api/videos/upload/missing-id/status');
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { code: string };
+    expect(body.code).toBe('upload_not_found');
+  });
+
+  it('returns the manifest and nextChunkIndex for an in-progress upload', async () => {
+    const store = new Map<string, string>();
+    const baseKvKey = 'upload:u1:abc';
+    store.set(
+      `${baseKvKey}:meta`,
+      JSON.stringify({
+        videoId: 'v1',
+        r2Key: 'u1/v1/clip.mp4',
+        title: 'hi',
+        description: '',
+        chunkCount: 4,
+      }),
+    );
+    // Parts 1 and 3 received → chunkIndex 0 and 2 → next missing is 1.
+    store.set(
+      `${baseKvKey}:parts`,
+      JSON.stringify({
+        '1': { etag: 'e1', size: 100 },
+        '3': { etag: 'e3', size: 100 },
+      }),
+    );
+    const env = fakeEnvWithKv(store);
+    const fetcher = mountWithUser(env, { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true });
+    const res = await fetcher('/api/videos/upload/abc/status');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      chunkCount: number;
+      receivedChunks: number[];
+      receivedBytes: number;
+      nextChunkIndex: number | null;
+      complete: boolean;
+    };
+    expect(body.chunkCount).toBe(4);
+    expect(body.receivedChunks).toEqual([0, 2]);
+    expect(body.receivedBytes).toBe(200);
+    expect(body.nextChunkIndex).toBe(1);
+    expect(body.complete).toBe(false);
+  });
+
+  it('signals complete=true when every chunk is present', async () => {
+    const store = new Map<string, string>();
+    const baseKvKey = 'upload:u1:done';
+    store.set(
+      `${baseKvKey}:meta`,
+      JSON.stringify({ videoId: 'v1', r2Key: 'u1/v1/c.mp4', title: 't', description: '', chunkCount: 2 }),
+    );
+    store.set(
+      `${baseKvKey}:parts`,
+      JSON.stringify({
+        '1': { etag: 'e1', size: 50 },
+        '2': { etag: 'e2', size: 50 },
+      }),
+    );
+    const env = fakeEnvWithKv(store);
+    const fetcher = mountWithUser(env, { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true });
+    const res = await fetcher('/api/videos/upload/done/status');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { nextChunkIndex: number | null; complete: boolean };
+    expect(body.complete).toBe(true);
+    expect(body.nextChunkIndex).toBeNull();
+  });
+
+  it('rejects unauthenticated callers', async () => {
+    const fetcher = mountWithUser(fakeEnvWithKv(new Map()), null);
+    const res = await fetcher('/api/videos/upload/anything/status');
+    expect(res.status).toBe(401);
+  });
+});

@@ -131,4 +131,4 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)
 # VITE_POSTHOG_KEY        (ALO-166 — PostHog project API key, e.g. phc_...)
-# VITE_POSTHOG_HOST       (ALO-166 — defaults to https://us.i.posthog.com; override for self-hosted)
+# VITE_POSTHOG_HOST       (ALO-184 — defaults to https://eu.i.posthog.com; set to https://us.i.posthog.com or a self-hosted URL to override)

@@ -145,16 +145,45 @@ export function Upload(): JSX.Element {
       return;
     }
 
+    // ALO-184: funnel instrumentation. We capture file metadata (size, MIME)
+    // but never the filename or contents. `is_first_upload` is gated on a
+    // localStorage marker so we can split brand-new creators from repeat
+    // uploaders even when the user is anonymous-then-signed-up.
+    const fileSize = file.size;
+    const fileType = file.type || 'unknown';
+    const startedAt = Date.now();
+    void import('../lib/analytics').then(({ track, ANALYTICS_EVENTS }) => {
+      track(ANALYTICS_EVENTS.uploadStarted, {
+        file_size_bytes: fileSize,
+        file_type: fileType,
+      });
+    });
+
     try {
       await uploadInChunks(file, title, description, setProgress);
       setStatus('Upload complete');
-      // ALO-184: funnel event. Fire-and-forget — analytics must never
-      // affect upload UX.
-      void import('../lib/analytics').then(({ track }) => {
-        track('upload_completed', { size_bytes: file.size, mime: file.type || 'unknown' });
-      });
+      void import('../lib/analytics').then(
+        ({ track, isFirstEvent, ANALYTICS_EVENTS }) => {
+          track(ANALYTICS_EVENTS.uploadCompleted, {
+            file_size_bytes: fileSize,
+            file_type: fileType,
+            duration_ms: Date.now() - startedAt,
+            is_first_upload: isFirstEvent('upload'),
+          });
+        },
+      );
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setError(message);
+      void import('../lib/analytics').then(({ track, ANALYTICS_EVENTS }) => {
+        track(ANALYTICS_EVENTS.uploadFailed, {
+          file_size_bytes: fileSize,
+          file_type: fileType,
+          duration_ms: Date.now() - startedAt,
+          // Truncate so a verbose server payload can't bloat the event.
+          error: message.slice(0, 200),
+        });
+      });
     }
   }
 

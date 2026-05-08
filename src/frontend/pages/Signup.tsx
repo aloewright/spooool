@@ -38,14 +38,15 @@ export function Signup(): JSX.Element {
       body: JSON.stringify({ isNewSignup: true }),
       keepalive: true,
     }).catch(() => undefined);
-    // ALO-166 / observability: stamp the visitor with their user id so
-    // PostHog stitches pre-signup activity to the new account, then emit
-    // the signup event for funnel analytics.
+    // ALO-166 / ALO-184: stamp the visitor with their user id so PostHog
+    // stitches pre-signup activity to the new account, then emit the
+    // canonical signup event that anchors the signup → first upload →
+    // first watch funnel.
     const newUserId = data?.user?.id;
     if (newUserId) {
-      void import('../lib/analytics').then(({ identify, track }) => {
+      void import('../lib/analytics').then(({ identify, track, ANALYTICS_EVENTS }) => {
         identify(newUserId, { signup_source: 'email_password' });
-        track('signup_completed', { method: 'email_password' });
+        track(ANALYTICS_EVENTS.signupCompleted, { method: 'email_password' });
       });
     }
     navigate(next, { replace: true });

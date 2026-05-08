@@ -118,15 +118,7 @@ export function Watch(): JSX.Element {
         }
         return (await response.json()) as VideoResponse;
       })
-      .then((data) => {
-        setVideo(data);
-        // ALO-184: funnel event for "first watch" tracking. PostHog
-        // de-duplicates per-user-first via funnel queries; we just emit
-        // the event on every successful video load.
-        void import('../lib/analytics').then(({ track }) => {
-          track('watch_started', { video_id: data.id });
-        });
-      })
+      .then((data) => setVideo(data))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 
@@ -438,6 +430,10 @@ export function Watch(): JSX.Element {
     if (!id || !player) return;
     const HEARTBEAT_MS = 10_000;
     let lastTick = Date.now();
+    // ALO-184: emit video_play_started exactly once per Watch mount so a
+    // user pausing/resuming doesn't inflate the "started watch" funnel
+    // metric. Reset on id change because the effect re-runs.
+    let playEventSent = false;
 
     const ping = (): void => {
       const p = playerRef.current;
@@ -462,6 +458,25 @@ export function Watch(): JSX.Element {
     const interval = window.setInterval(ping, HEARTBEAT_MS);
     const onPlay = (): void => {
       lastTick = Date.now();
+      if (playEventSent) return;
+      playEventSent = true;
+      // ALO-184: signup → first upload → first watch funnel. Captured on
+      // the first user-driven (or autoplayed) play of this video. The
+      // server's existing /heartbeat endpoint counts views; this event
+      // captures *intent to watch* for product analytics, including
+      // anonymous visitors.
+      void import('../lib/analytics').then(
+        ({ track, isFirstEvent, ANALYTICS_EVENTS }) => {
+          const firstWatch = isFirstEvent('watch');
+          track(ANALYTICS_EVENTS.videoPlayStarted, {
+            video_id: id,
+            is_first_watch: firstWatch,
+          });
+          if (firstWatch) {
+            track(ANALYTICS_EVENTS.videoFirstWatch, { video_id: id });
+          }
+        },
+      );
     };
     player.on('play', onPlay);
     return () => {

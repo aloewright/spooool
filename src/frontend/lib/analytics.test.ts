@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __resetForTests,
+  ANALYTICS_EVENTS,
+  DEFAULT_POSTHOG_HOST,
   identify,
   initAnalytics,
+  isFirstEvent,
   readAnalyticsConfig,
   reset,
   track,
@@ -32,9 +35,10 @@ describe('readAnalyticsConfig', () => {
     expect(cfg.enabled).toBe(false);
   });
 
-  it('falls back to the cloud host when none is configured', () => {
+  it('falls back to the EU cloud host when none is configured', () => {
     const cfg = readAnalyticsConfig();
-    expect(cfg.host).toBe('https://us.i.posthog.com');
+    expect(cfg.host).toBe('https://eu.i.posthog.com');
+    expect(cfg.host).toBe(DEFAULT_POSTHOG_HOST);
   });
 });
 
@@ -52,13 +56,13 @@ describe('initAnalytics', () => {
   it('initialises posthog when enabled with a key', () => {
     initAnalytics({
       apiKey: 'phc_test',
-      host: 'https://us.i.posthog.com',
+      host: 'https://eu.i.posthog.com',
       enabled: true,
     });
     expect(posthog.init).toHaveBeenCalledTimes(1);
     expect(posthog.init).toHaveBeenCalledWith(
       'phc_test',
-      expect.objectContaining({ api_host: 'https://us.i.posthog.com' }),
+      expect.objectContaining({ api_host: 'https://eu.i.posthog.com' }),
     );
   });
 
@@ -88,5 +92,62 @@ describe('track / identify / reset', () => {
     expect(posthog.capture).toHaveBeenCalledWith('signup', { source: 'invite' });
     expect(posthog.identify).toHaveBeenCalledWith('user-1', { plan: 'free' });
     expect(posthog.reset).toHaveBeenCalled();
+  });
+});
+
+describe('ANALYTICS_EVENTS', () => {
+  it('exposes the canonical funnel event names', () => {
+    expect(ANALYTICS_EVENTS.signupCompleted).toBe('signup_completed');
+    expect(ANALYTICS_EVENTS.uploadStarted).toBe('upload_started');
+    expect(ANALYTICS_EVENTS.uploadCompleted).toBe('upload_completed');
+    expect(ANALYTICS_EVENTS.uploadFailed).toBe('upload_failed');
+    expect(ANALYTICS_EVENTS.videoPlayStarted).toBe('video_play_started');
+    expect(ANALYTICS_EVENTS.videoFirstWatch).toBe('video_first_watch');
+  });
+});
+
+describe('isFirstEvent', () => {
+  function makeStorage(): {
+    getItem: (key: string) => string | null;
+    setItem: (key: string, value: string) => void;
+  } {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k) => map.get(k) ?? null,
+      setItem: (k, v) => {
+        map.set(k, v);
+      },
+    };
+  }
+
+  it('returns true the first time, false on subsequent calls for the same key', () => {
+    const storage = makeStorage();
+    expect(isFirstEvent('upload', storage)).toBe(true);
+    expect(isFirstEvent('upload', storage)).toBe(false);
+    expect(isFirstEvent('upload', storage)).toBe(false);
+  });
+
+  it('keys are independent', () => {
+    const storage = makeStorage();
+    expect(isFirstEvent('upload', storage)).toBe(true);
+    expect(isFirstEvent('watch', storage)).toBe(true);
+    expect(isFirstEvent('upload', storage)).toBe(false);
+    expect(isFirstEvent('watch', storage)).toBe(false);
+  });
+
+  it('returns false when storage is unavailable', () => {
+    expect(isFirstEvent('upload', null)).toBe(false);
+  });
+
+  it('returns false when storage throws (e.g. private mode)', () => {
+    const throwing = {
+      getItem: () => {
+        throw new Error('blocked');
+      },
+      setItem: () => {
+        throw new Error('blocked');
+      },
+    };
+    expect(isFirstEvent('upload', throwing)).toBe(false);
   });
 });

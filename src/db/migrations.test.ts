@@ -24,7 +24,9 @@ describe('D1 migrations', () => {
   it('0010_perf_indexes adds composite indexes for trending + soft-delete (ALO-200)', () => {
     const sql = readFileSync(join(MIGRATIONS_DIR, '0010_perf_indexes.sql'), 'utf8');
     expect(sql).toMatch(/idx_views_video_viewed_at\s+ON\s+views\(video_id,\s*viewed_at\)/i);
-    expect(sql).toMatch(/idx_videos_active_created\s+ON\s+videos\(deleted_at,\s*created_at DESC\)/i);
+    expect(sql).toMatch(
+      /idx_videos_active_created\s+ON\s+videos\(deleted_at,\s*created_at DESC\)/i,
+    );
   });
 
   it('schema.sql mirrors the perf indexes from 0010', () => {
@@ -69,5 +71,21 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS tags');
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
+  });
+
+  it('0019_beta_invites adds waitlist + invite_codes + invite_redemptions (ALO-181)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_beta_invites.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS waitlist/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS invite_codes/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS invite_redemptions/);
+    expect(sql).toMatch(/idx_waitlist_wave/);
+    expect(sql).toMatch(/UNIQUE \(invite_code_id, email\)/);
+  });
+
+  it('schema.sql mirrors the beta-invite tables from 0019', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS waitlist');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS invite_codes');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS invite_redemptions');
   });
 });

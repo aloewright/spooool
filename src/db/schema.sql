@@ -176,3 +176,48 @@ CREATE TABLE IF NOT EXISTS video_tags (
 
 CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_slug);
 CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+
+CREATE TABLE IF NOT EXISTS waitlist (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  name TEXT,
+  source TEXT,
+  referrer TEXT,
+  wave INTEGER NOT NULL DEFAULT 0,
+  invited_at INTEGER,
+  invite_code_id TEXT,
+  signed_up_user_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_waitlist_wave ON waitlist(wave, created_at);
+CREATE INDEX IF NOT EXISTS idx_waitlist_created_at ON waitlist(created_at);
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id TEXT PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  max_uses INTEGER NOT NULL DEFAULT 1,
+  uses INTEGER NOT NULL DEFAULT 0,
+  wave INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER,
+  created_by_user_id TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  disabled_at INTEGER,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_codes_wave ON invite_codes(wave);
+CREATE INDEX IF NOT EXISTS idx_invite_codes_disabled ON invite_codes(disabled_at);
+
+CREATE TABLE IF NOT EXISTS invite_redemptions (
+  id TEXT PRIMARY KEY,
+  invite_code_id TEXT NOT NULL,
+  email TEXT NOT NULL,
+  user_id TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE (invite_code_id, email)
+);
+
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_email ON invite_redemptions(email);
+CREATE INDEX IF NOT EXISTS idx_invite_redemptions_code ON invite_redemptions(invite_code_id);

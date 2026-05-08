@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
+import { betaInviteRoutes } from './beta-invites';
 import { ChannelSubscriberDO } from './channel-do';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
@@ -15,12 +16,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
-import {
-  AUTH_WRITE_BUCKET,
-  clientIp,
-  rateLimit,
-  rateLimitHeaders,
-} from './rate-limit';
+import { AUTH_WRITE_BUCKET, clientIp, rateLimit, rateLimitHeaders } from './rate-limit';
 import { RateLimiterDO } from './rate-limit-do';
 import { relatedRoutes } from './related';
 import { rolesRoutes } from './roles';
@@ -44,23 +40,24 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
-  RATE_LIMITER?: DurableObjectNamespace;
-  CF_STREAM_WEBHOOK_SECRET?: string;
-  ALLOWED_ORIGINS?: string;
-  ADMIN_EMAILS?: string;
-  SENTRY_DSN?: string;
-  CF_VERSION_METADATA?: { id: string; tag?: string };
-  // Resend (resend.com) REST API key. When unset, lifecycle calls
-  // fail-open — the contact / email is just skipped.
-  RESEND_API_KEY?: string;
-  RESEND_AUDIENCE_ID?: string;
-  RESEND_FROM?: string;
-  // Cloudflare static assets binding (auto-injected when [assets] is set in
-  // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
-  // it with per-video OG tags.
-  ASSETS: { fetch: (req: Request) => Promise<Response> };
-};
+type EnvBindings = AuthEnv &
+  VideoRoutesEnv & {
+    RATE_LIMITER?: DurableObjectNamespace;
+    CF_STREAM_WEBHOOK_SECRET?: string;
+    ALLOWED_ORIGINS?: string;
+    ADMIN_EMAILS?: string;
+    SENTRY_DSN?: string;
+    CF_VERSION_METADATA?: { id: string; tag?: string };
+    // Resend (resend.com) REST API key. When unset, lifecycle calls
+    // fail-open — the contact / email is just skipped.
+    RESEND_API_KEY?: string;
+    RESEND_AUDIENCE_ID?: string;
+    RESEND_FROM?: string;
+    // Cloudflare static assets binding (auto-injected when [assets] is set in
+    // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
+    // it with per-video OG tags.
+    ASSETS: { fetch: (req: Request) => Promise<Response> };
+  };
 
 type Variables = {
   user: SessionUser | null;
@@ -146,6 +143,7 @@ app.route('/', rumRoutes);
 app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);
 app.route('/', accountRoutes);
+app.route('/', betaInviteRoutes);
 app.route('/', dmcaRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
@@ -176,7 +174,11 @@ const workerHandlers = {
       }
     }
   },
-  async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext): Promise<void> {
+  async scheduled(
+    controller: ScheduledController,
+    env: EnvBindings,
+    ctx: ExecutionContext,
+  ): Promise<void> {
     // ALO-132: hard-delete users whose 30-day grace window has elapsed.
     // The cron is configured in wrangler.toml under [triggers] crons.
     ctx.waitUntil(

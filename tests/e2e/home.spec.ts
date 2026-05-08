@@ -4,19 +4,19 @@ import { expect, test } from '@playwright/test';
 // that the SPA shell + trending API are wired and serving.
 
 test.describe('home page', () => {
-  test('renders wordmark and trending heading', async ({ page }) => {
+  test('renders wordmark and marketing hero', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveTitle(/spooool/i);
-    // Trending section has a stable accessible label even when the list is empty.
-    await expect(page.getByRole('heading', { name: /trending this week/i })).toBeVisible();
+    // ALO-177: anonymous visitors land on the marketing site with the hero headline.
+    await expect(
+      page.getByRole('heading', { name: /a video host that respects your time/i }),
+    ).toBeVisible();
   });
 
   test('shows a sign-in entry point for anonymous users', async ({ page }) => {
     await page.goto('/');
-    // Either a Sign in link or the wordmark + Get started copy must be present.
     const signIn = page.getByRole('link', { name: /sign in/i });
-    const getStarted = page.getByRole('heading', { name: /start here/i });
-    await expect(signIn.or(getStarted)).toBeVisible();
+    await expect(signIn.first()).toBeVisible();
   });
 
   test('does not 5xx on a deep link to a non-existent video', async ({ page }) => {

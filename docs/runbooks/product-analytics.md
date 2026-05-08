@@ -33,9 +33,12 @@ in any session recording (`session_recording.maskAllInputs: true`).
 - Inputs masked in session recordings.
 - "First-event" markers (`spool.fired.upload`, `spool.fired.watch`) are
   stored in `localStorage` so the funnel works for anonymous visitors
-  too. Clearing site data (or signing out) does **not** clear them
-  — that's by design: the marker tracks the browser profile, not the
-  identity. A user who clears their browser correctly counts as fresh.
+  too. Server-side actions (signing out, deleting an account) do **not**
+  remove these browser-local markers — that's by design: the marker
+  tracks the browser profile, not the server-side identity. Browser
+  actions that wipe local storage (DevTools "Clear site data", clearing
+  browsing data, switching profiles, incognito) **do** clear them, and a
+  user in that state correctly counts as fresh.
 
 ## Building the funnel in PostHog
 

@@ -75,7 +75,15 @@ export function reset(): void {
   client.reset();
 }
 
-export function track(event: string, properties?: Record<string, unknown>): void {
+// `AnalyticsEventName | (string & {})` is the IDE-friendly autocomplete
+// trick: the typed union surfaces canonical names in autocomplete and
+// catches typos against `ANALYTICS_EVENTS`, while `string & {}` keeps the
+// type assignable from any string so ad-hoc/experimental events still
+// compile without ceremony.
+export function track(
+  event: AnalyticsEventName | (string & {}),
+  properties?: Record<string, unknown>,
+): void {
   if (!client) return;
   client.capture(event, properties);
 }

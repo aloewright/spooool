@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
+import { CookieNotice } from './components/CookieNotice';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the hls.js it depends on for
@@ -37,6 +38,10 @@ const ForgotPassword = lazy(() =>
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
+const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
+const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
+const Help = lazy(() => import('./pages/Help').then((m) => ({ default: m.Help })));
+const About = lazy(() => import('./pages/About').then((m) => ({ default: m.About })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -449,8 +454,12 @@ function Home(): JSX.Element {
         borderTop: '1px solid var(--border)',
       }}
     >
-      <Link to="/legal/tos">Terms of Service</Link>
-      <Link to="/legal/privacy">Privacy Policy</Link>
+      <Link to="/about">About</Link>
+      <Link to="/pricing">Pricing</Link>
+      <Link to="/help">Help</Link>
+      <Link to="/status">Status</Link>
+      <Link to="/legal/tos">Terms</Link>
+      <Link to="/legal/privacy">Privacy</Link>
       <Link to="/legal/dmca">DMCA</Link>
     </footer>
     </>
@@ -480,6 +489,7 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <AppHeader />
+      <CookieNotice />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -543,6 +553,10 @@ export default function App(): JSX.Element {
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/status" element={<Status />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/about" element={<About />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

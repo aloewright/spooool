@@ -11,11 +11,49 @@ interface AccountInfo {
   deletionScheduledFor: number | null;
 }
 
+// ALO-165: Polar acts as Merchant of Record so we don't run our own sales-tax
+// integration. The remaining surface is creator-side income reporting.
+// We link out to Polar's tax-form docs from the Earnings card so creators
+// can find region-appropriate forms (1099-K, DAC7, etc.). Update this
+// constant if Polar restructures their docs.
+const POLAR_TAX_DOCS_URL = 'https://docs.polar.sh/finance/tax-forms';
+
+type CreatorEarnings = {
+  lifetimeCents: number;
+  byYear: Array<{ year: number; cents: number }>;
+  currency: 'USD';
+  formIssuance: 'platform' | 'polar' | 'none';
+  notice: 'pending-polar' | 'self-report' | 'platform-issued';
+};
+
+function formatUsdCents(cents: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(cents / 100);
+}
+
+function noticeCopy(notice: CreatorEarnings['notice']): string {
+  // LEGAL-REVIEW: confirm the wording for the three issuance paths with
+  // counsel before partner payouts go live. Keys are stable; copy may move.
+  switch (notice) {
+    case 'platform-issued':
+      return 'spooool will issue a 1099-K to you for this calendar year. The form appears here once finalized.';
+    case 'pending-polar':
+      return 'Polar issues your tax form directly. Use the Polar dashboard link below to download it.';
+    case 'self-report':
+    default:
+      return 'No platform-issued tax form yet. Use these totals when filing — they reflect payouts settled to you.';
+  }
+}
+
 export function AccountSettings(): JSX.Element {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
 
   const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [earnings, setEarnings] = useState<CreatorEarnings | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -40,6 +78,31 @@ export function AccountSettings(): JSX.Element {
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Unknown error');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  // ALO-165: load creator earnings totals so the dashboard surface exists
+  // even before Polar partner payouts are live. The endpoint returns a
+  // zero-state today; the contract is stable so this code keeps working
+  // once payouts start landing in the ledger.
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    void fetch('/api/account/earnings', { credentials: 'include' })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Earnings fetch failed: ${r.status}`);
+        return (await r.json()) as CreatorEarnings;
+      })
+      .then((data) => {
+        if (!cancelled) setEarnings(data);
+      })
+      .catch(() => {
+        // Earnings is non-critical for the rest of the page — swallow so
+        // a transient backend hiccup doesn't blow up email / password UX.
+        if (!cancelled) setEarnings(null);
       });
     return () => {
       cancelled = true;
@@ -224,27 +287,59 @@ export function AccountSettings(): JSX.Element {
       <ActiveSessions />
 
       <section className="stack-sm" aria-label="Earnings and tax forms">
-        <span className="ds-label">Earnings & tax forms</span>
+        <span className="ds-label">Earnings &amp; tax forms</span>
         {/* LEGAL-REVIEW: confirm copy with counsel before enabling for partner-program creators. */}
         <p className="ds-meta">
-          Spooool's creator payouts run through Polar, our Merchant of Record. Polar collects and
-          remits sales tax / VAT on purchases, and issues payout statements and year-end tax forms
-          (W-9 / W-8, 1099-NEC where applicable, EU self-billing invoices) for partner-program
-          creators. Spooool will surface your year-to-date earnings here once the partner
-          integration is live; in the meantime, find your records in Polar.
+          Spooool&apos;s creator payouts run through Polar, our Merchant of
+          Record. Polar collects and remits sales tax / VAT on purchases —
+          you don&apos;t owe buyer-side tax on those amounts. The figures
+          below are your <em>creator payouts</em>, useful for filing your
+          own income tax.
         </p>
+        {earnings === null ? (
+          <p className="ds-empty">Loading earnings…</p>
+        ) : (
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: 'var(--space-3)',
+              }}
+            >
+              <div>
+                <div className="ds-meta">Lifetime payouts</div>
+                <div style={{ fontWeight: 700, fontSize: 'var(--text-xl)' }}>
+                  {formatUsdCents(earnings.lifetimeCents)}
+                </div>
+              </div>
+              {earnings.byYear.slice(0, 3).map((y) => (
+                <div key={y.year}>
+                  <div className="ds-meta">{y.year}</div>
+                  <div style={{ fontWeight: 700, fontSize: 'var(--text-xl)' }}>
+                    {formatUsdCents(y.cents)}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="ds-meta">{noticeCopy(earnings.notice)}</p>
+          </>
+        )}
         <p className="ds-meta">
-          <a href="https://docs.polar.sh/merchant-of-record/tax" target="_blank" rel="noreferrer">
-            Polar tax documentation
+          For region-specific tax forms (1099-K in the US, DAC7 in the EU,
+          etc.) see{' '}
+          <a href={POLAR_TAX_DOCS_URL} target="_blank" rel="noopener noreferrer">
+            Polar&apos;s tax-form documentation
           </a>
           {' · '}
           <a
             href="https://docs.polar.sh/features/partner-payouts"
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
           >
             Partner payouts
           </a>
+          .
         </p>
       </section>
 

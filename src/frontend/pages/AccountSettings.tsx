@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
+import { NotificationPreferences } from '../components/NotificationPreferences';
 
 interface AccountInfo {
   id: string;
@@ -222,6 +223,8 @@ export function AccountSettings(): JSX.Element {
       </section>
 
       <ActiveSessions />
+
+      <NotificationPreferences />
 
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">

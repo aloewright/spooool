@@ -70,4 +70,11 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
   });
+
+  it('0019_notifications adds digest preferences columns (ALO-157)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_notifications.sql'), 'utf8');
+    expect(sql).toMatch(/ALTER TABLE user ADD COLUMN email_digest_frequency/);
+    expect(sql).toMatch(/CHECK \(email_digest_frequency IN \('off', 'daily', 'weekly'\)\)/);
+    expect(sql).toMatch(/ALTER TABLE user ADD COLUMN email_digest_last_sent_at/);
+  });
 });

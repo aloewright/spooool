@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
+import { NotificationBell } from './components/NotificationBell';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the hls.js it depends on for
@@ -98,6 +99,7 @@ function HeaderNav(): JSX.Element {
   return (
     <nav className="app-header__nav">
       <span className="ds-meta">{session.user.email}</span>
+      <NotificationBell />
       <Link to="/upload">
         <button type="button" className="btn btn--secondary btn--sm">Upload</button>
       </Link>

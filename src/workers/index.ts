@@ -4,6 +4,7 @@ import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
+import { runDigestSweep } from './digest';
 import { handleEncodingMessage } from './encoding';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
@@ -13,6 +14,7 @@ import { healthRoutes } from './health';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
+import { notificationRoutes } from './notifications';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
 import {
@@ -144,6 +146,7 @@ app.route('/', analyticsRoutes);
 app.route('/', subscriptionRoutes);
 app.route('/', rumRoutes);
 app.route('/', moderationRoutes);
+app.route('/', notificationRoutes);
 app.route('/', rolesRoutes);
 app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
@@ -189,6 +192,21 @@ const workerHandlers = {
           const restored = await runDmcaRestoreSweep(env);
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
+          }
+          // ALO-157: email digest of new uploads from a user's subscriptions.
+          // Daily/weekly cadence is per-user; the sweep selects only those
+          // whose window has elapsed and walks them through one Resend send
+          // each. Best-effort: failures leave last_sent_at alone so the
+          // next sweep retries.
+          const digest = await runDigestSweep({ env });
+          if (digest.length > 0) {
+            console.log('[digest-sweep]', {
+              cron: controller.cron,
+              total: digest.length,
+              sent: digest.filter((d) => d.status === 'sent').length,
+              skipped: digest.filter((d) => d.status === 'skipped').length,
+              failed: digest.filter((d) => d.status === 'failed').length,
+            });
           }
         } catch (err) {
           console.error('scheduled sweep failed', {

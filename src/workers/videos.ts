@@ -211,10 +211,26 @@ videoRoutes.get('/api/videos/:id', async (c) => {
 
   if (setCookie) c.header('Set-Cookie', setCookie, { append: true });
 
+  // ALO-122 (E3): WebVTT caption tracks. Joined separately so the video meta
+  // cache (which is invalidated only on video updates) doesn't have to be
+  // rebuilt every time a caption row is added; the list is a small read.
+  const captionRows = await c.env.DB.prepare(
+    `SELECT lang, label, url, is_default FROM video_captions WHERE video_id = ? ORDER BY is_default DESC, lang ASC`,
+  )
+    .bind(id)
+    .all<{ lang: string; label: string; url: string; is_default: number }>();
+  const captions = (captionRows.results ?? []).map((r) => ({
+    lang: r.lang,
+    label: r.label,
+    url: r.url,
+    default: r.is_default === 1,
+  }));
+
   c.header('x-spooool-cache', cacheHit ? 'hit' : 'miss');
   return c.json({
     ...video,
     view_count: viewCount,
+    captions,
   });
 });
 

@@ -176,3 +176,16 @@ CREATE TABLE IF NOT EXISTS video_tags (
 
 CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_slug);
 CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+
+CREATE TABLE IF NOT EXISTS video_captions (
+  video_id TEXT NOT NULL,
+  lang TEXT NOT NULL,
+  label TEXT NOT NULL,
+  url TEXT NOT NULL,
+  is_default INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (video_id, lang),
+  FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_video_captions_video ON video_captions(video_id);

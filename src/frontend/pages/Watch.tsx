@@ -29,6 +29,13 @@ function formatHms(total: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
+type CaptionTrack = {
+  lang: string;
+  label: string;
+  url: string;
+  default?: boolean;
+};
+
 type VideoResponse = {
   id: string;
   title: string;
@@ -39,6 +46,7 @@ type VideoResponse = {
   stream_video_id?: string;
   r2_key?: string;
   status?: string;
+  captions?: CaptionTrack[];
 };
 
 type PlaybackSource = { src: string; type: string } | null;
@@ -532,8 +540,20 @@ export function Watch(): JSX.Element {
           className="native-player"
           playsInline
           preload="metadata"
+          crossOrigin="anonymous"
           style={{ width: '100%', display: 'block', background: 'black' }}
-        />
+        >
+          {(video.captions ?? []).map((t) => (
+            <track
+              key={t.lang}
+              kind="subtitles"
+              src={t.url}
+              srcLang={t.lang}
+              label={t.label}
+              default={t.default ?? false}
+            />
+          ))}
+        </video>
       </div>
       {resumeOffer != null && (
         <div

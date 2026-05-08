@@ -501,6 +501,20 @@ describe('seoRoutes — /sitemap-static.xml', () => {
     expect(body).toContain('<loc>http://localhost/channel/alice</loc>');
     expect(body).not.toContain('/watch/v1');
   });
+
+  it('lists the help center index and every advertised article (ALO-183)', async () => {
+    const env: SeoEnv = {
+      DB: fakeDB({ videos: [], channels: [] }),
+    };
+    const res = await seoRoutes.request('/sitemap-static.xml', {}, env);
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    expect(body).toContain('<loc>http://localhost/help</loc>');
+    expect(body).toContain('<loc>http://localhost/help/quickstart</loc>');
+    expect(body).toContain('<loc>http://localhost/help/upload-guide</loc>');
+    expect(body).toContain('<loc>http://localhost/help/encoding-tips</loc>');
+    expect(body).toContain('<loc>http://localhost/help/monetization-faq</loc>');
+  });
 });
 
 describe('seoRoutes — /sitemap-videos-:page.xml (wildcard route)', () => {

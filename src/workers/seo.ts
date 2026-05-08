@@ -239,11 +239,24 @@ async function loadCatalogLastMod(db: D1Database): Promise<string | undefined> {
   return toW3CDate(row?.lastmod ?? null);
 }
 
+// ALO-183: keep this list in sync with the ARTICLES catalog in
+// src/frontend/pages/Help.tsx. Hard-coded here to avoid pulling the React
+// module graph into the SEO worker bundle.
+const HELP_ARTICLE_SLUGS = ['quickstart', 'upload-guide', 'encoding-tips', 'monetization-faq'] as const;
+
 function buildStaticUrls(origin: string, channelRows: { username: string; updated_at: string }[]): SitemapUrl[] {
   const urls: SitemapUrl[] = [
     { loc: `${origin}/`, changefreq: 'hourly', priority: 1.0 },
     { loc: `${origin}/search`, changefreq: 'daily', priority: 0.8 },
+    { loc: `${origin}/help`, changefreq: 'weekly', priority: 0.5 },
   ];
+  for (const slug of HELP_ARTICLE_SLUGS) {
+    urls.push({
+      loc: `${origin}/help/${slug}`,
+      changefreq: 'weekly',
+      priority: 0.4,
+    });
+  }
   for (const row of channelRows) {
     urls.push({
       loc: `${origin}/channel/${encodeURIComponent(row.username)}`,

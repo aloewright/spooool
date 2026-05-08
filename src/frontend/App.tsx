@@ -37,6 +37,7 @@ const ForgotPassword = lazy(() =>
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
+const Help = lazy(() => import('./pages/Help').then((m) => ({ default: m.Help })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -449,6 +450,7 @@ function Home(): JSX.Element {
         borderTop: '1px solid var(--border)',
       }}
     >
+      <Link to="/help">Help</Link>
       <Link to="/legal/tos">Terms of Service</Link>
       <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/legal/dmca">DMCA</Link>
@@ -541,6 +543,8 @@ export default function App(): JSX.Element {
             }
           />
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/help/:slug" element={<Help />} />
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
           <Route path="*" element={<Navigate to="/" replace />} />

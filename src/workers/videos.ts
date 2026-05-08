@@ -416,7 +416,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         metadataParsed.data.description,
         r2Key,
         rawFile.size,
-        'uploaded',
+        'queued',
       )
       .run();
 
@@ -427,7 +427,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     });
     await bumpTrendingCacheVersion(env.CACHE);
 
-    return c.json({ id: videoId, status: 'uploaded' }, 201);
+    return c.json({ id: videoId, status: 'queued' }, 201);
   }
 
   const resolvedUploadId = uploadId ?? crypto.randomUUID();
@@ -546,7 +546,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       uploadMeta.description,
       uploadMeta.r2Key,
       totalBytes,
-      'uploaded',
+      'queued',
     )
     .run();
 
@@ -559,7 +559,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
-  return c.json({ id: uploadMeta.videoId, status: 'uploaded' }, 201);
+  return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });
 
 videoRoutes.delete('/api/videos/:id', async (c) => {

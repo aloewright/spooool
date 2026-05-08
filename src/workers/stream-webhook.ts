@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Context, MiddlewareHandler } from 'hono';
 import { buildThumbnailCandidates } from './thumbnails';
+import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
 
 export const STREAM_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 
@@ -24,12 +25,15 @@ const streamWebhookSchema = z.object({
 
 export type StreamWebhookPayload = z.infer<typeof streamWebhookSchema>;
 
-export type StreamVideoStatus = 'ready' | 'encode_failed' | 'encoding';
+// ALO-138: webhook reports always normalise to the canonical state
+// machine alphabet. Any non-ready / non-error stream state means
+// transcoding is mid-flight, which is `encoding` for us.
+export type StreamVideoStatus = VideoStatus;
 
 export function mapStreamState(state: string): StreamVideoStatus {
   const normalized = state.trim().toLowerCase();
   if (normalized === 'ready') return 'ready';
-  if (normalized === 'error') return 'encode_failed';
+  if (normalized === 'error') return 'failed';
   return 'encoding';
 }
 
@@ -157,6 +161,15 @@ export const handleStreamWebhook =
         ? JSON.stringify(buildThumbnailCandidates(payload.uid, payload.duration))
         : null;
 
+    // ALO-138: only flip the row when the webhook-derived status is a
+    // legal successor of the row's current state (or the same state — we
+    // tolerate idempotent retries). Stale webhook deliveries cannot drag
+    // a `ready` row back to `encoding`.
+    const allowedFrom = (VIDEO_STATUSES as readonly VideoStatus[]).filter((from) =>
+      canTransition(from, status),
+    );
+    const placeholders = allowedFrom.map(() => '?').join(', ');
+
     const result = await c.env.DB.prepare(
       `UPDATE videos
        SET status = ?,
@@ -165,9 +178,10 @@ export const handleStreamWebhook =
            thumbnail_url = COALESCE(?, thumbnail_url),
            thumbnail_candidates = COALESCE(?, thumbnail_candidates),
            updated_at = CURRENT_TIMESTAMP
-       WHERE stream_video_id = ?`,
+       WHERE stream_video_id = ?
+         AND status IN (${placeholders})`,
     )
-      .bind(status, payload.uid, playbackHls, thumbnail, candidatesJson, payload.uid)
+      .bind(status, payload.uid, playbackHls, thumbnail, candidatesJson, payload.uid, ...allowedFrom)
       .run();
 
     const changes = (result.meta?.changes as number | undefined) ?? 0;

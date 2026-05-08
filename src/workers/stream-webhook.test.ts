@@ -50,17 +50,14 @@ function makeFakeDB(seed: FakeRow[] = []): {
           return stmt;
         },
         async run() {
-          const [status, uid, playbackHls, thumbnail, candidates, whereUid] = bound as [
-            string,
-            string,
-            string | null,
-            string | null,
-            string | null,
-            string,
-          ];
+          // Bound order matches stream-webhook.ts:
+          //   status, uid, playbackHls, thumbnail, candidates, whereUid, ...allowedFromStatuses
+          const [status, uid, playbackHls, thumbnail, candidates, whereUid, ...allowedFrom] =
+            bound as [string, string, string | null, string | null, string | null, string, ...string[]];
+          const allowedSet = new Set(allowedFrom);
           let changes = 0;
           for (const row of rows) {
-            if (row.stream_video_id === whereUid) {
+            if (row.stream_video_id === whereUid && allowedSet.has(row.status)) {
               row.status = status;
               row.stream_video_id = uid;
               if (playbackHls !== null) row.playback_hls_url = playbackHls;
@@ -84,9 +81,9 @@ describe('mapStreamState', () => {
     expect(mapStreamState('ready')).toBe('ready');
     expect(mapStreamState('READY')).toBe('ready');
   });
-  it('maps error → encode_failed', () => {
-    expect(mapStreamState('error')).toBe('encode_failed');
-    expect(mapStreamState(' Error ')).toBe('encode_failed');
+  it('maps error → failed', () => {
+    expect(mapStreamState('error')).toBe('failed');
+    expect(mapStreamState(' Error ')).toBe('failed');
   });
   it('maps any other state → encoding', () => {
     expect(mapStreamState('queued')).toBe('encoding');
@@ -198,7 +195,7 @@ describe('handleStreamWebhook', () => {
       {
         id: 'v1',
         stream_video_id: 'abc',
-        status: 'stream_submitted',
+        status: 'encoding',
         playback_hls_url: null,
         thumbnail_url: null,
         thumbnail_candidates: null,
@@ -220,14 +217,14 @@ describe('handleStreamWebhook', () => {
     expect(rows[0].thumbnail_url).toBe('https://videodelivery.net/abc/thumbnails/thumbnail.jpg');
   });
 
-  it('maps error → encode_failed', async () => {
+  it('maps error → failed', async () => {
     const time = 1_700_000_000;
     const app = buildApp(time);
     const { rows, binding } = makeFakeDB([
       {
         id: 'v1',
         stream_video_id: 'abc',
-        status: 'stream_submitted',
+        status: 'encoding',
         playback_hls_url: null,
         thumbnail_url: null,
         thumbnail_candidates: null,
@@ -238,7 +235,7 @@ describe('handleStreamWebhook', () => {
     const body = JSON.stringify({ uid: 'abc', status: { state: 'error' } });
     const res = await postWebhook(app, { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET }, body, time, SECRET);
     expect(res.status).toBe(200);
-    expect(rows[0].status).toBe('encode_failed');
+    expect(rows[0].status).toBe('failed');
   });
 
   it('maps in-progress states → encoding', async () => {
@@ -248,7 +245,7 @@ describe('handleStreamWebhook', () => {
       {
         id: 'v1',
         stream_video_id: 'abc',
-        status: 'stream_submitted',
+        status: 'encoding',
         playback_hls_url: null,
         thumbnail_url: null,
         thumbnail_candidates: null,
@@ -269,7 +266,7 @@ describe('handleStreamWebhook', () => {
       {
         id: 'v1',
         stream_video_id: 'abc',
-        status: 'stream_submitted',
+        status: 'encoding',
         playback_hls_url: null,
         thumbnail_url: null,
         thumbnail_candidates: null,
@@ -299,5 +296,30 @@ describe('handleStreamWebhook', () => {
     expect(res.status).toBe(202);
     const json = (await res.json()) as { matched: number };
     expect(json.matched).toBe(0);
+  });
+
+  // ALO-138: a stale `inprogress` webhook arriving after the row already
+  // reached `ready` must not pull the lifecycle backwards.
+  it('refuses to drag a ready row back to encoding', async () => {
+    const time = 1_700_000_000;
+    const app = buildApp(time);
+    const { rows, binding } = makeFakeDB([
+      {
+        id: 'v1',
+        stream_video_id: 'abc',
+        status: 'ready',
+        playback_hls_url: 'https://videodelivery.net/abc/manifest/video.m3u8',
+        thumbnail_url: null,
+        thumbnail_candidates: null,
+        updated_at: 0,
+      },
+    ]);
+
+    const body = JSON.stringify({ uid: 'abc', status: { state: 'inprogress' } });
+    const res = await postWebhook(app, { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET }, body, time, SECRET);
+    expect(res.status).toBe(202);
+    const json = (await res.json()) as { matched: number };
+    expect(json.matched).toBe(0);
+    expect(rows[0].status).toBe('ready');
   });
 });

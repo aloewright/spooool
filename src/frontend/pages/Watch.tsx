@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Comments } from '../components/Comments';
 import { ReportButton } from '../components/ReportButton';
 import { TipButton } from '../components/TipButton';
+import { TipsList } from '../components/TipsList';
 import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
@@ -728,6 +729,7 @@ export function Watch(): JSX.Element {
           </ul>
         </section>
       ) : null}
+      {id ? <TipsList videoId={id} /> : null}
       {id ? <Comments videoId={id} /> : null}
     </main>
   );

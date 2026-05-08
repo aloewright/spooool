@@ -417,6 +417,33 @@ export async function handleStripeWebhook(env: TipsEnv, req: Request): Promise<R
         .bind(meta.tip_id)
         .run();
     }
+  } else if (event.type === 'payment_intent.payment_failed') {
+    // Sync card failures (3DS abort, network insufficient_funds) come through
+    // here without a corresponding session.* event. Use payment_intent.metadata
+    // (set by checkout.sessions.create above) to find the row.
+    const intent = event.data.object as Stripe.PaymentIntent;
+    const meta = parseStripeMetadata(intent.metadata);
+    if (meta) {
+      await env.DB.prepare(`UPDATE tips SET status = 'failed' WHERE id = ? AND status = 'pending'`)
+        .bind(meta.tip_id)
+        .run();
+    }
+  } else if (event.type === 'charge.refunded') {
+    // Refunds are issued asynchronously by support / fraud reversal. We mark
+    // the tip refunded so the public per-video tip list drops it; the row
+    // stays for audit. Both full and partial refunds set this state — finer
+    // distinctions can be reconstructed from Stripe.
+    const charge = event.data.object as Stripe.Charge;
+    const intentId =
+      typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
+    if (intentId) {
+      await env.DB.prepare(
+        `UPDATE tips SET status = 'refunded'
+         WHERE stripe_payment_intent = ? AND status = 'paid'`,
+      )
+        .bind(intentId)
+        .run();
+    }
   } else if (event.type === 'account.updated') {
     const acct = event.data.object as Stripe.Account;
     const userId = acct.metadata?.user_id;

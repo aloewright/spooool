@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   computePlatformFee,
+  handleStripeWebhook,
   MAX_MESSAGE_LENGTH,
   MAX_TIP_CENTS,
   MIN_TIP_CENTS,
   parseStripeMetadata,
   validateTipInput,
+  type TipsEnv,
 } from './tips';
 
 describe('computePlatformFee', () => {
@@ -85,4 +87,53 @@ describe('parseStripeMetadata', () => {
       parseStripeMetadata({ tip_id: 't', video_id: 'v', creator_user_id: 'u', extra: 'ignored' }),
     ).toEqual({ tip_id: 't', video_id: 'v', creator_user_id: 'u' });
   });
+});
+
+describe('handleStripeWebhook', () => {
+  // 503 paths don't require a signed body, so we can exercise them without
+  // pulling in the Stripe signing helper.
+  it('returns 503 when STRIPE_SECRET_KEY is unset', async () => {
+    const env: TipsEnv = { DB: {} as D1Database };
+    const req = new Request('https://x.test/api/webhooks/stripe', {
+      method: 'POST',
+      body: '{}',
+      headers: { 'stripe-signature': 'sig' },
+    });
+    const res = await handleStripeWebhook(env, req);
+    expect(res.status).toBe(503);
+  });
+
+  it('returns 503 when STRIPE_WEBHOOK_SECRET is unset', async () => {
+    const env: TipsEnv = {
+      DB: {} as D1Database,
+      STRIPE_SECRET_KEY: 'sk_test_x',
+    };
+    const req = new Request('https://x.test/api/webhooks/stripe', {
+      method: 'POST',
+      body: '{}',
+      headers: { 'stripe-signature': 'sig' },
+    });
+    const res = await handleStripeWebhook(env, req);
+    expect(res.status).toBe(503);
+  });
+
+  it('returns 400 when the stripe-signature header is missing', async () => {
+    const env: TipsEnv = {
+      DB: {} as D1Database,
+      STRIPE_SECRET_KEY: 'sk_test_x',
+      STRIPE_WEBHOOK_SECRET: 'whsec_x',
+    };
+    const req = new Request('https://x.test/api/webhooks/stripe', {
+      method: 'POST',
+      body: '{}',
+    });
+    const res = await handleStripeWebhook(env, req);
+    expect(res.status).toBe(400);
+  });
+
+  // Integration of the *signed* path is exercised via the shared sign/verify
+  // helper in stream-webhook.test.ts; replicating it here would couple the
+  // test to Stripe's internal signing format. Route-level coverage of the
+  // unsigned failure modes is enough — the handler delegates to
+  // stripe.webhooks.constructEventAsync once it gets past these checks.
 });

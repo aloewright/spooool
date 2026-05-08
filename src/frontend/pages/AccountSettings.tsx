@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
+import { PayoutsCard } from '../components/PayoutsCard';
 
 interface AccountInfo {
   id: string;
@@ -220,6 +221,8 @@ export function AccountSettings(): JSX.Element {
           </button>
         </form>
       </section>
+
+      <PayoutsCard />
 
       <ActiveSessions />
 

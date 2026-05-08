@@ -531,6 +531,11 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          {/* ALO-162: Stripe Connect onboarding return/refresh URL.
+              tips.ts builds account links pointing at /account/payouts; we
+              fold that into the existing settings page so creators don't
+              hit a 404 (or be punted to "/" by the catch-all) on return. */}
+          <Route path="/account/payouts" element={<Navigate to="/settings/account" replace />} />
           <Route path="/legal/dmca" element={<DmcaForm />} />
           <Route
             path="/legal/dmca/counter"

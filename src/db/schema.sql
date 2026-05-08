@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS videos (
   r2_key TEXT NOT NULL,
   bytes INTEGER NOT NULL DEFAULT 0,
   stream_video_id TEXT,
-  status TEXT NOT NULL DEFAULT 'uploaded',
+  status TEXT NOT NULL DEFAULT 'queued',
   view_count INTEGER NOT NULL DEFAULT 0,
   hidden_at TEXT,
   dmca_status TEXT,

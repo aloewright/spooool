@@ -89,9 +89,9 @@ export function Watch(): JSX.Element {
   const playbackSource: PlaybackSource = useMemo(() => {
     if (!video) return null;
     // Use Stream HLS only when transcoding is finished — until then the
-    // manifest 404s. R2 fallback covers the in-between states (uploaded,
-    // pending_encode, encoding, stream_submitted) and the case where Stream
-    // isn't configured at all.
+    // manifest 404s. R2 fallback covers the in-between canonical states
+    // (uploading, queued, encoding) and the case where Stream isn't
+    // configured at all.
     if (video.stream_video_id && video.status === 'ready') {
       return {
         src: `https://videodelivery.net/${video.stream_video_id}/manifest/video.m3u8`,

@@ -223,6 +223,31 @@ export function AccountSettings(): JSX.Element {
 
       <ActiveSessions />
 
+      <section className="stack-sm" aria-label="Earnings and tax forms">
+        <span className="ds-label">Earnings & tax forms</span>
+        {/* LEGAL-REVIEW: confirm copy with counsel before enabling for partner-program creators. */}
+        <p className="ds-meta">
+          Spooool's creator payouts run through Polar, our Merchant of Record. Polar collects and
+          remits sales tax / VAT on purchases, and issues payout statements and year-end tax forms
+          (W-9 / W-8, 1099-NEC where applicable, EU self-billing invoices) for partner-program
+          creators. Spooool will surface your year-to-date earnings here once the partner
+          integration is live; in the meantime, find your records in Polar.
+        </p>
+        <p className="ds-meta">
+          <a href="https://docs.polar.sh/merchant-of-record/tax" target="_blank" rel="noreferrer">
+            Polar tax documentation
+          </a>
+          {' · '}
+          <a
+            href="https://docs.polar.sh/features/partner-payouts"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Partner payouts
+          </a>
+        </p>
+      </section>
+
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">
           <span className="ds-label">Delete account</span>

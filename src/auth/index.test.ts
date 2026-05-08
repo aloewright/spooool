@@ -4,6 +4,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // password-reset and verification callbacks are wired and forward to Resend.
 type CapturedOptions = {
   appName?: string;
+  socialProviders?: Record<string, { clientId: string; clientSecret: string }>;
+  account?: {
+    accountLinking?: {
+      enabled?: boolean;
+      trustedProviders?: string[];
+    };
+  };
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
@@ -105,6 +112,41 @@ describe('createAuth', () => {
         token: 't',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('registers Google + GitHub social providers when env creds are present', () => {
+    createAuth({
+      DB: {} as D1Database,
+      GOOGLE_CLIENT_ID: 'g-id',
+      GOOGLE_CLIENT_SECRET: 'g-secret',
+      GITHUB_CLIENT_ID: 'gh-id',
+      GITHUB_CLIENT_SECRET: 'gh-secret',
+    });
+    expect(captured.options?.socialProviders).toEqual({
+      google: { clientId: 'g-id', clientSecret: 'g-secret' },
+      github: { clientId: 'gh-id', clientSecret: 'gh-secret' },
+    });
+    expect(captured.options?.account?.accountLinking?.enabled).toBe(true);
+    expect(captured.options?.account?.accountLinking?.trustedProviders).toEqual([
+      'google',
+      'github',
+    ]);
+  });
+
+  it('omits social providers when creds are missing', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(captured.options?.socialProviders).toEqual({});
+  });
+
+  it('registers only the providers that have both id and secret', () => {
+    createAuth({
+      DB: {} as D1Database,
+      GOOGLE_CLIENT_ID: 'g-id',
+      GOOGLE_CLIENT_SECRET: 'g-secret',
+      GITHUB_CLIENT_ID: 'gh-id',
+      // missing GITHUB_CLIENT_SECRET
+    });
+    expect(Object.keys(captured.options?.socialProviders ?? {})).toEqual(['google']);
   });
 
   it('configures email verification with sendOnSignUp + auto sign-in', () => {

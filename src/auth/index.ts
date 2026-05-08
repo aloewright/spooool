@@ -5,9 +5,32 @@ export type AuthEnv = ResendEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
 };
 
 export function createAuth(env: AuthEnv) {
+  // ALO-130: wire Google + GitHub social providers. Each provider is only
+  // registered when both id+secret are present so unconfigured environments
+  // (preview, local-without-creds) don't break startup. `accountLinking`
+  // links a social account to an existing user when the verified email
+  // matches — the providers below are trusted to return a verified email.
+  const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+    socialProviders.google = {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+    };
+  }
+  if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
+    socialProviders.github = {
+      clientId: env.GITHUB_CLIENT_ID,
+      clientSecret: env.GITHUB_CLIENT_SECRET,
+    };
+  }
+
   return betterAuth({
     appName: 'spooool',
     database: env.DB,
@@ -50,6 +73,13 @@ export function createAuth(env: AuthEnv) {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
       cookieCache: { enabled: true, maxAge: 60 * 5 },
+    },
+    socialProviders,
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: ['google', 'github'],
+      },
     },
     trustedOrigins: [
       'http://localhost:5173',

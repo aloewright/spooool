@@ -10,6 +10,7 @@ import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
 import { healthRoutes } from './health';
+import { statusRoutes } from './status';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
@@ -87,6 +88,7 @@ app.post('/api/webhooks/stream', handleStreamWebhook());
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
 app.route('/', healthRoutes);
+app.route('/', statusRoutes);
 
 app.all('/api/auth/*', async (c) => {
   // ALO-168: per-IP rate limit on state-changing auth calls (sign-in, sign-up,

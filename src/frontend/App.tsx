@@ -31,6 +31,7 @@ const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ defa
 const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
 const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
+const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
 const ForgotPassword = lazy(() =>
   import('./pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
 );
@@ -452,6 +453,7 @@ function Home(): JSX.Element {
       <Link to="/legal/tos">Terms of Service</Link>
       <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/legal/dmca">DMCA</Link>
+      <Link to="/status">Status</Link>
     </footer>
     </>
   );
@@ -543,6 +545,7 @@ export default function App(): JSX.Element {
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
+          <Route path="/status" element={<Status />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

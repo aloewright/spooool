@@ -1,10 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import {
+  MATERIALIZED_TRENDING_KEY,
   TRENDING_CACHE_TTL_SECONDS,
+  TRENDING_MATERIALIZE_INTERVAL_MINUTES,
   bumpTrendingCacheVersion,
+  computeTrendingScore,
+  getMaterializedTrending,
   getTrendingCacheVersion,
+  materializeTrending,
+  rankTrending,
+  type TrendingVideoRow,
   trendingCacheKey,
 } from './trending-cache';
+
+function row(overrides: Partial<TrendingVideoRow> = {}): TrendingVideoRow {
+  return {
+    id: 'v1',
+    user_id: 'u1',
+    title: 't',
+    description: '',
+    stream_video_id: null,
+    thumbnail_url: null,
+    view_count: 0,
+    created_at: new Date().toISOString(),
+    channel_name: null,
+    recent_views: 0,
+    ...overrides,
+  };
+}
 
 function makeFakeKV(initial: Record<string, string> = {}): KVNamespace {
   const store = new Map<string, string>(Object.entries(initial));
@@ -94,5 +117,99 @@ describe('bumpTrendingCacheVersion', () => {
 describe('TRENDING_CACHE_TTL_SECONDS', () => {
   it('matches the documented 5-minute window', () => {
     expect(TRENDING_CACHE_TTL_SECONDS).toBe(300);
+  });
+});
+
+describe('computeTrendingScore', () => {
+  const NOW = Date.parse('2026-05-08T12:00:00Z');
+
+  it('rewards recent views over old ones at equal counts', () => {
+    const fresh = computeTrendingScore(10, '2026-05-08T11:00:00Z', NOW);
+    const old = computeTrendingScore(10, '2026-04-08T11:00:00Z', NOW);
+    expect(fresh).toBeGreaterThan(old);
+  });
+
+  it('rewards more views at the same age', () => {
+    const more = computeTrendingScore(100, '2026-05-08T00:00:00Z', NOW);
+    const fewer = computeTrendingScore(10, '2026-05-08T00:00:00Z', NOW);
+    expect(more).toBeGreaterThan(fewer);
+  });
+
+  it('returns 0 for an unparseable timestamp instead of NaN', () => {
+    expect(computeTrendingScore(5, 'not a date', NOW)).toBe(0);
+  });
+});
+
+describe('rankTrending', () => {
+  const NOW = Date.parse('2026-05-08T12:00:00Z');
+
+  it('sorts by views × recency, fresher beats older when views match', () => {
+    const ranked = rankTrending(
+      [
+        row({ id: 'old', recent_views: 50, created_at: '2026-04-01T00:00:00Z' }),
+        row({ id: 'new', recent_views: 50, created_at: '2026-05-08T06:00:00Z' }),
+      ],
+      2,
+      NOW,
+    );
+    expect(ranked[0].id).toBe('new');
+  });
+
+  it('respects the limit', () => {
+    const rows = Array.from({ length: 10 }, (_, i) =>
+      row({ id: `v${i}`, recent_views: i, created_at: '2026-05-08T00:00:00Z' }),
+    );
+    expect(rankTrending(rows, 3, NOW)).toHaveLength(3);
+  });
+});
+
+describe('materializeTrending', () => {
+  function makeFakeKV(initial: Record<string, string> = {}): KVNamespace {
+    const store = new Map<string, string>(Object.entries(initial));
+    return {
+      get: async (key: string, type?: string) => {
+        const v = store.get(key) ?? null;
+        if (v && type === 'json') return JSON.parse(v);
+        return v;
+      },
+      put: async (key: string, value: string) => {
+        store.set(key, value);
+      },
+      delete: async (key: string) => {
+        store.delete(key);
+      },
+    } as unknown as KVNamespace;
+  }
+
+  function makeFakeDB(rows: TrendingVideoRow[]): D1Database {
+    return {
+      prepare: () => ({
+        bind: () => ({
+          all: async () => ({ results: rows }),
+        }),
+      }),
+    } as unknown as D1Database;
+  }
+
+  it('writes the ranked list under the materialized key', async () => {
+    const db = makeFakeDB([
+      row({ id: 'a', recent_views: 5, created_at: '2026-05-08T00:00:00Z' }),
+      row({ id: 'b', recent_views: 50, created_at: '2026-05-08T00:00:00Z' }),
+    ]);
+    const cache = makeFakeKV();
+    const { count } = await materializeTrending({ DB: db, CACHE: cache });
+    expect(count).toBe(2);
+    const stored = await getMaterializedTrending(cache);
+    expect(stored).not.toBeNull();
+    expect(stored?.[0]?.id).toBe('b');
+    expect(stored?.[0]).toHaveProperty('score');
+  });
+
+  it('exposes a 10-minute cadence constant in sync with wrangler.toml', () => {
+    expect(TRENDING_MATERIALIZE_INTERVAL_MINUTES).toBe(10);
+  });
+
+  it('writes under a stable key independent of the version cache buster', () => {
+    expect(MATERIALIZED_TRENDING_KEY).toBe('trending:materialized');
   });
 });

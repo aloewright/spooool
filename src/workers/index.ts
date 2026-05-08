@@ -29,6 +29,7 @@ import { rumRoutes } from './rum';
 import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
+import { materializeTrending } from './trending-cache';
 import { handleStreamWebhook } from './stream-webhook';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
@@ -182,6 +183,16 @@ const workerHandlers = {
     ctx.waitUntil(
       (async () => {
         try {
+          // ALO-149: every 10-min tick rebuilds the materialized trending feed.
+          // The daily sweeps only need to run on the 02:00 UTC tick, so gate
+          // them on the cron expression — checking `controller.cron` lets one
+          // scheduled handler service multiple crons without redundant work.
+          if (controller.cron === '*/10 * * * *') {
+            const result = await materializeTrending(env);
+            console.log('[trending-materialize]', { cron: controller.cron, ...result });
+            return;
+          }
+
           const stats = await runDeletionSweep(env);
           if (stats.length > 0) {
             console.log('[deletion-sweep]', { cron: controller.cron, deleted: stats });

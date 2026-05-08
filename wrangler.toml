@@ -101,7 +101,7 @@ new_classes = ["RateLimiterDO"]
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132). See src/workers/account.ts -> runDeletionSweep.
 [triggers]
-crons = ["0 2 * * *"]
+crons = ["0 2 * * *", "*/10 * * * *"]
 
 [vars]
 # Comma-separated origin allow-list for CSRF protection on /api/*. Same-origin

@@ -19,7 +19,11 @@ import { getStorageUsage, hasRoomFor } from './storage-quota';
 import {
   TRENDING_CACHE_TTL_SECONDS,
   bumpTrendingCacheVersion,
+  fetchTrendingCandidates,
+  getMaterializedTrending,
   getTrendingCacheVersion,
+  rankTrending,
+  TRENDING_MATERIALIZE_SIZE,
   trendingCacheKey,
 } from './trending-cache';
 
@@ -92,35 +96,31 @@ videoRoutes.get('/api/videos/trending', async (c) => {
   }
 
   const { limit } = parsed.data;
+
+  // Cron-materialized feed is the hot path (ALO-149). Slice covers any limit
+  // the schema allows because the materialized array is sized to the max.
+  const materialized = await getMaterializedTrending(c.env.CACHE);
+  if (materialized && materialized.length > 0) {
+    return c.json({ limit, videos: materialized.slice(0, limit), cached: true, source: 'materialized' });
+  }
+
+  // Cold-start / missed-tick fallback: per-limit versioned cache, then D1.
   const version = await getTrendingCacheVersion(c.env.CACHE);
   const cacheKey = trendingCacheKey(version, limit);
 
   const cached = await c.env.CACHE.get(cacheKey, 'json');
   if (cached) {
-    return c.json({ limit, videos: cached, cached: true });
+    return c.json({ limit, videos: cached, cached: true, source: 'versioned' });
   }
 
-  const { results } = await c.env.DB.prepare(
-    `SELECT v.id, v.user_id, v.title, v.description, v.stream_video_id, v.thumbnail_url,
-            v.view_count, v.created_at, u.name AS channel_name,
-            COUNT(views.id) AS recent_views
-     FROM videos v
-     LEFT JOIN user u ON u.id = v.user_id
-     LEFT JOIN views ON views.video_id = v.id
-       AND views.viewed_at >= datetime('now', '-7 days')
-     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL
-     GROUP BY v.id
-     ORDER BY recent_views DESC, v.view_count DESC, v.created_at DESC
-     LIMIT ?`,
-  )
-    .bind(limit)
-    .all();
+  const candidates = await fetchTrendingCandidates(c.env.DB, TRENDING_MATERIALIZE_SIZE);
+  const ranked = rankTrending(candidates, limit);
 
-  await c.env.CACHE.put(cacheKey, JSON.stringify(results), {
+  await c.env.CACHE.put(cacheKey, JSON.stringify(ranked), {
     expirationTtl: TRENDING_CACHE_TTL_SECONDS,
   });
 
-  return c.json({ limit, videos: results, cached: false });
+  return c.json({ limit, videos: ranked, cached: false, source: 'd1' });
 });
 
 videoRoutes.get('/api/videos', async (c) => {

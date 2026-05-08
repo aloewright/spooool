@@ -300,6 +300,79 @@ describe('handleStreamWebhook', () => {
 
   // ALO-138: a stale `inprogress` webhook arriving after the row already
   // reached `ready` must not pull the lifecycle backwards.
+  it('persists thumbnail_candidates JSON on ready, derived from duration', async () => {
+    const time = 1_700_000_000;
+    const app = buildApp(time);
+    const { rows, binding } = makeFakeDB([
+      {
+        id: 'v1',
+        stream_video_id: 'abc',
+        status: 'encoding',
+        playback_hls_url: null,
+        thumbnail_url: null,
+        thumbnail_candidates: null,
+        updated_at: 0,
+      },
+    ]);
+
+    const body = JSON.stringify({
+      uid: 'abc',
+      status: { state: 'ready' },
+      duration: 100,
+    });
+
+    const res = await postWebhook(app, { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET }, body, time, SECRET);
+    expect(res.status).toBe(200);
+    expect(rows[0].thumbnail_candidates).not.toBeNull();
+    const parsed = JSON.parse(rows[0].thumbnail_candidates as string) as string[];
+    expect(parsed).toHaveLength(3);
+    expect(parsed[0]).toContain('time=10s');
+    expect(parsed[2]).toContain('time=90s');
+  });
+
+  it('does not write thumbnail_candidates on non-ready states', async () => {
+    const time = 1_700_000_000;
+    const app = buildApp(time);
+    const { rows, binding } = makeFakeDB([
+      {
+        id: 'v1',
+        stream_video_id: 'abc',
+        status: 'encoding',
+        playback_hls_url: null,
+        thumbnail_url: null,
+        thumbnail_candidates: null,
+        updated_at: 0,
+      },
+    ]);
+    const body = JSON.stringify({ uid: 'abc', status: { state: 'inprogress' } });
+    const res = await postWebhook(app, { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET }, body, time, SECRET);
+    expect(res.status).toBe(200);
+    expect(rows[0].thumbnail_candidates).toBeNull();
+  });
+
+  it('rejects malformed JSON with 400', async () => {
+    const time = 1_700_000_000;
+    const app = buildApp(time);
+    const { binding } = makeFakeDB();
+    const res = await postWebhook(
+      app,
+      { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET },
+      'not-json',
+      time,
+      SECRET,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects payloads missing uid with 400', async () => {
+    const time = 1_700_000_000;
+    const app = buildApp(time);
+    const { binding } = makeFakeDB();
+    const body = JSON.stringify({ status: { state: 'ready' } });
+    const res = await postWebhook(app, { DB: binding, CF_STREAM_WEBHOOK_SECRET: SECRET }, body, time, SECRET);
+    expect(res.status).toBe(400);
+  });
+
   it('refuses to drag a ready row back to encoding', async () => {
     const time = 1_700_000_000;
     const app = buildApp(time);

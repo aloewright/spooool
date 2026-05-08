@@ -8,6 +8,7 @@ import { handleEncodingMessage } from './encoding';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
+import { costRoutes, runCostSnapshot, type CostMonitorEnv } from './cost-monitor';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
 import { healthRoutes } from './health';
 import { lifecycleRoutes } from './lifecycle';
@@ -44,7 +45,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & CostMonitorEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -154,6 +155,7 @@ app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
+app.route('/', costRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.
@@ -189,6 +191,19 @@ const workerHandlers = {
           const restored = await runDmcaRestoreSweep(env);
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
+          }
+          // ALO-176: daily cost snapshot + threshold alert.
+          const cost = await runCostSnapshot(env);
+          if (cost.ok) {
+            console.log('[cost-snapshot]', {
+              cron: controller.cron,
+              date: cost.snapshot.snapshotDate,
+              totalUsdCents: cost.snapshot.totalUsdCents,
+              alerted: cost.alerted,
+              alertSkippedReason: cost.alertSkippedReason,
+            });
+          } else {
+            console.error('[cost-snapshot] failed', { error: cost.error });
           }
         } catch (err) {
           console.error('scheduled sweep failed', {

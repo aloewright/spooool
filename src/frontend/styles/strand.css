@@ -435,6 +435,14 @@ code, kbd, pre, samp {
 
 .btn--sm { height: 28px; padding: 0 10px; font-size: var(--text-sm); border-radius: var(--radius-md); }
 
+.btn--lg {
+  height: 48px;
+  padding: 0 22px;
+  font-size: var(--text-lg);
+  border-radius: var(--radius-pill);
+  font-weight: 700;
+}
+
 /* ── Input / Field ─────────────────────────────────────────── */
 .field {
   display: flex;
@@ -546,3 +554,183 @@ input[type="file"].input {
 
 .fade-up { animation: fade-up 0.25s var(--ease-spring) both; }
 .fade-in { animation: fade-in 0.2s var(--ease-smooth) both; }
+
+/* ── Marketing landing (ALO-177) ───────────────────────────── */
+.landing {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-6) var(--space-12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+}
+
+.landing__hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-4);
+  padding: var(--space-12) 0 var(--space-8);
+}
+
+.landing__hero-title {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: clamp(36px, 6vw, 64px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  margin: 0;
+  max-width: 18ch;
+}
+
+.landing__hero-emphasis {
+  font-style: italic;
+  font-weight: 400;
+  color: var(--accent-blue);
+}
+
+.landing__hero-lede {
+  font-size: var(--text-lg);
+  line-height: 1.55;
+  color: var(--muted-foreground);
+  max-width: 56ch;
+  margin: 0 auto;
+}
+
+.landing__hero-cta {
+  display: flex;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+
+.landing__hero-foot {
+  margin-top: var(--space-2);
+}
+
+.landing__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.landing__section-lede {
+  margin: 0;
+  max-width: 56ch;
+}
+
+.landing__features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-4);
+}
+
+.landing__feature {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.landing__feature p {
+  color: var(--muted-foreground);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+
+.landing__sample {
+  display: block;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid color-mix(in oklch, var(--border), transparent 30%);
+  box-shadow: var(--shadow-card);
+  transition:
+    transform 200ms var(--ease-spring),
+    box-shadow 200ms var(--ease-spring);
+}
+
+.landing__sample:hover,
+.landing__sample:focus-visible {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-float);
+  outline: none;
+}
+
+.landing__sample-frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background:
+    linear-gradient(135deg,
+      color-mix(in oklch, var(--accent), var(--accent-blue) 35%),
+      color-mix(in oklch, var(--card), var(--border) 30%));
+  background-size: cover;
+  background-position: center;
+}
+
+.landing__sample-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, transparent 40%, oklch(0 0 0 / 0.35) 100%);
+}
+
+.landing__sample-play {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 9999px;
+  background: oklch(1 0 0 / 0.92);
+  color: oklch(0.12 0 0);
+  box-shadow: var(--shadow-float);
+}
+
+.landing__sample-play svg {
+  width: 32px;
+  height: 32px;
+}
+
+.landing__sample-meta {
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+
+.landing__sample-title {
+  font-weight: 700;
+  font-size: var(--text-lg);
+  color: var(--foreground);
+}
+
+.landing__sample-fallback {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklch, var(--card), var(--border) 25%);
+}
+
+.landing__cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-3);
+  padding: var(--space-12) var(--space-6);
+  border-radius: var(--radius-2xl);
+  background: color-mix(in oklch, var(--card), var(--accent-blue) 6%);
+  border: 1px solid color-mix(in oklch, var(--border), transparent 30%);
+}
+
+.landing__footer {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border);
+  margin-top: var(--space-4);
+}

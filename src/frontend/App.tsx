@@ -37,6 +37,10 @@ const ForgotPassword = lazy(() =>
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
+// ALO-177: anonymous visitors see the marketing landing page in place of
+// the trending/history Home. Lazy so the eager bundle stays shaped around
+// the signed-in surface.
+const Landing = lazy(() => import('./pages/Landing').then((m) => ({ default: m.Landing })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -268,177 +272,21 @@ function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
   );
 }
 
-// ALO-177: marketing landing surface for anonymous visitors at spooool.com.
-// Inline (not lazy) so the hero text renders in the initial JS payload — keeps
-// LCP < 1.5s on Pages without an extra round-trip for the chunk.
-function Landing(): JSX.Element {
-  const [playing, setPlaying] = useState(false);
-  return (
-    <main className="app-main app-main--narrow stack-lg fade-in">
-      <section
-        className="stack-sm"
-        style={{
-          alignItems: 'center',
-          textAlign: 'center',
-          paddingTop: 'var(--space-8)',
-          paddingBottom: 'var(--space-4)',
-        }}
-      >
-        <Wordmark />
-        <h1 className="ds-h1" style={{ maxWidth: 720, margin: '0 auto' }}>
-          A video host that respects your time.
-        </h1>
-        <p className="ds-lede" style={{ maxWidth: 560, margin: '0 auto' }}>
-          Upload, stream, share — no friction, no dark patterns, no algorithmic
-          rabbit holes. Just your videos, hosted at the edge.
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            gap: 'var(--space-2)',
-            justifyContent: 'center',
-            paddingTop: 'var(--space-2)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <Link to="/signup">
-            <button type="button" className="btn">Get started — it's free</button>
-          </Link>
-          <Link to="/login">
-            <button type="button" className="btn btn--ghost">Sign in</button>
-          </Link>
-        </div>
-      </section>
-
-      <section className="stack-sm" aria-label="Features">
-        <h2 className="ds-h3" style={{ margin: 0, textAlign: 'center' }}>
-          Built for creators who want their time back
-        </h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {[
-            {
-              title: 'Edge-fast playback',
-              body: 'Cloudflare Stream + HLS at every PoP. Sub-second start time, anywhere.',
-            },
-            {
-              title: 'Zero-friction upload',
-              body: 'Drop in MP4, WebM, MOV, or MKV. We transcode and ship the link.',
-            },
-            {
-              title: 'Calm by default',
-              body: 'No autoplay traps, no infinite recommendations. You set the pace.',
-            },
-            {
-              title: 'Yours to keep',
-              body: 'Own your channel, export your data, take it with you whenever.',
-            },
-          ].map((f) => (
-            <div key={f.title} className="suggestion-card">
-              <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{f.title}</div>
-              <div className="ds-meta" style={{ marginTop: 4 }}>{f.body}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="stack-sm" aria-label="Sample player">
-        <h2 className="ds-h3" style={{ margin: 0, textAlign: 'center' }}>See it in motion</h2>
-        <div
-          style={{
-            position: 'relative',
-            width: '100%',
-            aspectRatio: '16 / 9',
-            borderRadius: 'var(--radius)',
-            overflow: 'hidden',
-            background: 'var(--muted)',
-            border: '1px solid var(--border)',
-          }}
-        >
-          {playing ? (
-            <iframe
-              title="Sample video"
-              src="https://customer-f33zs165nr7gyfy4.cloudflarestream.com/6b9e68b07dfee8cc2d116e4c51d6a957/iframe?autoplay=true&muted=true"
-              loading="lazy"
-              allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-              allowFullScreen
-              style={{ border: 'none', position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setPlaying(true)}
-              aria-label="Play sample video"
-              style={{
-                position: 'absolute',
-                inset: 0,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'transparent',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--foreground)',
-                fontSize: 'var(--text-base)',
-                fontWeight: 700,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 64,
-                  height: 64,
-                  borderRadius: '50%',
-                  background: 'var(--primary)',
-                  color: 'var(--primary-foreground)',
-                  marginRight: 'var(--space-2)',
-                }}
-              >
-                ▶
-              </span>
-              Play sample
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section
-        className="stack-sm"
-        style={{ alignItems: 'center', textAlign: 'center', padding: 'var(--space-6) 0' }}
-      >
-        <h2 className="ds-h3" style={{ margin: 0 }}>Ready to upload?</h2>
-        <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
-          Sign up takes less time than this paragraph.
-        </p>
-        <div style={{ display: 'flex', gap: 'var(--space-2)', justifyContent: 'center' }}>
-          <Link to="/signup">
-            <button type="button" className="btn">Create your channel</button>
-          </Link>
-        </div>
-      </section>
-    </main>
-  );
-}
-
 function Home(): JSX.Element {
-  const { data: session } = useSession();
+  const { data: session, isPending } = useSession();
   const [trending, setTrending] = useState<TrendingVideo[] | null>(null);
   const [trendingError, setTrendingError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[] | null>(null);
   const [clearing, setClearing] = useState(false);
 
+  // ALO-177: anonymous visitors see the marketing landing instead of the
+  // trending feed. We still wait for the session to resolve so a logged-in
+  // user doesn't briefly see the marketing surface before their personal
+  // home renders.
+  const showLanding = !isPending && !session;
+
   useEffect(() => {
-    if (!session?.user) return undefined;
+    if (showLanding) return undefined;
     let cancelled = false;
     void fetch('/api/videos/trending?limit=12')
       .then(async (response) => {
@@ -460,7 +308,7 @@ function Home(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [session?.user]);
+  }, [showLanding]);
 
   // ALO-145: load the signed-in user's recent watch history. Skipped when
   // anonymous so the unauth Home stays a single round-trip.
@@ -499,26 +347,8 @@ function Home(): JSX.Element {
     }
   };
 
-  if (!session?.user) {
-    return (
-      <>
-        <Landing />
-        <footer
-          className="app-footer ds-meta"
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            gap: 'var(--space-4)',
-            padding: 'var(--space-6) var(--space-4)',
-            borderTop: '1px solid var(--border)',
-          }}
-        >
-          <Link to="/legal/tos">Terms of Service</Link>
-          <Link to="/legal/privacy">Privacy Policy</Link>
-          <Link to="/legal/dmca">DMCA</Link>
-        </footer>
-      </>
-    );
+  if (showLanding) {
+    return <Landing />;
   }
 
   return (

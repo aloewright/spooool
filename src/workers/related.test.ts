@@ -51,7 +51,9 @@ interface FakeDBResult {
 // Hand-rolled D1 stub keyed on SQL fragments the route actually issues. New
 // queries must be added explicitly so a schema change can never silently fall
 // through.
-function fakeDB(videos: VideoRow[]): FakeDBResult {
+type CoWatchPair = { user_id: string; video_id: string };
+
+function fakeDB(videos: VideoRow[], history: CoWatchPair[] = []): FakeDBResult {
   const prepares: string[] = [];
   const binds: unknown[][] = [];
 
@@ -97,6 +99,33 @@ function fakeDB(videos: VideoRow[]): FakeDBResult {
             .sort((a, b) => b.created_at.localeCompare(a.created_at))
             .slice(0, limit)
             .map(asProjected);
+          return { results: out as T[] };
+        }
+        if (sql.includes('FROM watch_history wh1')) {
+          // args: sourceId, ...seenIds, remaining
+          const [sourceId, ...rest] = args as [string, ...unknown[]];
+          const remaining = rest[rest.length - 1] as number;
+          const seen = rest.slice(0, -1) as string[];
+          // Find users who watched the source.
+          const cowatchers = history
+            .filter((h) => h.video_id === sourceId)
+            .map((h) => h.user_id);
+          const counts = new Map<string, number>();
+          for (const h of history) {
+            if (h.video_id === sourceId) continue;
+            if (!cowatchers.includes(h.user_id)) continue;
+            counts.set(h.video_id, (counts.get(h.video_id) ?? 0) + 1);
+          }
+          const out = [...counts.entries()]
+            .map(([vid, count]) => {
+              const v = videos.find((x) => x.id === vid);
+              return v ? { v, count } : null;
+            })
+            .filter((e): e is { v: VideoRow; count: number } => e !== null)
+            .filter(({ v }) => isViewable(v) && !seen.includes(v.id))
+            .sort((a, b) => b.count - a.count || b.v.view_count - a.v.view_count)
+            .slice(0, remaining)
+            .map(({ v, count }) => ({ ...asProjected(v), cowatch_count: count }));
           return { results: out as T[] };
         }
         if (sql.includes('FROM videos_fts')) {
@@ -227,6 +256,32 @@ describe('GET /api/videos/:id/related', () => {
     expect(ids[0]).toBe('b');
     expect(ids[1]).toBe('a');
     expect(ids).not.toContain('src');
+  });
+
+  it('surfaces co-watch picks ahead of FTS when watch_history overlaps', async () => {
+    const videos = [
+      row({ id: 'src', user_id: 'u1', title: 'unique source title' }),
+      // Same channel exhausted (none).
+      row({ id: 'co1', user_id: 'u9', title: 'totally different', view_count: 5 }),
+      row({ id: 'co2', user_id: 'u9', title: 'also different', view_count: 5 }),
+      row({ id: 'fts1', user_id: 'u9', title: 'unique', view_count: 1000 }),
+    ];
+    // Two users watched src + co1; one user also watched co2.
+    const history: CoWatchPair[] = [
+      { user_id: 'a', video_id: 'src' },
+      { user_id: 'a', video_id: 'co1' },
+      { user_id: 'a', video_id: 'co2' },
+      { user_id: 'b', video_id: 'src' },
+      { user_id: 'b', video_id: 'co1' },
+    ];
+    const { db, prepares } = fakeDB(videos, history);
+    const res = await buildApp({ DB: db, CACHE: kv })('/api/videos/src/related?limit=2');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { videos: { id: string }[] };
+    const ids = body.videos.map((v) => v.id);
+    expect(ids[0]).toBe('co1');
+    expect(ids).toContain('co2');
+    expect(prepares.some((q) => q.includes('FROM watch_history wh1'))).toBe(true);
   });
 
   it('falls through to FTS5 then trending top-up to fill the limit', async () => {

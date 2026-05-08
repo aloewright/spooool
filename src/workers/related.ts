@@ -3,10 +3,13 @@
 //
 // Strategy (in order, deduped, capped at `limit`):
 //   1. Same channel — most recent uploads from the source video's user_id.
-//   2. FTS5 over the source video's title — matches similar titles across
+//   2. Co-watch (ALO-123) — videos other viewers also watched. Joins
+//      watch_history to itself on user_id; ranks by co-occurrence count.
+//      Empty for videos no one's watched yet — that's fine, we fall through.
+//   3. FTS5 over the source video's title — matches similar titles across
 //      the catalog; reuses search.ts/buildFtsQuery so the syntax sanitisation
 //      stays in one place.
-//   3. Top-up — global most-viewed-then-newest, used when the first two
+//   4. Top-up — global most-viewed-then-newest, used when the first three
 //      passes don't fill the slot.
 //
 // Hidden / soft-deleted / DMCA-disabled / non-ready rows are filtered at
@@ -108,6 +111,37 @@ relatedRoutes.get('/api/videos/:id/related', async (c) => {
     seen.add(v.id);
     out.push(v);
     if (out.length >= limit) break;
+  }
+
+  if (out.length < limit) {
+    const remaining = limit - out.length;
+    const seenList = Array.from(seen);
+    const cowatch = await c.env.DB.prepare(
+      `SELECT v.id, v.title, v.thumbnail_url, v.view_count, v.created_at,
+              u.name AS channel_name, u.username AS channel_username,
+              COUNT(*) AS cowatch_count
+       FROM watch_history wh1
+       JOIN watch_history wh2 ON wh2.user_id = wh1.user_id AND wh2.video_id != wh1.video_id
+       JOIN videos v ON v.id = wh2.video_id
+       LEFT JOIN user u ON u.id = v.user_id
+       WHERE wh1.video_id = ?
+         AND v.deleted_at IS NULL AND v.hidden_at IS NULL
+         AND v.status = 'ready'
+         AND (v.dmca_status IS NULL OR v.dmca_status != 'disabled')
+         AND v.id NOT IN (${placeholders(seenList.length)})
+       GROUP BY v.id
+       ORDER BY cowatch_count DESC, v.view_count DESC, v.created_at DESC
+       LIMIT ?`,
+    )
+      .bind(id, ...seenList, remaining)
+      .all<RelatedVideo & { cowatch_count: number }>();
+    for (const v of cowatch.results ?? []) {
+      if (seen.has(v.id)) continue;
+      seen.add(v.id);
+      const { cowatch_count: _ignored, ...rest } = v;
+      out.push(rest);
+      if (out.length >= limit) break;
+    }
   }
 
   if (out.length < limit) {

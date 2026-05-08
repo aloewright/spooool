@@ -1,5 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
@@ -27,8 +35,12 @@ const AccountSettings = lazy(() =>
 );
 const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
-const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
-const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
+const DmcaCounter = lazy(() =>
+  import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })),
+);
+const DmcaNotice = lazy(() =>
+  import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })),
+);
 const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
 const ForgotPassword = lazy(() =>
@@ -36,6 +48,9 @@ const ForgotPassword = lazy(() =>
 );
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
+);
+const Onboarding = lazy(() =>
+  import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })),
 );
 
 function RouteFallback(): JSX.Element {
@@ -68,7 +83,11 @@ type HistoryItem = {
 
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   return (
-    <Link to="/" aria-label="spooool" className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}>
+    <Link
+      to="/"
+      aria-label="spooool"
+      className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}
+    >
       spooool
     </Link>
   );
@@ -86,10 +105,14 @@ function HeaderNav(): JSX.Element {
     return (
       <nav className="app-header__nav">
         <Link to="/login">
-          <button type="button" className="btn btn--ghost btn--sm">Sign in</button>
+          <button type="button" className="btn btn--ghost btn--sm">
+            Sign in
+          </button>
         </Link>
         <Link to="/signup">
-          <button type="button" className="btn btn--secondary btn--sm">Sign up</button>
+          <button type="button" className="btn btn--secondary btn--sm">
+            Sign up
+          </button>
         </Link>
       </nav>
     );
@@ -99,10 +122,14 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <span className="ds-meta">{session.user.email}</span>
       <Link to="/upload">
-        <button type="button" className="btn btn--secondary btn--sm">Upload</button>
+        <button type="button" className="btn btn--secondary btn--sm">
+          Upload
+        </button>
       </Link>
       <Link to="/profile">
-        <button type="button" className="btn btn--ghost btn--sm">Profile</button>
+        <button type="button" className="btn btn--ghost btn--sm">
+          Profile
+        </button>
       </Link>
       <button
         type="button"
@@ -207,9 +234,24 @@ const SUGGESTIONS: {
   to: string;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
 }[] = [
-  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
-  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
-  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
+  {
+    title: 'Upload a clip',
+    helper: 'Drop in an MP4, WebM, MOV, or MKV.',
+    to: '/upload',
+    Icon: UploadIcon,
+  },
+  {
+    title: 'Open a channel',
+    helper: 'Visit a creator and skim their library.',
+    to: '/channel/explore',
+    Icon: ChannelIcon,
+  },
+  {
+    title: 'Watch something',
+    helper: 'Jump into a video by id.',
+    to: '/watch/demo',
+    Icon: PlayIcon,
+  },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
@@ -270,10 +312,36 @@ function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
 
 function Home(): JSX.Element {
   const { data: session } = useSession();
+  const navigate = useNavigate();
   const [trending, setTrending] = useState<TrendingVideo[] | null>(null);
   const [trendingError, setTrendingError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[] | null>(null);
   const [clearing, setClearing] = useState(false);
+
+  // ALO-178: redirect freshly signed-in users to the welcome flow when they
+  // haven't picked a username yet. The flow itself owns the per-device skip
+  // bookkeeping so we don't loop on users who've already opted out.
+  useEffect(() => {
+    if (!session?.user) return;
+    let cancelled = false;
+    void Promise.all([
+      fetch('/api/users/me', { credentials: 'same-origin' }).then((r) =>
+        r.ok ? (r.json() as Promise<{ username: string | null }>) : null,
+      ),
+      import('./lib/onboarding'),
+    ])
+      .then(([profile, mod]) => {
+        if (cancelled || !profile) return;
+        const hasUsername = Boolean(profile.username);
+        if (mod.shouldRunOnboarding(hasUsername)) {
+          navigate('/welcome', { replace: true });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate, session?.user]);
 
   useEffect(() => {
     let cancelled = false;
@@ -338,35 +406,87 @@ function Home(): JSX.Element {
 
   return (
     <>
-    <main className="app-main app-main--narrow stack-lg fade-in">
-      <section
-        className="stack-sm"
-        style={{
-          alignItems: 'center',
-          textAlign: 'center',
-          paddingTop: 'var(--space-8)',
-          paddingBottom: 'var(--space-4)',
-        }}
-      >
-        <Wordmark />
-        <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
-          A video host that respects your time. Upload, stream, share — no friction.
-        </p>
-      </section>
+      <main className="app-main app-main--narrow stack-lg fade-in">
+        <section
+          className="stack-sm"
+          style={{
+            alignItems: 'center',
+            textAlign: 'center',
+            paddingTop: 'var(--space-8)',
+            paddingBottom: 'var(--space-4)',
+          }}
+        >
+          <Wordmark />
+          <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
+            A video host that respects your time. Upload, stream, share — no friction.
+          </p>
+        </section>
 
-      {session?.user && history !== null && history.length > 0 ? (
-        <section className="stack-sm" aria-label="Continue watching">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-            <h2 className="ds-h3" style={{ margin: 0 }}>Continue watching</h2>
-            <button
-              type="button"
-              className="ds-btn ds-btn--ghost ds-btn--sm"
-              onClick={() => void clearHistory()}
-              disabled={clearing}
+        {session?.user && history !== null && history.length > 0 ? (
+          <section className="stack-sm" aria-label="Continue watching">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 'var(--space-2)',
+              }}
             >
-              {clearing ? 'Clearing…' : 'Clear history'}
-            </button>
-          </div>
+              <h2 className="ds-h3" style={{ margin: 0 }}>
+                Continue watching
+              </h2>
+              <button
+                type="button"
+                className="ds-btn ds-btn--ghost ds-btn--sm"
+                onClick={() => void clearHistory()}
+                disabled={clearing}
+              >
+                {clearing ? 'Clearing…' : 'Clear history'}
+              </button>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 'var(--space-3)',
+              }}
+            >
+              {history.map((item) => (
+                <HistoryCard key={item.video_id} item={item} />
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section className="stack-sm" aria-label="Trending">
+          <h2 className="ds-h3" style={{ margin: 0 }}>
+            Trending this week
+          </h2>
+          {trendingError ? (
+            <p className="status-error">{trendingError}</p>
+          ) : trending === null ? (
+            <p className="ds-empty">Loading…</p>
+          ) : trending.length === 0 ? (
+            <p className="ds-empty">No trending videos yet — be the first to upload.</p>
+          ) : (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 'var(--space-3)',
+              }}
+            >
+              {trending.map((video) => (
+                <TrendingCard key={video.id} video={video} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="stack-sm" aria-label="Get started">
+          <h2 className="ds-h3" style={{ margin: 0 }}>
+            Start here
+          </h2>
           <div
             style={{
               display: 'grid',
@@ -374,85 +494,46 @@ function Home(): JSX.Element {
               gap: 'var(--space-3)',
             }}
           >
-            {history.map((item) => (
-              <HistoryCard key={item.video_id} item={item} />
+            {SUGGESTIONS.map((item) => (
+              <Link key={item.title} to={item.to} className="suggestion-card">
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    marginBottom: 'var(--space-2)',
+                    background: 'color-mix(in oklch, var(--accent), transparent 85%)',
+                    color: 'var(--accent)',
+                  }}
+                >
+                  <item.Icon />
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
+                <div className="ds-meta" style={{ marginTop: 4 }}>
+                  {item.helper}
+                </div>
+              </Link>
             ))}
           </div>
         </section>
-      ) : null}
-
-      <section className="stack-sm" aria-label="Trending">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Trending this week</h2>
-        {trendingError ? (
-          <p className="status-error">{trendingError}</p>
-        ) : trending === null ? (
-          <p className="ds-empty">Loading…</p>
-        ) : trending.length === 0 ? (
-          <p className="ds-empty">No trending videos yet — be the first to upload.</p>
-        ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 'var(--space-3)',
-            }}
-          >
-            {trending.map((video) => (
-              <TrendingCard key={video.id} video={video} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="stack-sm" aria-label="Get started">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Start here</h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {SUGGESTIONS.map((item) => (
-            <Link key={item.title} to={item.to} className="suggestion-card">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 44,
-                  height: 44,
-                  borderRadius: 10,
-                  marginBottom: 'var(--space-2)',
-                  background: 'color-mix(in oklch, var(--accent), transparent 85%)',
-                  color: 'var(--accent)',
-                }}
-              >
-                <item.Icon />
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
-              <div className="ds-meta" style={{ marginTop: 4 }}>
-                {item.helper}
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
-    </main>
-    <footer
-      className="app-footer ds-meta"
-      style={{
-        display: 'flex',
-        justifyContent: 'center',
-        gap: 'var(--space-4)',
-        padding: 'var(--space-6) var(--space-4)',
-        borderTop: '1px solid var(--border)',
-      }}
-    >
-      <Link to="/legal/tos">Terms of Service</Link>
-      <Link to="/legal/privacy">Privacy Policy</Link>
-      <Link to="/legal/dmca">DMCA</Link>
-    </footer>
+      </main>
+      <footer
+        className="app-footer ds-meta"
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: 'var(--space-4)',
+          padding: 'var(--space-6) var(--space-4)',
+          borderTop: '1px solid var(--border)',
+        }}
+      >
+        <Link to="/legal/tos">Terms of Service</Link>
+        <Link to="/legal/privacy">Privacy Policy</Link>
+        <Link to="/legal/dmca">DMCA</Link>
+      </footer>
     </>
   );
 }
@@ -487,6 +568,14 @@ export default function App(): JSX.Element {
           <Route path="/signup" element={<Signup />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
+          <Route
+            path="/welcome"
+            element={
+              <RequireAuth>
+                <Onboarding />
+              </RequireAuth>
+            }
+          />
           <Route path="/watch/:id" element={<Watch />} />
           <Route
             path="/upload"

@@ -533,6 +533,67 @@ input[type="file"].input {
   font-size: var(--text-sm);
 }
 
+/* ── Onboarding ────────────────────────────────────────────── */
+.onboarding__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.onboarding__step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border: 1px solid color-mix(in oklch, var(--border), transparent 50%);
+}
+
+.onboarding__step span[aria-hidden="true"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in oklch, var(--muted-foreground), transparent 70%);
+  color: var(--card);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.onboarding__step--active {
+  background: color-mix(in oklch, var(--accent-blue), transparent 80%);
+  color: var(--foreground);
+  border-color: color-mix(in oklch, var(--accent-blue), transparent 60%);
+}
+
+.onboarding__step--active span[aria-hidden="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.onboarding__step--done {
+  background: color-mix(in oklch, var(--primary), transparent 88%);
+  color: var(--foreground);
+}
+
+.onboarding__step--done span[aria-hidden="true"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.onboarding__step-label {
+  white-space: nowrap;
+}
+
 /* ── Motion ────────────────────────────────────────────────── */
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(6px); }

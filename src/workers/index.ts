@@ -30,6 +30,7 @@ import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
 import { handleStreamWebhook } from './stream-webhook';
+import { pollStreamForEncodingVideos } from './stream-poll';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
@@ -47,6 +48,9 @@ type SessionUser = {
 type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
+  CF_STREAM_API_TOKEN?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  STREAM_ENABLED?: string;
   ALLOWED_ORIGINS?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
@@ -189,6 +193,12 @@ const workerHandlers = {
           const restored = await runDmcaRestoreSweep(env);
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
+          }
+          // ALO-135: reconcile any videos still stuck in `encoding` whose
+          // Stream webhook we never received. Cheap GET per stuck row.
+          const pollResult = await pollStreamForEncodingVideos(env);
+          if (pollResult.scanned > 0) {
+            console.log('[stream-poll]', { cron: controller.cron, ...pollResult });
           }
         } catch (err) {
           console.error('scheduled sweep failed', {

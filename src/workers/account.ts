@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createAuth, type AuthEnv } from '../auth';
 import { getStorageUsage } from './storage-quota';
+import { upsertContact, type ResendEnv } from './resend';
 
 export const DELETION_GRACE_DAYS = 30;
 export const DELETION_GRACE_MS = DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000;
@@ -10,7 +11,15 @@ export interface AccountEnv extends AuthEnv {
   DB: D1Database;
   CACHE: KVNamespace;
   VIDEOS: R2Bucket;
+  /** Optional — mirrors marketing-email opt-out to Resend audience. */
+  RESEND_API_KEY?: string;
+  RESEND_AUDIENCE_ID?: string;
 }
+
+const notificationsSchema = z.object({
+  productEmails: z.boolean(),
+  marketingEmails: z.boolean(),
+});
 
 type SessionUser = { id: string; email: string; name: string } | null;
 type AccountVariables = { user: SessionUser };
@@ -35,7 +44,8 @@ accountRoutes.get('/api/account', async (c) => {
 
   const [row, storage] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
+      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for,
+              notify_product_emails, notify_marketing_emails
        FROM user WHERE id = ?`,
     )
       .bind(user.id)
@@ -45,6 +55,8 @@ accountRoutes.get('/api/account', async (c) => {
         name: string;
         deletion_requested_at: number | null;
         deletion_scheduled_for: number | null;
+        notify_product_emails: number | null;
+        notify_marketing_emails: number | null;
       }>(),
     // ALO-139: surface the user's quota + current usage so the account
     // settings page (and any future creator dashboard) can render a
@@ -59,7 +71,60 @@ accountRoutes.get('/api/account', async (c) => {
     name: row.name,
     deletionRequestedAt: row.deletion_requested_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    notifications: {
+      productEmails: (row.notify_product_emails ?? 1) === 1,
+      marketingEmails: (row.notify_marketing_emails ?? 1) === 1,
+    },
     storage,
+  });
+});
+
+accountRoutes.put('/api/account/notifications', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const json = await c.req.json().catch(() => null);
+  const parsed = notificationsSchema.safeParse(json);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid preferences', details: parsed.error.flatten() }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE user
+     SET notify_product_emails = ?, notify_marketing_emails = ?, updatedAt = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      parsed.data.productEmails ? 1 : 0,
+      parsed.data.marketingEmails ? 1 : 0,
+      Date.now(),
+      user.id,
+    )
+    .run();
+
+  // Mirror marketing opt-out to the Resend audience so bulk sends honor
+  // the preference without us re-implementing list segmentation.
+  if (c.env.RESEND_API_KEY && c.env.RESEND_AUDIENCE_ID) {
+    const resendEnv: ResendEnv = {
+      RESEND_API_KEY: c.env.RESEND_API_KEY,
+      RESEND_AUDIENCE_ID: c.env.RESEND_AUDIENCE_ID,
+    };
+    await upsertContact(resendEnv, {
+      email: user.email,
+      unsubscribed: !parsed.data.marketingEmails,
+    }).catch((err) => {
+      console.warn('resend marketing-pref mirror failed', {
+        userId: user.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  return c.json({
+    notifications: {
+      productEmails: parsed.data.productEmails,
+      marketingEmails: parsed.data.marketingEmails,
+    },
   });
 });
 

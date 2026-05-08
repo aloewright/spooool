@@ -22,6 +22,8 @@ interface FakeUser {
   name: string;
   deletion_requested_at: number | null;
   deletion_scheduled_for: number | null;
+  notify_product_emails?: number;
+  notify_marketing_emails?: number;
 }
 
 interface FakeStore {
@@ -47,6 +49,8 @@ function makeStore(): FakeStore {
           name: 'A',
           deletion_requested_at: null,
           deletion_scheduled_for: null,
+          notify_product_emails: 1,
+          notify_marketing_emails: 1,
         },
       ],
     ]),
@@ -188,6 +192,12 @@ function applyMutation(sql: string, bound: unknown[], store: FakeStore): void {
   } else if (sql.startsWith('UPDATE user SET email = ?')) {
     const u = store.users.get(bound[2] as string);
     if (u) u.email = bound[0] as string;
+  } else if (sql.startsWith('UPDATE user SET notify_product_emails = ?')) {
+    const u = store.users.get(bound[3] as string);
+    if (u) {
+      u.notify_product_emails = bound[0] as number;
+      u.notify_marketing_emails = bound[1] as number;
+    }
   }
 }
 
@@ -263,6 +273,16 @@ function userApp(store: FakeStore, asUser: { id: string } | null) {
         cascadeEnvWithStore(store) as never,
       );
     },
+    async put(path: string, body?: unknown) {
+      return app.fetch(
+        new Request(`http://t${path}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        cascadeEnvWithStore(store) as never,
+      );
+    },
     async get(path: string) {
       return app.fetch(new Request(`http://t${path}`), cascadeEnvWithStore(store) as never);
     },
@@ -307,6 +327,26 @@ describe('account delete + cancel window', () => {
     const store = makeStore();
     const app = userApp(store, { id: 'u1' });
     const res = await app.post('/api/account/delete/cancel');
+    expect(res.status).toBe(400);
+  });
+
+  it('updates notification preferences', async () => {
+    const store = makeStore();
+    const app = userApp(store, { id: 'u1' });
+    const res = await app.put('/api/account/notifications', {
+      productEmails: false,
+      marketingEmails: false,
+    });
+    expect(res.status).toBe(200);
+    const u = store.users.get('u1');
+    expect(u?.notify_product_emails).toBe(0);
+    expect(u?.notify_marketing_emails).toBe(0);
+  });
+
+  it('rejects invalid notification payloads with 400', async () => {
+    const store = makeStore();
+    const app = userApp(store, { id: 'u1' });
+    const res = await app.put('/api/account/notifications', { productEmails: 'yes' });
     expect(res.status).toBe(400);
   });
 

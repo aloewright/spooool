@@ -3,12 +3,18 @@ import { useNavigate } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
 
+interface NotificationPrefs {
+  productEmails: boolean;
+  marketingEmails: boolean;
+}
+
 interface AccountInfo {
   id: string;
   email: string;
   name: string;
   deletionRequestedAt: number | null;
   deletionScheduledFor: number | null;
+  notifications?: NotificationPrefs;
 }
 
 export function AccountSettings(): JSX.Element {
@@ -111,6 +117,34 @@ export function AccountSettings(): JSX.Element {
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateNotifications = async (patch: Partial<NotificationPrefs>): Promise<void> => {
+    if (!account) return;
+    const current: NotificationPrefs = account.notifications ?? {
+      productEmails: true,
+      marketingEmails: true,
+    };
+    const next: NotificationPrefs = { ...current, ...patch };
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    setAccount({ ...account, notifications: next });
+    try {
+      const r = await fetch('/api/account/notifications', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(next),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
+      setInfo('Notification preferences updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed');
+      setAccount({ ...account, notifications: current });
     } finally {
       setBusy(false);
     }
@@ -219,6 +253,31 @@ export function AccountSettings(): JSX.Element {
             Change password
           </button>
         </form>
+      </section>
+
+      <section className="stack-sm" aria-label="Notifications">
+        <span className="ds-label">Notifications</span>
+        <p className="ds-meta">
+          Choose which emails we send. You'll always get critical security and legal notices.
+        </p>
+        <label className="stack-xs" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={account?.notifications?.productEmails ?? true}
+            disabled={busy || !account}
+            onChange={(e) => void updateNotifications({ productEmails: e.target.checked })}
+          />
+          <span>Product updates and tips</span>
+        </label>
+        <label className="stack-xs" style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={account?.notifications?.marketingEmails ?? true}
+            disabled={busy || !account}
+            onChange={(e) => void updateNotifications({ marketingEmails: e.target.checked })}
+          />
+          <span>Marketing and announcements</span>
+        </label>
       </section>
 
       <ActiveSessions />

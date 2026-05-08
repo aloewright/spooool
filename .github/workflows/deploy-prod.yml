@@ -13,8 +13,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  staging-smoke:
+    name: Staging health gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # ALO-126: prod deploy waits until staging /api/health says "ok".
+      # The URL is overridable via the STAGING_HEALTH_URL repo variable so
+      # forks / preview environments can point this at their own staging.
+      - name: Probe staging /api/health
+        env:
+          STAGING_HEALTH_URL: ${{ vars.STAGING_HEALTH_URL || 'https://staging.spooool.com/api/health' }}
+        run: |
+          set -euo pipefail
+          echo "Probing $STAGING_HEALTH_URL"
+          # Up to 5 attempts, 10s apart — handles a deploy in flight.
+          for i in 1 2 3 4 5; do
+            body=$(curl -fsS --max-time 10 "$STAGING_HEALTH_URL" || true)
+            status=$(echo "$body" | jq -r '.status // empty' 2>/dev/null || true)
+            if [ "$status" = "ok" ]; then
+              echo "Staging healthy on attempt $i"
+              exit 0
+            fi
+            echo "Attempt $i: status='$status' body='$body'"
+            sleep 10
+          done
+          echo "::error ::Staging is not healthy — refusing to deploy production. Fix staging first or override STAGING_HEALTH_URL."
+          exit 1
+
   deploy:
     name: Wrangler deploy (production)
+    needs: staging-smoke
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

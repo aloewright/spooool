@@ -25,6 +25,26 @@ function isAcceptedVideo(file: File): boolean {
   return ALLOWED_EXTENSIONS.has(file.name.slice(dot + 1).toLowerCase());
 }
 
+function resumeKey(file: File): string {
+  return `spooool:upload:${file.name}:${file.size}:${file.lastModified}`;
+}
+
+async function fetchResumeState(
+  uploadId: string,
+): Promise<{ received: number[]; chunkCount: number } | null> {
+  try {
+    const res = await fetch(`/api/videos/upload/${encodeURIComponent(uploadId)}/status`, {
+      credentials: 'same-origin',
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { received?: number[]; chunkCount?: number };
+    if (typeof data.chunkCount !== 'number' || !Array.isArray(data.received)) return null;
+    return { received: data.received, chunkCount: data.chunkCount };
+  } catch {
+    return null;
+  }
+}
+
 async function uploadInChunks(
   file: File,
   title: string,
@@ -34,49 +54,92 @@ async function uploadInChunks(
   const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
   let lastResponse: Response | null = null;
   let uploadId: string | null = null;
+  const received = new Set<number>();
+
+  // ALO-121: resume across page reloads / disconnects. Persist uploadId
+  // keyed by file identity so a refresh continues where the last attempt
+  // left off; the server is the source of truth for which chunks landed.
+  const persistKey = resumeKey(file);
+  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(persistKey) : null;
+  if (stored) {
+    const state = await fetchResumeState(stored);
+    if (state && state.chunkCount === chunkCount) {
+      uploadId = stored;
+      for (const i of state.received) received.add(i);
+      if (received.size > 0) {
+        onProgress(Math.round((received.size / chunkCount) * 100));
+      }
+    } else {
+      try { localStorage.removeItem(persistKey); } catch { /* private mode */ }
+    }
+  }
 
   for (let index = 0; index < chunkCount; index += 1) {
+    if (received.has(index) && index < chunkCount - 1) {
+      // Final chunk must still be sent so the server can run completion;
+      // intermediate chunks the server already has can be skipped.
+      onProgress(Math.round(((index + 1) / chunkCount) * 100));
+      continue;
+    }
     const start = index * CHUNK_SIZE;
     const end = Math.min(start + CHUNK_SIZE, file.size);
-    // Pass file.type so the resulting Blob keeps the parent's MIME — without it
-    // the chunk's type is '' and the multipart part is sent as
-    // application/octet-stream, which the upload validator then rejects.
     const chunk = file.slice(start, end, file.type);
-    const formData = new FormData();
-    formData.set('title', title);
-    formData.set('description', description);
-    formData.set('file', chunk, file.name);
-    formData.set('chunkIndex', String(index));
-    formData.set('chunkCount', String(chunkCount));
-    if (uploadId) {
-      formData.set('uploadId', uploadId);
-    }
 
-    lastResponse = await fetch('/api/videos/upload', {
-      method: 'POST',
-      body: formData,
-    });
+    let attempt = 0;
+    const maxAttempts = 4;
+    // Per-chunk retry with exponential backoff. Network blips and 5xx are
+    // transient; the server is idempotent on chunk re-submission so retries
+    // are safe.
+    while (true) {
+      const formData = new FormData();
+      formData.set('title', title);
+      formData.set('description', description);
+      formData.set('file', chunk, file.name);
+      formData.set('chunkIndex', String(index));
+      formData.set('chunkCount', String(chunkCount));
+      if (uploadId) formData.set('uploadId', uploadId);
 
-    if (!lastResponse.ok) {
-      const body = await lastResponse.text();
+      let res: Response;
+      try {
+        res = await fetch('/api/videos/upload', { method: 'POST', body: formData });
+      } catch (err) {
+        if (++attempt >= maxAttempts) throw err;
+        await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+        continue;
+      }
+
+      if (res.ok) {
+        lastResponse = res;
+        const responseData = (await res.json()) as { uploadId?: string };
+        if (responseData.uploadId) {
+          uploadId = responseData.uploadId;
+          try { localStorage.setItem(persistKey, uploadId); } catch { /* private mode */ }
+        }
+        received.add(index);
+        break;
+      }
+
+      if (res.status >= 500 && ++attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+        continue;
+      }
+
+      const body = await res.text();
       let detail = body;
       try {
         const parsed = JSON.parse(body) as { error?: string; code?: string };
         detail = parsed.error ?? body;
         if (parsed.code) detail = `${detail} (${parsed.code})`;
       } catch {
-        // Non-JSON response — keep raw text.
+        /* non-JSON */
       }
-      throw new Error(`Upload failed (${lastResponse.status}): ${detail.slice(0, 300)}`);
-    }
-
-    const responseData = (await lastResponse.json()) as { uploadId?: string };
-    if (responseData.uploadId) {
-      uploadId = responseData.uploadId;
+      throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 300)}`);
     }
 
     onProgress(Math.round(((index + 1) / chunkCount) * 100));
   }
+
+  try { localStorage.removeItem(persistKey); } catch { /* private mode */ }
 
   if (!lastResponse) {
     throw new Error('No upload response');

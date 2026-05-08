@@ -80,10 +80,50 @@ const uploadMetaPersistedSchema = z.object({
   chunkCount: z.number().int().positive(),
 });
 
+function uploadKvBase(userId: string, uploadId: string): string {
+  return `upload:${userId}:${uploadId}`;
+}
+
 export const videoRoutes = new Hono<{
   Bindings: VideoRoutesEnv;
   Variables: VideoRoutesVariables;
 }>();
+
+// ALO-121: resume-on-disconnect. Lets the client re-derive which chunks the
+// server already has after a network failure, so we don't re-upload bytes
+// the multipart already accepted. Auth-gated by user-scoped KV key.
+videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const uploadId = c.req.param('uploadId');
+  const baseKvKey = uploadKvBase(user.id, uploadId);
+  const [metaJson, partsJson, mpid] = await Promise.all([
+    c.env.SESSIONS.get(`${baseKvKey}:meta`),
+    c.env.SESSIONS.get(`${baseKvKey}:parts`),
+    c.env.SESSIONS.get(`${baseKvKey}:mpid`),
+  ]);
+  if (!metaJson || !mpid) {
+    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
+  }
+  const meta = uploadMetaPersistedSchema.parse(JSON.parse(metaJson));
+  const partsMap = partsJson
+    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
+    : {};
+  // Stored part numbers are 1-indexed; client uses 0-indexed chunk indexes.
+  const received = Object.keys(partsMap)
+    .map((p) => Number(p) - 1)
+    .filter((i) => Number.isInteger(i) && i >= 0)
+    .sort((a, b) => a - b);
+  const bytesReceived = Object.values(partsMap).reduce((sum, p) => sum + p.size, 0);
+  return c.json({
+    uploadId,
+    chunkCount: meta.chunkCount,
+    received,
+    bytesReceived,
+    complete: false,
+  });
+});
 
 videoRoutes.get('/api/videos/trending', async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
@@ -432,7 +472,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
   const resolvedUploadId = uploadId ?? crypto.randomUUID();
 
-  const baseKvKey = `upload:${user.id}:${resolvedUploadId}`;
+  const baseKvKey = uploadKvBase(user.id, resolvedUploadId);
   const mpidKey = `${baseKvKey}:mpid`;
   const metaKey = `${baseKvKey}:meta`;
   const partsKey = `${baseKvKey}:parts`;
@@ -485,6 +525,20 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
     : {};
 
+  // ALO-121: idempotent retry. If the client retries a chunk we already
+  // accepted (typical on flaky connections where the response was lost),
+  // ack without re-paying the multipart upload cost.
+  const partKey = String(chunkIndex + 1);
+  if (uploadedPartsMap[partKey]) {
+    if (chunkIndex < chunkCount - 1) {
+      return c.json(
+        { status: 'chunk_received', chunkIndex, chunkCount, idempotent: true },
+        202,
+      );
+    }
+    // Final chunk re-send: fall through so completion logic still runs.
+  }
+
   const priorBytes = Object.values(uploadedPartsMap).reduce((sum, part) => sum + part.size, 0);
   if (priorBytes + rawFile.size > MAX_VIDEO_BYTES) {
     return c.json(
@@ -494,10 +548,14 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   }
 
   const multipart = env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
-  const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
-
-  uploadedPartsMap[String(chunkIndex + 1)] = { etag: uploadedPart.etag, size: rawFile.size };
-  await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), { expirationTtl: 86400 });
+  const alreadyHavePart = Boolean(uploadedPartsMap[partKey]);
+  if (!alreadyHavePart) {
+    const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
+    uploadedPartsMap[partKey] = { etag: uploadedPart.etag, size: rawFile.size };
+    await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), {
+      expirationTtl: 86400,
+    });
+  }
 
   if (chunkIndex < chunkCount - 1) {
     return c.json({ status: 'chunk_received', chunkIndex, chunkCount }, 202);
@@ -514,7 +572,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // ALO-139: authoritative quota check at completion. Catches the case
   // where the first-chunk precheck passed but a parallel upload (or a
   // very large total via many small chunks) would push the user over.
-  const totalBytes = priorBytes + rawFile.size;
+  const totalBytes = Object.values(uploadedPartsMap).reduce((sum, p) => sum + p.size, 0);
   const finalUsage = await getStorageUsage(env, user.id);
   if (!hasRoomFor(finalUsage, totalBytes)) {
     await multipart.abort().catch(() => {});

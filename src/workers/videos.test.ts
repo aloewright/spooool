@@ -141,3 +141,78 @@ describe('upload storage-quota gate', () => {
     expect(res.status).toBe(201);
   });
 });
+
+// ALO-121: resume-on-disconnect endpoint surfaces server-known chunks.
+describe('upload status endpoint', () => {
+  function envWithSessions(store: Record<string, string>): VideoRoutesEnv {
+    const sessions = {
+      async get(key: string) {
+        return store[key] ?? null;
+      },
+      async put() {},
+      async delete() {},
+    } as unknown as KVNamespace;
+    return {
+      DB: {} as unknown as D1Database,
+      VIDEOS: {} as unknown as R2Bucket,
+      CACHE: {} as unknown as KVNamespace,
+      SESSIONS: sessions,
+      VIDEO_ENCODING: { send: async () => {} } as unknown as Queue,
+    };
+  }
+
+  it('returns 401 when unauthenticated', async () => {
+    const fetcher = mountWithUser(envWithSessions({}), null);
+    const res = await fetcher('/api/videos/upload/abc/status');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 when no session exists for the user/uploadId pair', async () => {
+    const fetcher = mountWithUser(envWithSessions({}), {
+      id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true,
+    });
+    const res = await fetcher('/api/videos/upload/missing/status');
+    expect(res.status).toBe(404);
+  });
+
+  it('reports received chunk indexes (0-based) from stored parts', async () => {
+    const base = 'upload:u1:abc';
+    const store: Record<string, string> = {
+      [`${base}:mpid`]: 'mpid-1',
+      [`${base}:meta`]: JSON.stringify({
+        videoId: 'v1', r2Key: 'u1/v1/clip.mp4', title: 't', description: 'd', chunkCount: 3,
+      }),
+      [`${base}:parts`]: JSON.stringify({
+        '1': { etag: 'e1', size: 10 },
+        '3': { etag: 'e3', size: 7 },
+      }),
+    };
+    const fetcher = mountWithUser(envWithSessions(store), {
+      id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true,
+    });
+    const res = await fetcher('/api/videos/upload/abc/status');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      uploadId: string; chunkCount: number; received: number[]; bytesReceived: number;
+    };
+    expect(body.uploadId).toBe('abc');
+    expect(body.chunkCount).toBe(3);
+    expect(body.received).toEqual([0, 2]);
+    expect(body.bytesReceived).toBe(17);
+  });
+
+  it('scopes upload sessions per user (cannot read another user\'s upload)', async () => {
+    const base = 'upload:other:abc';
+    const store: Record<string, string> = {
+      [`${base}:mpid`]: 'mpid-1',
+      [`${base}:meta`]: JSON.stringify({
+        videoId: 'v1', r2Key: 'other/v1/clip.mp4', title: 't', description: 'd', chunkCount: 1,
+      }),
+    };
+    const fetcher = mountWithUser(envWithSessions(store), {
+      id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true,
+    });
+    const res = await fetcher('/api/videos/upload/abc/status');
+    expect(res.status).toBe(404);
+  });
+});

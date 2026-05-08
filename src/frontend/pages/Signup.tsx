@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signUp, useSession } from '../lib/auth-client';
+import { OAuthButtons } from '../components/OAuthButtons';
 
 export function Signup(): JSX.Element {
   const location = useLocation();
@@ -109,6 +110,8 @@ export function Signup(): JSX.Element {
           </button>
         </div>
       </form>
+
+      <OAuthButtons callbackURL={next} />
 
       {error ? <p className="status-error">{error}</p> : null}
     </main>

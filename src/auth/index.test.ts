@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 // password-reset and verification callbacks are wired and forward to Resend.
 type CapturedOptions = {
   appName?: string;
+  socialProviders?: Record<string, { clientId: string; clientSecret: string }>;
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
@@ -105,6 +106,25 @@ describe('createAuth', () => {
         token: 't',
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it('omits socialProviders when no OAuth credentials are present', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(captured.options?.socialProviders).toBeUndefined();
+  });
+
+  it('wires google + github when OAuth credentials are provided', () => {
+    createAuth({
+      DB: {} as D1Database,
+      GOOGLE_CLIENT_ID: 'g-id',
+      GOOGLE_CLIENT_SECRET: 'g-secret',
+      GITHUB_CLIENT_ID: 'gh-id',
+      GITHUB_CLIENT_SECRET: 'gh-secret',
+    });
+    expect(captured.options?.socialProviders).toEqual({
+      google: { clientId: 'g-id', clientSecret: 'g-secret' },
+      github: { clientId: 'gh-id', clientSecret: 'gh-secret' },
+    });
   });
 
   it('configures email verification with sendOnSignUp + auto sign-in', () => {

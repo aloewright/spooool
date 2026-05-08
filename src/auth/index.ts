@@ -5,14 +5,36 @@ export type AuthEnv = ResendEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  // ALO-120: OAuth providers. Each is enabled only when both client id and
+  // secret are present; absent vars cleanly skip the provider so local dev
+  // and tests don't need real credentials.
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
 };
 
 export function createAuth(env: AuthEnv) {
+  const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
+  if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
+    socialProviders.google = {
+      clientId: env.GOOGLE_CLIENT_ID,
+      clientSecret: env.GOOGLE_CLIENT_SECRET,
+    };
+  }
+  if (env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET) {
+    socialProviders.github = {
+      clientId: env.GITHUB_CLIENT_ID,
+      clientSecret: env.GITHUB_CLIENT_SECRET,
+    };
+  }
+
   return betterAuth({
     appName: 'spooool',
     database: env.DB,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
+    ...(Object.keys(socialProviders).length > 0 ? { socialProviders } : {}),
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,

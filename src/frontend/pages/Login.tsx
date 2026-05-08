@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
+import { OAuthButtons } from '../components/OAuthButtons';
 
 export function Login(): JSX.Element {
   const location = useLocation();
@@ -85,6 +86,8 @@ export function Login(): JSX.Element {
           <Link to="/forgot-password" className="ds-meta">Forgot your password?</Link>
         </div>
       </form>
+
+      <OAuthButtons callbackURL={next} />
 
       {error ? <p className="status-error">{error}</p> : null}
     </main>

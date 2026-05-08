@@ -70,4 +70,20 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
   });
+
+  it('0019_channel_memberships adds tier + membership tables and members_only flag (ALO-161)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_channel_memberships.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS channel_membership_tiers/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS channel_memberships/);
+    expect(sql).toMatch(/ALTER TABLE videos ADD COLUMN members_only/);
+    expect(sql).toMatch(/idx_memberships_pair_active/);
+    expect(sql).toMatch(/stripe_subscription_id\s+TEXT\s+UNIQUE/);
+  });
+
+  it('schema.sql mirrors the membership tables from 0019', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS channel_membership_tiers');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS channel_memberships');
+    expect(schema).toContain('idx_memberships_pair_active');
+  });
 });

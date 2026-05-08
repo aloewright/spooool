@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
+import { isActiveMember } from './memberships';
 import {
   UPLOAD_INIT_BUCKET,
   rateLimit,
@@ -56,6 +57,7 @@ type CachedVideoMeta = {
   channel_username: string | null;
   hidden_at: string | null;
   dmca_status: string | null;
+  members_only: number;
 };
 
 const listVideosQuerySchema = z.object({
@@ -70,6 +72,11 @@ const trendingQuerySchema = z.object({
 const uploadMetadataSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(5000).optional().default(''),
+  // ALO-161: optional flag — when truthy, the gate in /api/videos/:id
+  // returns 402 to anyone who isn't the owner or an active member.
+  membersOnly: z
+    .union([z.literal('1'), z.literal('true'), z.literal('on'), z.literal('0'), z.literal('false'), z.literal('')])
+    .optional(),
 });
 
 const uploadMetaPersistedSchema = z.object({
@@ -78,6 +85,7 @@ const uploadMetaPersistedSchema = z.object({
   title: z.string(),
   description: z.string(),
   chunkCount: z.number().int().positive(),
+  membersOnly: z.boolean().optional().default(false),
 });
 
 export const videoRoutes = new Hono<{
@@ -156,6 +164,7 @@ videoRoutes.get('/api/videos/:id', async (c) => {
     video = await c.env.DB.prepare(
       `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id, v.status,
               v.view_count, v.created_at, v.updated_at, v.hidden_at, v.dmca_status,
+              v.members_only,
               u.name AS channel_name, u.username AS channel_username
        FROM videos v
        LEFT JOIN user u ON u.id = v.user_id
@@ -186,6 +195,33 @@ videoRoutes.get('/api/videos/:id', async (c) => {
   if (video.hidden_at && video.user_id !== user?.id) {
     return c.json({ error: 'Video not found' }, 404);
   }
+
+  // ALO-161: members-only paywall. Owner always sees their own video; an
+  // active member of the channel does too. Everyone else gets a structured
+  // 402 with the metadata the SPA needs to render the join-membership card
+  // (title, channel handle, thumbnail) without having to make a second
+  // request.
+  if (Number(video.members_only) === 1 && video.user_id !== user?.id) {
+    const member = user
+      ? await isActiveMember(c.env.DB, user.id, video.user_id)
+      : false;
+    if (!member) {
+      return c.json(
+        {
+          error: 'Members-only video',
+          code: 'members_only',
+          channel: {
+            id: video.user_id,
+            username: video.channel_username,
+            name: video.channel_name,
+          },
+          video: { id: video.id, title: video.title },
+        },
+        402,
+      );
+    }
+  }
+
   const { sid, setCookie } = ensureSessionId(c.req.header('cookie') ?? null);
   // Dedup by user id when authenticated, else by anon session id, so opening
   // the same tab twice in 12h doesn't double-count.
@@ -225,7 +261,7 @@ videoRoutes.get('/api/videos/:id', async (c) => {
 videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   const id = c.req.param('id');
   const video = await c.env.DB.prepare(
-    `SELECT user_id, r2_key, hidden_at, dmca_status
+    `SELECT user_id, r2_key, hidden_at, dmca_status, members_only
      FROM videos
      WHERE id = ? AND deleted_at IS NULL`,
   )
@@ -235,6 +271,7 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
       r2_key: string;
       hidden_at: string | null;
       dmca_status: string | null;
+      members_only: number;
     }>();
 
   if (!video) return c.json({ error: 'Video not found' }, 404);
@@ -245,6 +282,17 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   const user = c.get('user');
   if (video.hidden_at && video.user_id !== user?.id) {
     return c.json({ error: 'Video not found' }, 404);
+  }
+
+  // ALO-161: same gate as the metadata endpoint, applied directly to the
+  // bytes so a determined client can't bypass it by hitting /stream.
+  if (Number(video.members_only) === 1 && video.user_id !== user?.id) {
+    const member = user
+      ? await isActiveMember(c.env.DB, user.id, video.user_id)
+      : false;
+    if (!member) {
+      return c.json({ error: 'Members-only video', code: 'members_only' }, 402);
+    }
   }
 
   const head = await c.env.VIDEOS.head(video.r2_key);
@@ -323,11 +371,13 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   const formData = await c.req.formData();
   const rawTitle = formData.get('title');
   const rawDescription = formData.get('description');
+  const rawMembersOnly = formData.get('membersOnly');
   const rawFile = formData.get('file');
 
   const metadataParsed = uploadMetadataSchema.safeParse({
     title: rawTitle,
     description: rawDescription ?? '',
+    membersOnly: rawMembersOnly ?? undefined,
   });
 
   if (!metadataParsed.success) {
@@ -397,6 +447,13 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     }
   }
 
+  const membersOnlyFlag =
+    metadataParsed.data.membersOnly === '1' ||
+    metadataParsed.data.membersOnly === 'true' ||
+    metadataParsed.data.membersOnly === 'on'
+      ? 1
+      : 0;
+
   if (chunkCount === 1) {
     const videoId = crypto.randomUUID();
     const r2Key = `${user.id}/${videoId}/${rawFile.name}`;
@@ -406,8 +463,8 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     });
 
     await env.DB.prepare(
-      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, members_only, view_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
     )
       .bind(
         videoId,
@@ -417,6 +474,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         r2Key,
         rawFile.size,
         'queued',
+        membersOnlyFlag,
       )
       .run();
 
@@ -455,6 +513,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         title: metadataParsed.data.title,
         description: metadataParsed.data.description,
         chunkCount,
+        membersOnly: Boolean(membersOnlyFlag),
       }),
       { expirationTtl: 86400 },
     );
@@ -536,8 +595,8 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   await multipart.complete(completedParts);
 
   await env.DB.prepare(
-    `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, members_only, view_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
   )
     .bind(
       uploadMeta.videoId,
@@ -547,6 +606,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       uploadMeta.r2Key,
       totalBytes,
       'queued',
+      uploadMeta.membersOnly ? 1 : 0,
     )
     .run();
 
@@ -560,6 +620,41 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
+});
+
+// ALO-161: owner-only toggle for the members-only paywall flag. Kept
+// minimal — only field on the wire is `membersOnly` so we can grow this
+// into a generic PATCH later without a schema break.
+videoRoutes.patch('/api/videos/:id', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== 'object' || !('membersOnly' in body)) {
+    return c.json({ error: 'membersOnly is required' }, 400);
+  }
+  const membersOnly = (body as { membersOnly: unknown }).membersOnly;
+  if (typeof membersOnly !== 'boolean') {
+    return c.json({ error: 'membersOnly must be boolean' }, 400);
+  }
+
+  const video = await c.env.DB.prepare(
+    'SELECT id, user_id FROM videos WHERE id = ? AND deleted_at IS NULL',
+  )
+    .bind(id)
+    .first<{ id: string; user_id: string }>();
+  if (!video) return c.json({ error: 'Video not found' }, 404);
+  if (video.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
+
+  await c.env.DB.prepare(
+    'UPDATE videos SET members_only = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+  )
+    .bind(membersOnly ? 1 : 0, id)
+    .run();
+
+  await c.env.CACHE.delete(videoMetaCacheKey(id));
+  return c.json({ id, membersOnly });
 });
 
 videoRoutes.delete('/api/videos/:id', async (c) => {

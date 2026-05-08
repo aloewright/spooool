@@ -39,6 +39,15 @@ type VideoResponse = {
   stream_video_id?: string;
   r2_key?: string;
   status?: string;
+  members_only?: number;
+};
+
+// ALO-161: shape of the 402 response returned by /api/videos/:id when a
+// non-member hits a members-only video. The SPA renders a paywall card
+// using this payload — no extra round-trip needed.
+type MembersOnlyPaywall = {
+  channel: { id: string; username: string | null; name: string | null };
+  video: { id: string; title: string };
 };
 
 type PlaybackSource = { src: string; type: string } | null;
@@ -64,6 +73,7 @@ export function Watch(): JSX.Element {
   const autoAdvanceRef = useRef<boolean>(false);
   const [video, setVideo] = useState<VideoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [paywall, setPaywall] = useState<MembersOnlyPaywall | null>(null);
   const [likes, setLikes] = useState<{ count: number; liked: boolean } | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
   const [likeError, setLikeError] = useState<string | null>(null);
@@ -111,14 +121,27 @@ export function Watch(): JSX.Element {
       setError('Missing video ID');
       return;
     }
-    void fetch(`/api/videos/${id}`)
+    void fetch(`/api/videos/${id}`, { credentials: 'same-origin' })
       .then(async (response) => {
+        if (response.status === 402) {
+          // ALO-161: members-only paywall. Render the join-card instead of
+          // the player; the body carries enough context to do so without a
+          // second round-trip.
+          const body = (await response.json()) as { code?: string } & MembersOnlyPaywall;
+          if (body.code === 'members_only') {
+            setPaywall(body);
+            return null;
+          }
+          throw new Error('Payment required');
+        }
         if (!response.ok) {
           throw new Error('Failed to load video');
         }
         return (await response.json()) as VideoResponse;
       })
-      .then((data) => setVideo(data))
+      .then((data) => {
+        if (data) setVideo(data);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 
@@ -502,6 +525,36 @@ export function Watch(): JSX.Element {
     return (
       <main className="app-main stack">
         <p className="status-error">{error}</p>
+      </main>
+    );
+  }
+
+  if (paywall) {
+    const channelHref = paywall.channel.username
+      ? `/channel/${encodeURIComponent(paywall.channel.username)}`
+      : null;
+    return (
+      <main className="app-main app-main--narrow stack-lg fade-in">
+        <div className="card stack-sm" data-testid="members-only-paywall">
+          <span className="ds-label">Members only</span>
+          <h1 className="ds-h2" style={{ margin: 0 }}>{paywall.video.title}</h1>
+          <p>
+            This video is for active members of{' '}
+            {channelHref ? (
+              <Link to={channelHref}>{paywall.channel.name ?? `@${paywall.channel.username}`}</Link>
+            ) : (
+              <strong>{paywall.channel.name ?? 'this channel'}</strong>
+            )}
+            .
+          </p>
+          <div>
+            {channelHref ? (
+              <Link to={`${channelHref}#membership`}>
+                <button type="button" className="btn">View membership tiers</button>
+              </Link>
+            ) : null}
+          </div>
+        </div>
       </main>
     );
   }

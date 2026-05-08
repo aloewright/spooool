@@ -12,6 +12,11 @@ import { csrfProtection, parseAllowedOrigins } from './csrf';
 import { healthRoutes } from './health';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
+import {
+  handleMembershipWebhook,
+  membershipRoutes,
+  type MembershipsEnv,
+} from './memberships';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
@@ -44,7 +49,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & MembershipsEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -83,6 +88,12 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+
+// ALO-161: Stripe webhook for membership subscription lifecycle. Stripe
+// signs the *raw* request body, so we hand the raw Request to the handler
+// instead of letting Hono parse JSON. CSRF is exempted via the
+// `/api/webhooks/*` rule above.
+app.post('/api/webhooks/stripe', async (c) => handleMembershipWebhook(c.req.raw, c.env));
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -142,6 +153,7 @@ app.route('/', likeRoutes);
 app.route('/', commentRoutes);
 app.route('/', analyticsRoutes);
 app.route('/', subscriptionRoutes);
+app.route('/', membershipRoutes);
 app.route('/', rumRoutes);
 app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);

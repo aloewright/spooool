@@ -29,6 +29,7 @@ async function uploadInChunks(
   file: File,
   title: string,
   description: string,
+  membersOnly: boolean,
   onProgress: (value: number) => void,
 ): Promise<Response> {
   const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
@@ -48,6 +49,12 @@ async function uploadInChunks(
     formData.set('file', chunk, file.name);
     formData.set('chunkIndex', String(index));
     formData.set('chunkCount', String(chunkCount));
+    // ALO-161: only the chunk-0 request consumes the membersOnly flag.
+    // Subsequent chunks are stored as a single multipart upload that the
+    // worker associates with the metadata persisted at chunk-0 time.
+    if (index === 0 && membersOnly) {
+      formData.set('membersOnly', '1');
+    }
     if (uploadId) {
       formData.set('uploadId', uploadId);
     }
@@ -114,6 +121,7 @@ export function Upload(): JSX.Element {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [membersOnly, setMembersOnly] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -146,7 +154,7 @@ export function Upload(): JSX.Element {
     }
 
     try {
-      await uploadInChunks(file, title, description, setProgress);
+      await uploadInChunks(file, title, description, membersOnly, setProgress);
       setStatus('Upload complete');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -226,6 +234,17 @@ export function Upload(): JSX.Element {
             required
           />
           <span className="ds-meta">MP4, MOV, MKV, WebM, AVI, MPEG, M4V, 3GP, FLV, OGV, or TS. 30GB max.</span>
+        </div>
+
+        <div className="field">
+          <label className="row" style={{ alignItems: 'center', gap: 'var(--space-2)' }}>
+            <input
+              type="checkbox"
+              checked={membersOnly}
+              onChange={(event) => setMembersOnly(event.target.checked)}
+            />
+            <span>Members only — restrict playback to active members of your channel</span>
+          </label>
         </div>
 
         <div className="stack-sm">

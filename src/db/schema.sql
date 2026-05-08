@@ -176,3 +176,41 @@ CREATE TABLE IF NOT EXISTS video_tags (
 
 CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_slug);
 CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+
+CREATE TABLE IF NOT EXISTS channel_membership_tiers (
+  id TEXT PRIMARY KEY,
+  channel_user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  price_cents INTEGER NOT NULL CHECK (price_cents >= 0),
+  currency TEXT NOT NULL DEFAULT 'usd',
+  interval TEXT NOT NULL CHECK (interval IN ('month', 'year')),
+  stripe_product_id TEXT,
+  stripe_price_id TEXT,
+  archived_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS channel_memberships (
+  id TEXT PRIMARY KEY,
+  member_user_id TEXT NOT NULL,
+  channel_user_id TEXT NOT NULL,
+  tier_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'incomplete',
+  current_period_end INTEGER,
+  stripe_customer_id TEXT,
+  stripe_subscription_id TEXT UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tier_id) REFERENCES channel_membership_tiers(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_membership_tiers_channel
+  ON channel_membership_tiers(channel_user_id, archived_at);
+CREATE INDEX IF NOT EXISTS idx_memberships_member
+  ON channel_memberships(member_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_memberships_channel
+  ON channel_memberships(channel_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_memberships_pair_active
+  ON channel_memberships(member_user_id, channel_user_id, status);

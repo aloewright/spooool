@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { VideoPlaceholderIcon } from '../components/Icons';
+import { ChannelMembership } from './ChannelMembership';
 
 interface ChannelHeader {
   id: string;
@@ -235,6 +236,8 @@ export function Channel(): JSX.Element {
 
       {subError ? <p className="status-error">{subError}</p> : null}
       {header.bio ? <p style={{ maxWidth: 720 }}>{header.bio}</p> : null}
+
+      <ChannelMembership username={username ?? ''} isOwner={isOwner} />
 
       <section className="stack-sm" aria-label="Videos">
         <h2 className="ds-h3">Videos</h2>

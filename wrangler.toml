@@ -132,3 +132,168 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)
 # VITE_POSTHOG_KEY        (ALO-166 — PostHog project API key, e.g. phc_...)
 # VITE_POSTHOG_HOST       (ALO-166 — defaults to https://us.i.posthog.com; override for self-hosted)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Named environments (ALO-190)
+#
+# Wrangler's named environments do NOT inherit bindings from the top-level
+# config — every binding the worker uses must be re-declared per env. The
+# top-level config above is kept as the de-facto production configuration so
+# `wrangler deploy` (no --env) keeps working for legacy/local flows. The
+# CI workflows now pass `--env staging` / `--env production` and resolve to
+# the blocks below.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── staging ──────────────────────────────────────────────────────────────────
+[env.staging]
+name = "spooool-staging"
+workers_dev = true
+
+[env.staging.observability.logs]
+enabled = true
+head_sampling_rate = 0.2
+
+[env.staging.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = [
+  "/api/*",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/sitemap-static.xml",
+  "/sitemap-videos-*.xml",
+  "/watch/*",
+]
+
+[[env.staging.r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "cloudflare-tube-videos-staging"
+
+[[env.staging.r2_buckets]]
+binding = "LOGS"
+bucket_name = "cloudflare-tube-logs"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "cloudflare-tube-staging"
+database_id = "42ecd01d-c942-4061-ac87-fab4ceaa4da8"
+migrations_dir = "src/db/migrations"
+
+[[env.staging.kv_namespaces]]
+binding = "CACHE"
+id = "cb3729ca9d2541d3aa49a9b0438ec34d"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSIONS"
+id = "aefc0b45fee444708a1a58acc5697159"
+
+[[env.staging.queues.producers]]
+binding = "VIDEO_ENCODING"
+queue = "video-encoding-staging"
+
+[[env.staging.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "spooool_video_analytics_staging"
+
+[env.staging.version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[env.staging.durable_objects.bindings]]
+name = "CHANNEL_SUBSCRIBER_DO"
+class_name = "ChannelSubscriberDO"
+
+[[env.staging.durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[env.staging.migrations]]
+tag = "do_v1"
+new_classes = ["ChannelSubscriberDO"]
+
+[[env.staging.migrations]]
+tag = "do_v2"
+new_classes = ["RateLimiterDO"]
+
+[env.staging.triggers]
+crons = ["0 2 * * *"]
+
+[env.staging.vars]
+ALLOWED_ORIGINS = ""
+ADMIN_EMAILS = "aloewright@gmail.com"
+
+# ── production ───────────────────────────────────────────────────────────────
+[env.production]
+name = "spooool"
+workers_dev = true
+
+[env.production.observability.logs]
+enabled = true
+head_sampling_rate = 0.2
+
+[env.production.assets]
+directory = "./dist"
+not_found_handling = "single-page-application"
+run_worker_first = [
+  "/api/*",
+  "/robots.txt",
+  "/sitemap.xml",
+  "/sitemap-static.xml",
+  "/sitemap-videos-*.xml",
+  "/watch/*",
+]
+
+[[env.production.r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "cloudflare-tube-videos"
+
+[[env.production.r2_buckets]]
+binding = "LOGS"
+bucket_name = "cloudflare-tube-logs"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "cloudflare-tube-prod"
+database_id = "bcf1a3f9-3732-4770-aae2-774decf68171"
+migrations_dir = "src/db/migrations"
+
+[[env.production.kv_namespaces]]
+binding = "CACHE"
+id = "3926c69276244c558e2d8aebb42c01e2"
+
+[[env.production.kv_namespaces]]
+binding = "SESSIONS"
+id = "0b560dd1327445bd8b5eb6efca3e82e0"
+
+[[env.production.queues.producers]]
+binding = "VIDEO_ENCODING"
+queue = "video-encoding"
+
+[[env.production.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "spooool_video_analytics"
+
+[env.production.version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[env.production.durable_objects.bindings]]
+name = "CHANNEL_SUBSCRIBER_DO"
+class_name = "ChannelSubscriberDO"
+
+[[env.production.durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[env.production.migrations]]
+tag = "do_v1"
+new_classes = ["ChannelSubscriberDO"]
+
+[[env.production.migrations]]
+tag = "do_v2"
+new_classes = ["RateLimiterDO"]
+
+[env.production.triggers]
+crons = ["0 2 * * *"]
+
+[env.production.vars]
+ALLOWED_ORIGINS = ""
+ADMIN_EMAILS = "aloewright@gmail.com"

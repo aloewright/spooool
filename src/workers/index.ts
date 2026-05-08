@@ -15,6 +15,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { partnersRoutes, type PartnersEnv } from './partners';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -44,7 +45,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & PartnersEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -154,6 +155,7 @@ app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
+app.route('/', partnersRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.

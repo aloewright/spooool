@@ -127,6 +127,9 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # RESEND_API_KEY          (REST key from resend.com/api-keys; lifecycle email is fail-open without it)
 # RESEND_AUDIENCE_ID      (audience to upsert contacts into; contact sync skipped without it)
 # RESEND_FROM             (optional — From header, e.g. "spooool <hello@spooool.com>")
+# POLAR_API_KEY           (ALO-160 — Polar Organization Access Token; partner onboarding fails 503 without it)
+# POLAR_ENVIRONMENT       (optional — set to "sandbox" to route through sandbox-api.polar.sh; defaults to prod)
+# POLAR_DASHBOARD_URL     (optional — onboarding redirect base, defaults to https://polar.sh/dashboard)
 #
 # Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)

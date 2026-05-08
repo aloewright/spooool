@@ -118,7 +118,15 @@ export function Watch(): JSX.Element {
         }
         return (await response.json()) as VideoResponse;
       })
-      .then((data) => setVideo(data))
+      .then((data) => {
+        setVideo(data);
+        // ALO-184: funnel event for "first watch" tracking. PostHog
+        // de-duplicates per-user-first via funnel queries; we just emit
+        // the event on every successful video load.
+        void import('../lib/analytics').then(({ track }) => {
+          track('watch_started', { video_id: data.id });
+        });
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 

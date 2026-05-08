@@ -148,6 +148,11 @@ export function Upload(): JSX.Element {
     try {
       await uploadInChunks(file, title, description, setProgress);
       setStatus('Upload complete');
+      // ALO-184: funnel event. Fire-and-forget — analytics must never
+      // affect upload UX.
+      void import('../lib/analytics').then(({ track }) => {
+        track('upload_completed', { size_bytes: file.size, mime: file.type || 'unknown' });
+      });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     }

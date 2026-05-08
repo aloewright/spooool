@@ -37,6 +37,7 @@ const ForgotPassword = lazy(() =>
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
+const Inbox = lazy(() => import('./pages/Inbox').then((m) => ({ default: m.Inbox })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -74,6 +75,44 @@ function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   );
 }
 
+function InboxBadge(): JSX.Element {
+  const [count, setCount] = useState<number>(0);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/users/me/inbox?unseenOnly=1&limit=100', { credentials: 'include' })
+      .then(async (r) => (r.ok ? ((await r.json()) as { items: unknown[] }) : { items: [] }))
+      .then((data) => {
+        if (!cancelled) setCount(data.items.length);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return (
+    <Link to="/inbox" aria-label={`Inbox${count > 0 ? `, ${count} unseen` : ''}`}>
+      <button type="button" className="btn btn--ghost btn--sm">
+        Inbox
+        {count > 0 && (
+          <span
+            style={{
+              marginLeft: 6,
+              background: 'var(--color-accent, #06f)',
+              color: '#fff',
+              borderRadius: 999,
+              padding: '0 6px',
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            {count > 99 ? '99+' : count}
+          </span>
+        )}
+      </button>
+    </Link>
+  );
+}
+
 function HeaderNav(): JSX.Element {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
@@ -101,6 +140,7 @@ function HeaderNav(): JSX.Element {
       <Link to="/upload">
         <button type="button" className="btn btn--secondary btn--sm">Upload</button>
       </Link>
+      <InboxBadge />
       <Link to="/profile">
         <button type="button" className="btn btn--ghost btn--sm">Profile</button>
       </Link>
@@ -528,6 +568,14 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <AccountSettings />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/inbox"
+            element={
+              <RequireAuth>
+                <Inbox />
               </RequireAuth>
             }
           />

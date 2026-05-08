@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { HELP_ARTICLE_SLUGS } from '../shared/helpArticles';
 
 export interface SeoEnv {
   DB: D1Database;
@@ -238,11 +239,6 @@ async function loadCatalogLastMod(db: D1Database): Promise<string | undefined> {
     .first<{ lastmod: string | null }>();
   return toW3CDate(row?.lastmod ?? null);
 }
-
-// ALO-183: keep this list in sync with the ARTICLES catalog in
-// src/frontend/pages/Help.tsx. Hard-coded here to avoid pulling the React
-// module graph into the SEO worker bundle.
-const HELP_ARTICLE_SLUGS = ['quickstart', 'upload-guide', 'encoding-tips', 'monetization-faq'] as const;
 
 function buildStaticUrls(origin: string, channelRows: { username: string; updated_at: string }[]): SitemapUrl[] {
   const urls: SitemapUrl[] = [

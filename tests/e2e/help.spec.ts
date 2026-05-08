@@ -31,5 +31,6 @@ test.describe('help center', () => {
     await page.goto('/');
     const helpLink = page.locator('footer').getByRole('link', { name: /^help$/i });
     await expect(helpLink).toBeVisible();
+    await expect(helpLink).toHaveAttribute('href', '/help');
   });
 });

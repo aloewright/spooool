@@ -6,13 +6,15 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
+import { HELP_ARTICLE_SLUGS, type HelpArticleSlug } from '../../shared/helpArticles';
+
 type Section = {
   heading: string;
   body: string[];
 };
 
 type Article = {
-  slug: string;
+  slug: HelpArticleSlug;
   title: string;
   blurb: string;
   sections: Section[];
@@ -168,6 +170,15 @@ const ARTICLES: Article[] = [
     ],
   },
 ];
+
+// Drift guard: every slug the SEO worker advertises in the sitemap must have
+// a rendered article here. Throws at module load so a missing entry is caught
+// in CI / dev before reaching production.
+for (const slug of HELP_ARTICLE_SLUGS) {
+  if (!ARTICLES.some((a) => a.slug === slug)) {
+    throw new Error(`Help article missing for slug "${slug}"`);
+  }
+}
 
 function searchArticles(query: string): Article[] {
   const q = query.trim().toLowerCase();

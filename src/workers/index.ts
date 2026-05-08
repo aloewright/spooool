@@ -29,6 +29,7 @@ import { rumRoutes } from './rum';
 import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
+import { handlePolarWebhook } from './polar-webhook';
 import { handleStreamWebhook } from './stream-webhook';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
@@ -47,6 +48,7 @@ type SessionUser = {
 type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
+  POLAR_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
@@ -83,6 +85,7 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+app.post('/api/webhooks/polar', handlePolarWebhook());
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).

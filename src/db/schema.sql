@@ -185,7 +185,8 @@ CREATE TABLE IF NOT EXISTS creator_payouts (
   payouts_enabled INTEGER NOT NULL DEFAULT 0,
   details_submitted INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS tips (
@@ -205,8 +206,10 @@ CREATE TABLE IF NOT EXISTS tips (
   stripe_payment_intent TEXT,
   created_at INTEGER NOT NULL,
   paid_at INTEGER,
-  FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+  FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE,
+  FOREIGN KEY (creator_user_id) REFERENCES user(id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_tips_video_paid ON tips(video_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tips_creator ON tips(creator_user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tips_payment_intent ON tips(stripe_payment_intent);

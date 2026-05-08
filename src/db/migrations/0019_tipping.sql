@@ -45,3 +45,8 @@ CREATE INDEX IF NOT EXISTS idx_tips_video_paid
   ON tips(video_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tips_creator
   ON tips(creator_user_id, created_at DESC);
+-- Webhook handlers (charge.refunded, payment_intent.payment_failed) look up
+-- rows by stripe_payment_intent. Without this index those queries scan the
+-- whole table.
+CREATE INDEX IF NOT EXISTS idx_tips_payment_intent
+  ON tips(stripe_payment_intent);

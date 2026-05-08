@@ -303,7 +303,11 @@ tipRoutes.post('/api/videos/:id/tips/checkout', async (c) => {
   if (!video) return c.json({ error: 'Video not found' }, 404);
 
   const creatorPayout = await getCreatorPayout(c.env.DB, video.user_id);
-  if (!creatorPayout || creatorPayout.charges_enabled !== 1) {
+  if (
+    !creatorPayout ||
+    creatorPayout.charges_enabled !== 1 ||
+    creatorPayout.payouts_enabled !== 1
+  ) {
     return c.json({ error: 'Creator is not accepting tips yet' }, 409);
   }
 
@@ -405,9 +409,9 @@ export async function handleStripeWebhook(env: TipsEnv, req: Request): Promise<R
     const pi = typeof session.payment_intent === 'string' ? session.payment_intent : null;
     await env.DB.prepare(
       `UPDATE tips SET status = 'paid', paid_at = ?, stripe_payment_intent = ?
-       WHERE id = ? AND status = 'pending'`,
+       WHERE id = ? AND stripe_session_id = ? AND status = 'pending'`,
     )
-      .bind(paidAt, pi, meta.tip_id)
+      .bind(paidAt, pi, meta.tip_id, session.id)
       .run();
   } else if (event.type === 'checkout.session.async_payment_failed') {
     const session = event.data.object as Stripe.Checkout.Session;

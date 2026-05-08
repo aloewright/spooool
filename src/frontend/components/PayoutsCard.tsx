@@ -73,7 +73,7 @@ export function PayoutsCard(): JSX.Element {
             Connected to Stripe. Tips are routed via Stripe Connect; spooool retains a 10% platform fee.
           </p>
           <button type="button" className="btn btn--ghost btn--sm" disabled={busy} onClick={() => void startOnboarding()}>
-            Update Stripe details
+            {busy ? 'Redirecting…' : 'Update Stripe details'}
           </button>
         </>
       ) : status?.connected ? (

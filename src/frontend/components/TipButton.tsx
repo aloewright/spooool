@@ -99,7 +99,8 @@ export function TipButton({ videoId }: TipButtonProps): JSX.Element {
                 onChange={(e) => {
                   const dollars = Number.parseFloat(e.target.value);
                   if (Number.isFinite(dollars) && dollars > 0) {
-                    setAmountCents(Math.round(dollars * 100));
+                    const clamped = Math.min(500, Math.max(1, dollars));
+                    setAmountCents(Math.round(clamped * 100));
                   }
                 }}
                 style={{ width: 80 }}

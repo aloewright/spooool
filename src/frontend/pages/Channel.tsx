@@ -12,6 +12,7 @@ interface ChannelHeader {
   bannerUrl: string | null;
   subscriberCount: number;
   videoCount: number;
+  totalViews: number;
 }
 
 interface ChannelVideo {
@@ -209,7 +210,7 @@ export function Channel(): JSX.Element {
             <span className="ds-meta">@{header.username}</span>
           ) : null}
           <span className="ds-meta">
-            {sub?.subscriberCount ?? header.subscriberCount} subscribers · {header.videoCount} videos
+            {sub?.subscriberCount ?? header.subscriberCount} subscribers · {header.videoCount} videos · {header.totalViews.toLocaleString()} views
           </span>
         </div>
         {isOwner ? (

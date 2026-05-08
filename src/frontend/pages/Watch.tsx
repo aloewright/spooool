@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
 import { ReportButton } from '../components/ReportButton';
+import { TipButton } from '../components/TipButton';
 import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
@@ -613,6 +614,7 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
+        {id ? <TipButton videoId={id} /> : null}
         {id ? <ReportButton targetType="video" targetId={id} /> : null}
       </div>
       {/* ALO-158: web-intent links — no third-party SDKs, no tracking. The

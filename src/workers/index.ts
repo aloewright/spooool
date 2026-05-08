@@ -31,6 +31,7 @@ import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
 import { handleStreamWebhook } from './stream-webhook';
 import { subscriptionRoutes } from './subscriptions';
+import { handleStripeWebhook, tipRoutes } from './tips';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
@@ -56,6 +57,11 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RESEND_API_KEY?: string;
   RESEND_AUDIENCE_ID?: string;
   RESEND_FROM?: string;
+  // ALO-162: Stripe Connect for per-video tipping. When unset, tip routes
+  // return 503 — the rest of the app is unaffected.
+  STRIPE_SECRET_KEY?: string;
+  STRIPE_WEBHOOK_SECRET?: string;
+  PUBLIC_ORIGIN?: string;
   // Cloudflare static assets binding (auto-injected when [assets] is set in
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.
@@ -83,6 +89,11 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+
+// ALO-162: Stripe webhook for Connect Checkout tip completions. Verifies
+// the signature inside the handler (constructEventAsync) — never trust
+// payloads here.
+app.post('/api/webhooks/stripe', (c) => handleStripeWebhook(c.env, c.req.raw));
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -142,6 +153,7 @@ app.route('/', likeRoutes);
 app.route('/', commentRoutes);
 app.route('/', analyticsRoutes);
 app.route('/', subscriptionRoutes);
+app.route('/', tipRoutes);
 app.route('/', rumRoutes);
 app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);

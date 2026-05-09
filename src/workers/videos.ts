@@ -8,6 +8,15 @@ import {
   rateLimitHeaders,
 } from './rate-limit';
 import {
+  abortUploadSession,
+  deleteUploadSession,
+  readUploadSession,
+  uploadedChunkIndices,
+  UPLOAD_SESSION_TTL_SECONDS,
+  uploadSessionKeys,
+  type UploadPartsMap,
+} from './upload-session';
+import {
   MAX_VIDEO_BYTES,
   parseChunkMetadataFromFormData,
   validateChunkShape,
@@ -72,58 +81,10 @@ const uploadMetadataSchema = z.object({
   description: z.string().max(5000).optional().default(''),
 });
 
-const uploadMetaPersistedSchema = z.object({
-  videoId: z.string(),
-  r2Key: z.string(),
-  title: z.string(),
-  description: z.string(),
-  chunkCount: z.number().int().positive(),
-});
-
-function uploadKvBase(userId: string, uploadId: string): string {
-  return `upload:${userId}:${uploadId}`;
-}
-
 export const videoRoutes = new Hono<{
   Bindings: VideoRoutesEnv;
   Variables: VideoRoutesVariables;
 }>();
-
-// ALO-121: resume-on-disconnect. Lets the client re-derive which chunks the
-// server already has after a network failure, so we don't re-upload bytes
-// the multipart already accepted. Auth-gated by user-scoped KV key.
-videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
-  const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
-  const uploadId = c.req.param('uploadId');
-  const baseKvKey = uploadKvBase(user.id, uploadId);
-  const [metaJson, partsJson, mpid] = await Promise.all([
-    c.env.SESSIONS.get(`${baseKvKey}:meta`),
-    c.env.SESSIONS.get(`${baseKvKey}:parts`),
-    c.env.SESSIONS.get(`${baseKvKey}:mpid`),
-  ]);
-  if (!metaJson || !mpid) {
-    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
-  }
-  const meta = uploadMetaPersistedSchema.parse(JSON.parse(metaJson));
-  const partsMap = partsJson
-    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
-    : {};
-  // Stored part numbers are 1-indexed; client uses 0-indexed chunk indexes.
-  const received = Object.keys(partsMap)
-    .map((p) => Number(p) - 1)
-    .filter((i) => Number.isInteger(i) && i >= 0)
-    .sort((a, b) => a - b);
-  const bytesReceived = Object.values(partsMap).reduce((sum, p) => sum + p.size, 0);
-  return c.json({
-    uploadId,
-    chunkCount: meta.chunkCount,
-    received,
-    bytesReceived,
-    complete: false,
-  });
-});
 
 videoRoutes.get('/api/videos/trending', async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
@@ -471,13 +432,34 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   }
 
   const resolvedUploadId = uploadId ?? crypto.randomUUID();
-
-  const baseKvKey = uploadKvBase(user.id, resolvedUploadId);
-  const mpidKey = `${baseKvKey}:mpid`;
-  const metaKey = `${baseKvKey}:meta`;
-  const partsKey = `${baseKvKey}:parts`;
+  const keys = uploadSessionKeys(user.id, resolvedUploadId);
 
   if (chunkIndex === 0) {
+    // ALO-121: idempotent chunk-0 retry. If the client already opened a
+    // multipart for this uploadId (network blip swallowed our 202 and the
+    // client retried with the same uploadId), reuse the existing R2
+    // multipart instead of creating a second one — otherwise we'd leak
+    // an orphaned multipart and the parts manifest would split across two.
+    const existing = uploadId ? await readUploadSession(env, user.id, uploadId) : null;
+    if (existing) {
+      const multipart = env.VIDEOS.resumeMultipartUpload(
+        existing.meta.r2Key,
+        existing.multipartUploadId,
+      );
+      const firstPart = await multipart.uploadPart(1, rawFile.stream());
+      const updatedParts: UploadPartsMap = {
+        ...existing.parts,
+        '1': { etag: firstPart.etag, size: rawFile.size },
+      };
+      await env.SESSIONS.put(keys.parts, JSON.stringify(updatedParts), {
+        expirationTtl: UPLOAD_SESSION_TTL_SECONDS,
+      });
+      return c.json(
+        { status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId },
+        202,
+      );
+    }
+
     const videoId = crypto.randomUUID();
     const r2Key = `${user.id}/${videoId}/${rawFile.name}`;
     const multipart = await env.VIDEOS.createMultipartUpload(r2Key, {
@@ -486,60 +468,44 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
     const firstPart = await multipart.uploadPart(1, rawFile.stream());
 
-    await env.SESSIONS.put(mpidKey, multipart.uploadId, { expirationTtl: 86400 });
+    await env.SESSIONS.put(keys.mpid, multipart.uploadId, {
+      expirationTtl: UPLOAD_SESSION_TTL_SECONDS,
+    });
     await env.SESSIONS.put(
-      metaKey,
+      keys.meta,
       JSON.stringify({
         videoId,
         r2Key,
         title: metadataParsed.data.title,
         description: metadataParsed.data.description,
         chunkCount,
+        fileName: rawFile.name,
+        fileSize: rawFile.size,
       }),
-      { expirationTtl: 86400 },
+      { expirationTtl: UPLOAD_SESSION_TTL_SECONDS },
     );
-    await env.SESSIONS.put(
-      partsKey,
-      JSON.stringify({ '1': { etag: firstPart.etag, size: rawFile.size } } as Record<
-        string,
-        { etag: string; size: number }
-      >),
-      { expirationTtl: 86400 },
-    );
+    const initialParts: UploadPartsMap = {
+      '1': { etag: firstPart.etag, size: rawFile.size },
+    };
+    await env.SESSIONS.put(keys.parts, JSON.stringify(initialParts), {
+      expirationTtl: UPLOAD_SESSION_TTL_SECONDS,
+    });
     return c.json({ status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId }, 202);
   }
 
-  const [multipartUploadId, uploadMetaJson, partsJson] = await Promise.all([
-    env.SESSIONS.get(mpidKey),
-    env.SESSIONS.get(metaKey),
-    env.SESSIONS.get(partsKey),
-  ]);
-
-  if (!multipartUploadId || !uploadMetaJson) {
+  const session = await readUploadSession(env, user.id, resolvedUploadId);
+  if (!session) {
     return c.json({ error: 'Missing upload session. Start with chunkIndex=0.' }, 400);
   }
 
-  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+  const uploadMeta = session.meta;
+  const uploadedPartsMap: UploadPartsMap = { ...session.parts };
 
-  const uploadedPartsMap = partsJson
-    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
-    : {};
-
-  // ALO-121: idempotent retry. If the client retries a chunk we already
-  // accepted (typical on flaky connections where the response was lost),
-  // ack without re-paying the multipart upload cost.
-  const partKey = String(chunkIndex + 1);
-  if (uploadedPartsMap[partKey]) {
-    if (chunkIndex < chunkCount - 1) {
-      return c.json(
-        { status: 'chunk_received', chunkIndex, chunkCount, idempotent: true },
-        202,
-      );
-    }
-    // Final chunk re-send: fall through so completion logic still runs.
-  }
-
-  const priorBytes = Object.values(uploadedPartsMap).reduce((sum, part) => sum + part.size, 0);
+  // chunk-N retries are idempotent: re-uploading a part overwrites the
+  // previous one in R2, and the parts manifest just gets the new etag/size.
+  const priorBytes = Object.entries(uploadedPartsMap)
+    .filter(([partNumber]) => Number(partNumber) !== chunkIndex + 1)
+    .reduce((sum, [, part]) => sum + part.size, 0);
   if (priorBytes + rawFile.size > MAX_VIDEO_BYTES) {
     return c.json(
       { error: `Upload exceeds ${MAX_VIDEO_BYTES} bytes`, code: 'file_too_large' },
@@ -547,15 +513,13 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     );
   }
 
-  const multipart = env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
-  const alreadyHavePart = Boolean(uploadedPartsMap[partKey]);
-  if (!alreadyHavePart) {
-    const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
-    uploadedPartsMap[partKey] = { etag: uploadedPart.etag, size: rawFile.size };
-    await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), {
-      expirationTtl: 86400,
-    });
-  }
+  const multipart = env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, session.multipartUploadId);
+  const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
+
+  uploadedPartsMap[String(chunkIndex + 1)] = { etag: uploadedPart.etag, size: rawFile.size };
+  await env.SESSIONS.put(keys.parts, JSON.stringify(uploadedPartsMap), {
+    expirationTtl: UPLOAD_SESSION_TTL_SECONDS,
+  });
 
   if (chunkIndex < chunkCount - 1) {
     return c.json({ status: 'chunk_received', chunkIndex, chunkCount }, 202);
@@ -572,15 +536,11 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // ALO-139: authoritative quota check at completion. Catches the case
   // where the first-chunk precheck passed but a parallel upload (or a
   // very large total via many small chunks) would push the user over.
-  const totalBytes = Object.values(uploadedPartsMap).reduce((sum, p) => sum + p.size, 0);
+  const totalBytes = priorBytes + rawFile.size;
   const finalUsage = await getStorageUsage(env, user.id);
   if (!hasRoomFor(finalUsage, totalBytes)) {
     await multipart.abort().catch(() => {});
-    await Promise.all([
-      env.SESSIONS.delete(mpidKey),
-      env.SESSIONS.delete(metaKey),
-      env.SESSIONS.delete(partsKey),
-    ]);
+    await deleteUploadSession(env, user.id, resolvedUploadId);
     return c.json(
       {
         error: 'Storage quota exceeded.',
@@ -615,9 +575,48 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   });
   await bumpTrendingCacheVersion(env.CACHE);
 
-  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+  await deleteUploadSession(env, user.id, resolvedUploadId);
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
+});
+
+// ALO-121 resume support. The frontend persists `uploadId` to localStorage
+// after chunk-0; on remount/reload it calls this endpoint to learn which
+// chunks (0-indexed) are already on the server, then re-uploads only the
+// missing ones. The session row in KV doubles as the source of truth for
+// `chunkCount`/`r2Key`/file fingerprint, so a stale localStorage entry
+// (different file picked, session expired) is detected here.
+videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const uploadId = c.req.param('uploadId');
+  const session = await readUploadSession(c.env, user.id, uploadId);
+  if (!session) {
+    return c.json({ error: 'Upload session not found' }, 404);
+  }
+
+  return c.json({
+    uploadId,
+    chunkCount: session.meta.chunkCount,
+    uploadedChunks: uploadedChunkIndices(session.parts),
+    fileName: session.meta.fileName ?? null,
+    fileSize: session.meta.fileSize ?? null,
+    title: session.meta.title,
+    description: session.meta.description,
+  });
+});
+
+// ALO-121 user-initiated cancel. Aborts the R2 multipart so storage
+// isn't billed for orphaned parts and clears the KV session keys.
+// Idempotent: returns 204 whether the session existed or not.
+videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const uploadId = c.req.param('uploadId');
+  await abortUploadSession(c.env, user.id, uploadId);
+  return c.body(null, 204);
 });
 
 videoRoutes.delete('/api/videos/:id', async (c) => {

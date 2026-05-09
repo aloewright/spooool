@@ -1,7 +1,19 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '../lib/auth-client';
+import {
+  cancelUpload,
+  chunkCountFor,
+  clearResumeRecord,
+  fetchUploadStatus,
+  fingerprintFile,
+  fingerprintsMatch,
+  loadResumeRecord,
+  saveResumeRecord,
+  uploadFileInChunks,
+  UploadAbortedError,
+  type ResumeRecord,
+} from '../lib/upload-resume';
 
-const CHUNK_SIZE = 10 * 1024 * 1024;
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   'mp4',
@@ -23,128 +35,6 @@ function isAcceptedVideo(file: File): boolean {
   const dot = file.name.lastIndexOf('.');
   if (dot < 0) return false;
   return ALLOWED_EXTENSIONS.has(file.name.slice(dot + 1).toLowerCase());
-}
-
-function resumeKey(file: File): string {
-  return `spooool:upload:${file.name}:${file.size}:${file.lastModified}`;
-}
-
-async function fetchResumeState(
-  uploadId: string,
-): Promise<{ received: number[]; chunkCount: number } | null> {
-  try {
-    const res = await fetch(`/api/videos/upload/${encodeURIComponent(uploadId)}/status`, {
-      credentials: 'same-origin',
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { received?: number[]; chunkCount?: number };
-    if (typeof data.chunkCount !== 'number' || !Array.isArray(data.received)) return null;
-    return { received: data.received, chunkCount: data.chunkCount };
-  } catch {
-    return null;
-  }
-}
-
-async function uploadInChunks(
-  file: File,
-  title: string,
-  description: string,
-  onProgress: (value: number) => void,
-): Promise<Response> {
-  const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-  let lastResponse: Response | null = null;
-  let uploadId: string | null = null;
-  const received = new Set<number>();
-
-  // ALO-121: resume across page reloads / disconnects. Persist uploadId
-  // keyed by file identity so a refresh continues where the last attempt
-  // left off; the server is the source of truth for which chunks landed.
-  const persistKey = resumeKey(file);
-  const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(persistKey) : null;
-  if (stored) {
-    const state = await fetchResumeState(stored);
-    if (state && state.chunkCount === chunkCount) {
-      uploadId = stored;
-      for (const i of state.received) received.add(i);
-      if (received.size > 0) {
-        onProgress(Math.round((received.size / chunkCount) * 100));
-      }
-    } else {
-      try { localStorage.removeItem(persistKey); } catch { /* private mode */ }
-    }
-  }
-
-  for (let index = 0; index < chunkCount; index += 1) {
-    if (received.has(index) && index < chunkCount - 1) {
-      // Final chunk must still be sent so the server can run completion;
-      // intermediate chunks the server already has can be skipped.
-      onProgress(Math.round(((index + 1) / chunkCount) * 100));
-      continue;
-    }
-    const start = index * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    const chunk = file.slice(start, end, file.type);
-
-    let attempt = 0;
-    const maxAttempts = 4;
-    // Per-chunk retry with exponential backoff. Network blips and 5xx are
-    // transient; the server is idempotent on chunk re-submission so retries
-    // are safe.
-    while (true) {
-      const formData = new FormData();
-      formData.set('title', title);
-      formData.set('description', description);
-      formData.set('file', chunk, file.name);
-      formData.set('chunkIndex', String(index));
-      formData.set('chunkCount', String(chunkCount));
-      if (uploadId) formData.set('uploadId', uploadId);
-
-      let res: Response;
-      try {
-        res = await fetch('/api/videos/upload', { method: 'POST', body: formData });
-      } catch (err) {
-        if (++attempt >= maxAttempts) throw err;
-        await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
-        continue;
-      }
-
-      if (res.ok) {
-        lastResponse = res;
-        const responseData = (await res.json()) as { uploadId?: string };
-        if (responseData.uploadId) {
-          uploadId = responseData.uploadId;
-          try { localStorage.setItem(persistKey, uploadId); } catch { /* private mode */ }
-        }
-        received.add(index);
-        break;
-      }
-
-      if (res.status >= 500 && ++attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
-        continue;
-      }
-
-      const body = await res.text();
-      let detail = body;
-      try {
-        const parsed = JSON.parse(body) as { error?: string; code?: string };
-        detail = parsed.error ?? body;
-        if (parsed.code) detail = `${detail} (${parsed.code})`;
-      } catch {
-        /* non-JSON */
-      }
-      throw new Error(`Upload failed (${res.status}): ${detail.slice(0, 300)}`);
-    }
-
-    onProgress(Math.round(((index + 1) / chunkCount) * 100));
-  }
-
-  try { localStorage.removeItem(persistKey); } catch { /* private mode */ }
-
-  if (!lastResponse) {
-    throw new Error('No upload response');
-  }
-  return lastResponse;
 }
 
 async function resendVerification(): Promise<{ ok: boolean; error: string | null }> {
@@ -172,6 +62,8 @@ async function resendVerification(): Promise<{ ok: boolean; error: string | null
   return { ok: false, error: message };
 }
 
+type UploadStatus = 'idle' | 'uploading' | 'retrying' | 'offline' | 'paused' | 'done' | 'error';
+
 export function Upload(): JSX.Element {
   const { data: session } = useSession();
   const [file, setFile] = useState<File | null>(null);
@@ -179,8 +71,10 @@ export function Upload(): JSX.Element {
   const [description, setDescription] = useState('');
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<UploadStatus>('idle');
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [pendingResume, setPendingResume] = useState<ResumeRecord | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const isEmailVerified = session?.user?.emailVerified !== false;
   const isValidFile = useMemo(() => {
@@ -190,10 +84,105 @@ export function Upload(): JSX.Element {
     return file.size <= MAX_SIZE && isAcceptedVideo(file);
   }, [file]);
 
+  // ALO-121: surface a saved resume offer on mount. The user has to re-pick
+  // the same file — the File API doesn't let us hold a handle across reloads —
+  // and we verify the fingerprint matches before offering resume.
+  useEffect(() => {
+    const stored = loadResumeRecord();
+    if (stored) {
+      setPendingResume(stored);
+      setTitle(stored.title);
+      setDescription(stored.description);
+    }
+  }, []);
+
+  const canResumeWithFile = useMemo(() => {
+    if (!file || !pendingResume) return false;
+    return fingerprintsMatch(fingerprintFile(file), pendingResume.fingerprint);
+  }, [file, pendingResume]);
+
+  async function runUpload(resume: ResumeRecord | null): Promise<void> {
+    if (!file) return;
+    setError(null);
+    setStatus('uploading');
+    setProgress(0);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let uploadIdForResume = resume?.uploadId ?? null;
+    let skipChunks = new Set<number>();
+
+    if (resume) {
+      try {
+        const remote = await fetchUploadStatus(resume.uploadId);
+        if (remote && remote.chunkCount === resume.chunkCount) {
+          skipChunks = new Set(remote.uploadedChunks);
+        } else {
+          // Server forgot the session — start fresh.
+          uploadIdForResume = null;
+          clearResumeRecord();
+          setPendingResume(null);
+        }
+      } catch (err) {
+        // If the status probe fails, fall back to a fresh upload rather
+        // than getting stuck. The previous multipart in R2 will be cleaned
+        // up by R2's lifecycle policy.
+        uploadIdForResume = null;
+        clearResumeRecord();
+        setPendingResume(null);
+        setError(err instanceof Error ? err.message : 'Could not check resume state');
+      }
+    }
+
+    const chunkCount = chunkCountFor(file.size);
+    const fingerprint = fingerprintFile(file);
+
+    try {
+      const result = await uploadFileInChunks(
+        file,
+        { title, description },
+        {
+          uploadId: uploadIdForResume ?? undefined,
+          skipChunks,
+          signal: controller.signal,
+        },
+        {
+          onProgress: (p) => setProgress(Math.round(p.fraction * 100)),
+          onStatus: (s) => setStatus(s),
+          onUploadId: (uploadId) => {
+            const record: ResumeRecord = {
+              uploadId,
+              chunkCount,
+              fingerprint,
+              title,
+              description,
+              createdAt: Date.now(),
+            };
+            saveResumeRecord(record);
+            setPendingResume(record);
+          },
+        },
+      );
+      clearResumeRecord();
+      setPendingResume(null);
+      setStatus('done');
+      setProgress(100);
+      void result;
+    } catch (err: unknown) {
+      if (err instanceof UploadAbortedError) {
+        setStatus('paused');
+        return;
+      }
+      setStatus('error');
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      abortRef.current = null;
+    }
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    setError(null);
-    setStatus(null);
 
     if (!file) {
       setError('Please choose a file');
@@ -208,12 +197,29 @@ export function Upload(): JSX.Element {
       return;
     }
 
-    try {
-      await uploadInChunks(file, title, description, setProgress);
-      setStatus('Upload complete');
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+    const resume = canResumeWithFile ? pendingResume : null;
+    await runUpload(resume);
+  }
+
+  async function onCancel(): Promise<void> {
+    abortRef.current?.abort();
+    if (pendingResume) {
+      await cancelUpload(pendingResume.uploadId);
+      clearResumeRecord();
+      setPendingResume(null);
     }
+    setStatus('idle');
+    setProgress(0);
+  }
+
+  function onDiscardResume(): void {
+    if (pendingResume) {
+      void cancelUpload(pendingResume.uploadId);
+    }
+    clearResumeRecord();
+    setPendingResume(null);
+    setTitle('');
+    setDescription('');
   }
 
   return (
@@ -244,6 +250,26 @@ export function Upload(): JSX.Element {
             </button>
           </div>
           {resendStatus ? <p className="ds-meta">{resendStatus}</p> : null}
+        </div>
+      ) : null}
+
+      {pendingResume ? (
+        <div className="card stack-sm" data-testid="resume-banner">
+          <strong>You have an unfinished upload.</strong>
+          <p className="ds-meta">
+            <code>{pendingResume.fingerprint.name}</code> ({Math.round(
+              pendingResume.fingerprint.size / (1024 * 1024),
+            )}{' '}
+            MB).{' '}
+            {canResumeWithFile
+              ? 'Re-selecting the same file will resume where you left off.'
+              : 'Pick the same file to resume, or discard to start over.'}
+          </p>
+          <div className="row" style={{ gap: '0.5rem' }}>
+            <button type="button" className="btn btn--secondary btn--sm" onClick={onDiscardResume}>
+              Discard unfinished upload
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -293,7 +319,15 @@ export function Upload(): JSX.Element {
 
         <div className="stack-sm">
           <div className="row" style={{ justifyContent: 'space-between' }}>
-            <span className="ds-label">Upload progress</span>
+            <span className="ds-label">
+              {status === 'offline'
+                ? 'Waiting for connection…'
+                : status === 'retrying'
+                  ? 'Retrying…'
+                  : status === 'paused'
+                    ? 'Paused'
+                    : 'Upload progress'}
+            </span>
             <span className="ds-meta">{progress}%</span>
           </div>
           <div
@@ -307,15 +341,24 @@ export function Upload(): JSX.Element {
           </div>
         </div>
 
-        <div>
-          <button type="submit" className="btn" disabled={!isValidFile || !isEmailVerified}>
-            Upload
+        <div className="row" style={{ gap: '0.5rem' }}>
+          <button
+            type="submit"
+            className="btn"
+            disabled={!isValidFile || !isEmailVerified || status === 'uploading' || status === 'retrying'}
+          >
+            {canResumeWithFile ? 'Resume upload' : 'Upload'}
           </button>
+          {status === 'uploading' || status === 'retrying' || status === 'offline' ? (
+            <button type="button" className="btn btn--secondary" onClick={() => void onCancel()}>
+              Cancel
+            </button>
+          ) : null}
         </div>
       </form>
 
       {error ? <p className="status-error">{error}</p> : null}
-      {status ? <p className="status-ok">{status}</p> : null}
+      {status === 'done' ? <p className="status-ok">Upload complete</p> : null}
     </main>
   );
 }

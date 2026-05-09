@@ -13,8 +13,10 @@ import { healthRoutes } from './health';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
+import { monetizationRoutes, type MonetizationEnv } from './monetization';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { handlePolarWebhook } from './polar-webhook';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -44,7 +46,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & MonetizationEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -83,6 +85,7 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+app.post('/api/webhooks/polar', handlePolarWebhook());
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -142,6 +145,7 @@ app.route('/', likeRoutes);
 app.route('/', commentRoutes);
 app.route('/', analyticsRoutes);
 app.route('/', subscriptionRoutes);
+app.route('/', monetizationRoutes);
 app.route('/', rumRoutes);
 app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);

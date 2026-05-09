@@ -127,6 +127,11 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # RESEND_API_KEY          (REST key from resend.com/api-keys; lifecycle email is fail-open without it)
 # RESEND_AUDIENCE_ID      (audience to upsert contacts into; contact sync skipped without it)
 # RESEND_FROM             (optional — From header, e.g. "spooool <hello@spooool.com>")
+# POLAR_ACCESS_TOKEN      (ALO-125 — polar.sh API token for monetization)
+# POLAR_ORGANIZATION_ID   (ALO-125 — Polar org id used as parent for products + partners)
+# POLAR_WEBHOOK_SECRET    (ALO-125 — Standard Webhooks signing secret; whsec_<base64> or plain)
+# POLAR_PLATFORM_FEE_BPS  (ALO-125 — spooool revenue share in basis points; default 1000 = 10%)
+# PUBLIC_ORIGIN           (ALO-125 — public origin for Polar return/cancel URLs, e.g. https://spooool.com)
 #
 # Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)

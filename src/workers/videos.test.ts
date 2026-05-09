@@ -2,6 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 
+// Minimum valid ISO BMFF (mp4) header — 'ftyp' box with the 'isom' brand.
+// Used as a fixture so uploads pass the ALO-140 magic-byte sniffer; tests
+// that focus on later gates (quota, etc.) still need a valid container.
+function mp4Bytes(totalSize: number): Uint8Array<ArrayBuffer> {
+  const header = [
+    0x00, 0x00, 0x00, 0x20, // box size
+    0x66, 0x74, 0x79, 0x70, // 'ftyp'
+    0x69, 0x73, 0x6f, 0x6d, // major brand 'isom'
+    0x00, 0x00, 0x00, 0x00, // minor version
+    0x69, 0x73, 0x6f, 0x6d, // compatible 'isom'
+    0x6d, 0x70, 0x34, 0x32, // compatible 'mp42'
+    0x61, 0x76, 0x63, 0x31, // compatible 'avc1'
+    0x00, 0x00, 0x00, 0x00, // pad
+  ];
+  const out = new Uint8Array(new ArrayBuffer(Math.max(totalSize, header.length)));
+  out.set(header, 0);
+  return totalSize >= header.length
+    ? out
+    : new Uint8Array(out.buffer.slice(0, totalSize));
+}
+
 interface QuotaState {
   used: number;
   quota: number;
@@ -116,7 +137,7 @@ describe('upload storage-quota gate', () => {
     fd.set('title', 'hi');
     fd.set('description', '');
     // 200 bytes incoming, 100 bytes remaining → over quota.
-    fd.set('file', new Blob([new Uint8Array(200)], { type: 'video/mp4' }), 'clip.mp4');
+    fd.set('file', new Blob([mp4Bytes(200)], { type: 'video/mp4' }), 'clip.mp4');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
     const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });
@@ -134,7 +155,7 @@ describe('upload storage-quota gate', () => {
     const fd = new FormData();
     fd.set('title', 'hi');
     fd.set('description', '');
-    fd.set('file', new Blob([new Uint8Array(5)], { type: 'video/mp4' }), 'clip.mp4');
+    fd.set('file', new Blob([mp4Bytes(64)], { type: 'video/mp4' }), 'clip.mp4');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
     const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });

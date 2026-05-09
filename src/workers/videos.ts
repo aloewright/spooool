@@ -8,10 +8,12 @@ import {
   rateLimitHeaders,
 } from './rate-limit';
 import {
+  MAGIC_HEADER_BYTES,
   MAX_VIDEO_BYTES,
   parseChunkMetadataFromFormData,
   validateChunkShape,
   validateInitialFile,
+  validateMagicBytes,
 } from './upload-validation';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
@@ -378,6 +380,19 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     });
     if (initialError) {
       return c.json({ error: initialError.message, code: initialError.code }, 400);
+    }
+
+    // ALO-140: sniff the actual file header before any R2 write or multipart
+    // open. Slicing a Blob doesn't consume it, so the original rawFile.stream()
+    // below still produces the full payload.
+    const headerBlob = rawFile.slice(0, MAGIC_HEADER_BYTES);
+    const headerBytes = new Uint8Array(await headerBlob.arrayBuffer());
+    const magicError = validateMagicBytes({
+      fileName: rawFile.name,
+      headerBytes,
+    });
+    if (magicError) {
+      return c.json({ error: magicError.message, code: magicError.code }, 400);
     }
 
     // ALO-139: precheck the user's storage quota before we pay for the

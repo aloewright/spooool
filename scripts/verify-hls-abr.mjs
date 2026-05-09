@@ -28,7 +28,9 @@ function parseAttributes(line) {
 }
 
 function parseHlsMaster(text) {
-  const lines = text.split(/\r?\n/);
+  // Strip a UTF-8 BOM if present — fetch().text() doesn't, and the #EXTM3U
+  // tag check would silently fail against an otherwise-valid manifest.
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
   if (lines.length === 0 || !lines[0].startsWith('#EXTM3U')) return [];
   const variants = [];
   for (let i = 0; i < lines.length; i++) {
@@ -68,7 +70,10 @@ function pickVariantForBandwidth(variants, ceilingBps) {
 
 function resolveUrl(arg) {
   if (/^https?:\/\//i.test(arg)) return arg;
-  if (/^[a-f0-9]{20,}$/i.test(arg)) {
+  // Cloudflare Stream UIDs are typically 32-char hex, but the public docs
+  // describe them as opaque, so accept any token that has no path/scheme
+  // characters and is plausibly an id (>=8 chars, [a-z0-9_-]).
+  if (/^[a-z0-9_-]{8,}$/i.test(arg)) {
     return `https://videodelivery.net/${arg}/manifest/video.m3u8`;
   }
   return arg;
@@ -95,8 +100,10 @@ async function main() {
   }
   console.log(`found ${variants.length} variants:`);
   for (const v of variants) {
-    const res = v.resolution ? `${v.resolution.width}x${v.resolution.height}` : '?';
-    console.log(`  ${(v.bandwidth / 1000).toFixed(0).padStart(6)} kbps  ${res.padEnd(10)}  ${v.uri}`);
+    const resolutionStr = v.resolution ? `${v.resolution.width}x${v.resolution.height}` : '?';
+    console.log(
+      `  ${(v.bandwidth / 1000).toFixed(0).padStart(6)} kbps  ${resolutionStr.padEnd(10)}  ${v.uri}`,
+    );
   }
 
   const ceilings = [10_000_000, 3_000_000, 1_500_000, 700_000, 250_000];
@@ -106,9 +113,22 @@ async function main() {
     const r = v?.resolution ? `${v.resolution.height}p` : '?';
     console.log(`  ceiling ${(c / 1_000_000).toFixed(2)} Mbps -> ${r} @ ${v?.bandwidth ?? 0} bps`);
   }
-  const heights = picks.map((p) => p.v?.resolution?.height ?? 0);
-  for (let i = 1; i < heights.length; i++) {
-    if (heights[i] > heights[i - 1]) {
+
+  // Resolution metadata is what makes a step-down inspectable. If any picked
+  // variant lacks a height, fall back to bandwidth for the monotonic check
+  // and emit an explicit warning so a manifest without RESOLUTION attrs
+  // doesn't silently look "OK" without proving anything visual changed.
+  const allHaveHeights = picks.every((p) => p.v?.resolution?.height != null);
+  const ladder = picks.map((p) =>
+    allHaveHeights ? (p.v?.resolution?.height ?? 0) : (p.v?.bandwidth ?? 0),
+  );
+  if (!allHaveHeights) {
+    console.warn(
+      '\nWARN: at least one picked variant has no RESOLUTION attr; falling back to BANDWIDTH for the monotonic check.',
+    );
+  }
+  for (let i = 1; i < ladder.length; i++) {
+    if (ladder[i] > ladder[i - 1]) {
       console.error('FAIL: throttle ladder is not monotonic');
       process.exit(1);
     }

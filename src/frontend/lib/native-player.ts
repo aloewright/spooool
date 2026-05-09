@@ -1,33 +1,22 @@
-// ALO-204: drop-in replacement for the slice of the video.js Player API the
-// Watch page actually uses, backed by a native <video> element + hls.js for
-// HLS playback in browsers that don't natively support it (i.e. everything
-// outside Safari / iOS).
+// ALO-204: thin adapter around video.js exposing only the slice of player
+// behaviour Watch.tsx actually uses. We restored video.js (rolling back the
+// hls.js swap from PR #57) because the long-term player roadmap depends on
+// video.js's plugin host — captions, quality menu, marker / chapters, ad
+// insertion all live in that ecosystem.
 //
-// Why an adapter instead of touching <video> directly from the page?
-// - Keeps the existing Watch.tsx event-handler shape (`player.on(...)`,
-//   `player.currentTime(t)`) so the refactor diff stays focused on the
-//   player wrapper, not every keyboard / heartbeat / seek call site.
-// - Centralises HLS-vs-MP4-vs-native-HLS detection in one place.
-// - Lets us unit-test the adapter without a real DOM by feeding a fake
-//   element, rather than monkey-patching the Player module.
-//
-// Bundle savings: video.js is ~570KB raw / ~160KB gz; hls.js is ~120KB raw /
-// ~38KB gz. ~3× smaller and we lose no functionality the watch page used.
+// The adapter shape is preserved so Watch.tsx and its tests don't have to
+// learn the video.js API surface. It also gives us a single place to swap
+// engines again without churning every keyboard / heartbeat / seek call site.
+import videojs from 'video.js';
+import 'video.js/dist/video-js.css';
 
-// hls.light excludes the legacy MPEG-TS demuxer + alt-audio paths we don't
-// need (Cloudflare Stream emits CMAF/fMP4). Cuts ~180KB raw vs the full
-// build, taking the watch chunk from ~570KB (video.js) to ~330KB raw /
-// ~105KB gz. The light bundle ships without typings; we re-use the main
-// package's class type for parameter and return positions.
-import type HlsType from 'hls.js';
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-expect-error -- hls.js light subpath has no types
-import HlsLight from 'hls.js/dist/hls.light.mjs';
-const Hls = HlsLight as typeof HlsType;
+// video.js 8 ships its own types but doesn't export the Player class directly
+// for downstream typing. ReturnType is the documented escape hatch.
+type VjsPlayer = ReturnType<typeof videojs>;
 
 export interface NativePlayerSource {
   src: string;
-  /** MIME type — informational; we route on the URL/type pair. */
+  /** MIME type — passed straight to video.js so VHS can route HLS sources. */
   type: string;
 }
 
@@ -40,7 +29,7 @@ export type NativePlayerEvent =
   | 'error';
 
 export interface NativePlayer {
-  /** Releases the hls.js instance and clears the source. Safe to call twice. */
+  /** Releases the underlying player. Safe to call twice. */
   dispose(): void;
 
   /** Read the current playhead time in seconds. */
@@ -48,7 +37,7 @@ export interface NativePlayer {
   /** Move the playhead to `t` seconds. */
   setCurrentTime(t: number): void;
 
-  /** Total duration in seconds (NaN until `loadedmetadata` fires). */
+  /** Total duration in seconds (0 until `loadedmetadata` fires). */
   duration(): number;
 
   paused(): boolean;
@@ -69,62 +58,41 @@ export interface NativePlayer {
   off(event: NativePlayerEvent, handler: () => void): void;
 }
 
-// `application/x-mpegURL` and `application/vnd.apple.mpegurl` are both used in
-// the wild for HLS manifests. The `.m3u8` extension is the universal fallback.
-export function isHlsSource(source: NativePlayerSource): boolean {
-  if (source.type === 'application/x-mpegURL') return true;
-  if (source.type === 'application/vnd.apple.mpegurl') return true;
-  if (/\.m3u8(?:[?#]|$)/i.test(source.src)) return true;
-  return false;
-}
+// Test seam: callers (and tests) may inject a stand-in for the videojs factory
+// to avoid spinning up a real player against a fake DOM.
+type VideoJsFactory = (
+  el: Element,
+  options?: Record<string, unknown>,
+) => VjsPlayer;
 
-// Native HLS support is the Safari (desktop + iOS) path. We probe via
-// `canPlayType` rather than UA sniffing so behaviour is correct in any
-// future browser that ships native HLS.
-export function nativeHlsSupported(element: HTMLMediaElement): boolean {
-  if (typeof element.canPlayType !== 'function') return false;
-  return (
-    element.canPlayType('application/vnd.apple.mpegurl') !== '' ||
-    element.canPlayType('application/x-mpegURL') !== ''
-  );
-}
-
-interface AttachOptions {
-  element: HTMLVideoElement;
-  source: NativePlayerSource;
-  /** Inject a fake Hls constructor for testing. */
-  HlsCtor?: typeof Hls;
-}
-
-interface AttachResult {
-  /** hls.js instance we own and must destroy on dispose, if any. */
-  hls?: { destroy: () => void };
-}
-
-// Installs the source on the element. Returns the hls.js instance (if one
-// was created) so the adapter can destroy it on dispose.
-export function attachSource(opts: AttachOptions): AttachResult {
-  const { element, source } = opts;
-  const HlsCtor = opts.HlsCtor ?? Hls;
-
-  if (isHlsSource(source) && !nativeHlsSupported(element) && HlsCtor.isSupported()) {
-    const hls = new HlsCtor();
-    hls.loadSource(source.src);
-    hls.attachMedia(element);
-    return { hls };
-  }
-
-  // Native HLS in Safari OR a non-HLS source (mp4 etc): just set src.
-  element.src = source.src;
-  return {};
+interface CreateOptions {
+  videojsFactory?: VideoJsFactory;
 }
 
 export function createNativePlayer(
   element: HTMLVideoElement,
   source: NativePlayerSource,
-  opts: { HlsCtor?: typeof Hls } = {},
+  opts: CreateOptions = {},
 ): NativePlayer {
-  const { hls } = attachSource({ element, source, HlsCtor: opts.HlsCtor });
+  const factory: VideoJsFactory = opts.videojsFactory ?? (videojs as unknown as VideoJsFactory);
+
+  // video.js looks for the `video-js` class to apply its skin. Adding it here
+  // means the JSX call site doesn't have to know about the player engine.
+  if (!element.classList.contains('video-js')) {
+    element.classList.add('video-js');
+  }
+
+  const player = factory(element, {
+    controls: true,
+    preload: 'metadata',
+    fluid: false,
+    // VHS handles HLS in browsers without native support. `overrideNative`
+    // forces VHS even on Safari, which keeps ABR / heartbeat behaviour
+    // identical across browsers (Safari's native HLS doesn't expose the
+    // hooks video.js plugins rely on).
+    html5: { vhs: { overrideNative: true } },
+  });
+  player.src({ src: source.src, type: source.type });
 
   let disposed = false;
   return {
@@ -132,69 +100,57 @@ export function createNativePlayer(
       if (disposed) return;
       disposed = true;
       try {
-        hls?.destroy();
+        player.dispose();
       } catch {
-        // best-effort cleanup
-      }
-      try {
-        element.pause();
-        element.removeAttribute('src');
-        element.load();
-      } catch {
-        // element may already be detached
+        // already torn down — best-effort cleanup
       }
     },
     currentTime(): number {
-      // HTMLMediaElement.currentTime is a number, but it can be NaN before
-      // metadata loads. Coalesce so callers don't have to guard every read.
-      const t = element.currentTime;
-      return Number.isFinite(t) ? t : 0;
+      const t = player.currentTime();
+      return typeof t === 'number' && Number.isFinite(t) ? t : 0;
     },
     setCurrentTime(t: number): void {
-      element.currentTime = t;
+      player.currentTime(t);
     },
     duration(): number {
-      // NaN before loadedmetadata. Returning 0 matches the safest behaviour
-      // for the keyboard / heartbeat guards on the watch page.
-      const d = element.duration;
-      return Number.isFinite(d) ? d : 0;
+      const d = player.duration();
+      return typeof d === 'number' && Number.isFinite(d) ? d : 0;
     },
     paused(): boolean {
-      return element.paused;
+      return player.paused();
     },
     play(): Promise<void> {
-      return element.play();
+      const result = player.play();
+      return result instanceof Promise ? result : Promise.resolve();
     },
     pause(): void {
-      element.pause();
+      player.pause();
     },
     muted(): boolean {
-      return element.muted;
+      return player.muted() ?? false;
     },
     setMuted(value: boolean): void {
-      element.muted = value;
+      player.muted(value);
     },
     isFullscreen(): boolean {
-      return typeof document !== 'undefined' && document.fullscreenElement === element;
+      return player.isFullscreen() ?? false;
     },
     requestFullscreen(): Promise<void> {
-      if (typeof element.requestFullscreen !== 'function') return Promise.resolve();
-      return element.requestFullscreen();
+      const result = player.requestFullscreen();
+      return result instanceof Promise ? result : Promise.resolve();
     },
     exitFullscreen(): Promise<void> {
-      if (typeof document === 'undefined' || typeof document.exitFullscreen !== 'function') {
-        return Promise.resolve();
-      }
-      return document.exitFullscreen();
+      const result = player.exitFullscreen();
+      return result instanceof Promise ? result : Promise.resolve();
     },
     readyState(): number {
-      return element.readyState;
+      return player.readyState();
     },
     on(event: NativePlayerEvent, handler: () => void): void {
-      element.addEventListener(event, handler);
+      player.on(event, handler);
     },
     off(event: NativePlayerEvent, handler: () => void): void {
-      element.removeEventListener(event, handler);
+      player.off(event, handler);
     },
   };
 }

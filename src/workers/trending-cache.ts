@@ -98,15 +98,25 @@ export function rankTrending(
   limit: number,
   now: number = Date.now(),
 ): ScoredTrendingVideo[] {
-  return rows
-    .map((row) => ({ ...row, score: computeTrendingScore(row.recent_views, row.created_at, now) }))
-    .sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      if (b.recent_views !== a.recent_views) return b.recent_views - a.recent_views;
-      if (b.view_count !== a.view_count) return b.view_count - a.view_count;
-      return Date.parse(b.created_at) - Date.parse(a.created_at);
-    })
-    .slice(0, limit);
+  // Pre-parse the created_at timestamp once per row instead of inside the
+  // sort comparator — Date.parse is non-trivial and the comparator runs
+  // O(n log n) times. NaN from a malformed row gets sorted last via the
+  // -Infinity fallback.
+  const decorated = rows.map((row) => {
+    const createdMs = Date.parse(row.created_at);
+    return {
+      row,
+      score: computeTrendingScore(row.recent_views, row.created_at, now),
+      createdMs: Number.isNaN(createdMs) ? -Infinity : createdMs,
+    };
+  });
+  decorated.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (b.row.recent_views !== a.row.recent_views) return b.row.recent_views - a.row.recent_views;
+    if (b.row.view_count !== a.row.view_count) return b.row.view_count - a.row.view_count;
+    return b.createdMs - a.createdMs;
+  });
+  return decorated.slice(0, limit).map(({ row, score }) => ({ ...row, score }));
 }
 
 // SQL pulled out so the cron path and the on-demand fallback share one query.

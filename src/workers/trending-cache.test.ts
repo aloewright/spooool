@@ -32,7 +32,12 @@ function row(overrides: Partial<TrendingVideoRow> = {}): TrendingVideoRow {
 function makeFakeKV(initial: Record<string, string> = {}): KVNamespace {
   const store = new Map<string, string>(Object.entries(initial));
   return {
-    get: async (key: string) => store.get(key) ?? null,
+    get: async (key: string, type?: string) => {
+      const raw = store.get(key);
+      if (raw === undefined) return null;
+      if (type === 'json') return JSON.parse(raw);
+      return raw;
+    },
     put: async (key: string, value: string) => {
       store.set(key, value);
     },
@@ -161,26 +166,18 @@ describe('rankTrending', () => {
     );
     expect(rankTrending(rows, 3, NOW)).toHaveLength(3);
   });
+
+  it('does not throw when a row has an unparseable created_at', () => {
+    const rows = [
+      row({ id: 'good', recent_views: 5, created_at: '2026-05-08T00:00:00Z' }),
+      row({ id: 'bad', recent_views: 5, created_at: 'not-a-date' }),
+    ];
+    const ranked = rankTrending(rows, 5, NOW);
+    expect(ranked.map((v) => v.id)).toEqual(['good', 'bad']);
+  });
 });
 
 describe('materializeTrending', () => {
-  function makeFakeKV(initial: Record<string, string> = {}): KVNamespace {
-    const store = new Map<string, string>(Object.entries(initial));
-    return {
-      get: async (key: string, type?: string) => {
-        const v = store.get(key) ?? null;
-        if (v && type === 'json') return JSON.parse(v);
-        return v;
-      },
-      put: async (key: string, value: string) => {
-        store.set(key, value);
-      },
-      delete: async (key: string) => {
-        store.delete(key);
-      },
-    } as unknown as KVNamespace;
-  }
-
   function makeFakeDB(rows: TrendingVideoRow[]): D1Database {
     return {
       prepare: () => ({

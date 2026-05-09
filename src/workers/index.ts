@@ -4,7 +4,9 @@ import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
-import { handleEncodingMessage } from './encoding';
+import { handleEncodingMessage, type EncodingEnv } from './encoding';
+import { pollStuckEncodings } from './stream-poll';
+import { streamSourceRoutes } from './stream-source';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
@@ -30,7 +32,6 @@ import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
 import { handleStreamWebhook } from './stream-webhook';
-import { pollStreamForEncodingVideos } from './stream-poll';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
@@ -45,7 +46,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & EncodingEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   CF_STREAM_API_TOKEN?: string;
@@ -87,6 +88,12 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+
+// Source URL Cloudflare Stream pulls R2 bytes from when a /stream/copy job
+// kicks off. Mounted before the session middleware so the route doesn't
+// take a hit for an auth check it ignores — the HMAC signature in the
+// query string is the authorization material.
+app.route('/', streamSourceRoutes);
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -194,11 +201,16 @@ const workerHandlers = {
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
           }
-          // ALO-135: reconcile any videos still stuck in `encoding` whose
-          // Stream webhook we never received. Cheap GET per stuck row.
-          const pollResult = await pollStreamForEncodingVideos(env);
-          if (pollResult.scanned > 0) {
-            console.log('[stream-poll]', { cron: controller.cron, ...pollResult });
+          // ALO-135: Stream webhook is best-effort; reconcile any row that
+          // missed its callback by polling the Stream API directly.
+          const polled = await pollStuckEncodings(env);
+          const updated = polled.filter((p) => p.changes > 0);
+          if (updated.length > 0) {
+            console.log('[stream-poll]', { cron: controller.cron, updated });
+          }
+          const errors = polled.filter((p) => p.error);
+          if (errors.length > 0) {
+            console.warn('[stream-poll] errors', { cron: controller.cron, errors });
           }
         } catch (err) {
           console.error('scheduled sweep failed', {

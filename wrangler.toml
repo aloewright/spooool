@@ -119,8 +119,12 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)
 # CLOUDFLARE_ACCOUNT_ID
 # CF_STREAM_API_TOKEN
-# CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)
+# CF_STREAM_WEBHOOK_SECRET (HMAC secret — verifies inbound Stream webhooks AND
+#                           signs the outbound R2 source URL Stream pulls from
+#                           when /stream/copy fires; rotate both sides together)
 # STREAM_ENABLED          (set to "true" to route uploads through Cloudflare Stream)
+# STREAM_SOURCE_ORIGIN    (optional — public origin for the R2 source URL.
+#                          Falls back to BETTER_AUTH_URL if unset.)
 # STRIPE_SECRET_KEY
 # STRIPE_WEBHOOK_SECRET
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)

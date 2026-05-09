@@ -15,8 +15,10 @@ export function createAuth(env: AuthEnv) {
   // ALO-130: wire Google + GitHub social providers. Each provider is only
   // registered when both id+secret are present so unconfigured environments
   // (preview, local-without-creds) don't break startup. `accountLinking`
-  // links a social account to an existing user when the verified email
-  // matches — the providers below are trusted to return a verified email.
+  // links a social account to an existing user when the provider returns a
+  // verified email; we deliberately do NOT mark these as `trustedProviders`
+  // because that bypass would let an unverified provider email take over an
+  // existing account.
   const socialProviders: Record<string, { clientId: string; clientSecret: string }> = {};
   if (env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET) {
     socialProviders.google = {
@@ -78,7 +80,6 @@ export function createAuth(env: AuthEnv) {
     account: {
       accountLinking: {
         enabled: true,
-        trustedProviders: ['google', 'github'],
       },
     },
     trustedOrigins: [

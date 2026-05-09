@@ -23,13 +23,19 @@ export function SocialSignIn({ callbackURL }: { callbackURL: string }): JSX.Elem
   async function onClick(provider: 'google' | 'github'): Promise<void> {
     setError(null);
     setPending(provider);
-    const { error: signInError } = await signIn.social({ provider, callbackURL });
-    if (signInError) {
+    try {
+      const { error: signInError } = await signIn.social({ provider, callbackURL });
+      if (signInError) {
+        setPending(null);
+        setError(signInError.message ?? `${provider} sign-in failed`);
+      }
+      // On success the browser navigates to the OAuth provider — no further
+      // state to update.
+    } catch {
+      // Network / client error: reset so the buttons don't stay disabled.
       setPending(null);
-      setError(signInError.message ?? `${provider} sign-in failed`);
+      setError(`${provider} sign-in failed`);
     }
-    // On success the browser navigates to the OAuth provider — no further
-    // state to update.
   }
 
   return (
@@ -55,7 +61,11 @@ export function SocialSignIn({ callbackURL }: { callbackURL: string }): JSX.Elem
           {pending === id ? 'Redirecting…' : label}
         </button>
       ))}
-      {error ? <p className="status-error">{error}</p> : null}
+      {error ? (
+        <p className="status-error" role="alert" aria-live="assertive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

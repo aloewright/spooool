@@ -127,10 +127,9 @@ describe('createAuth', () => {
       github: { clientId: 'gh-id', clientSecret: 'gh-secret' },
     });
     expect(captured.options?.account?.accountLinking?.enabled).toBe(true);
-    expect(captured.options?.account?.accountLinking?.trustedProviders).toEqual([
-      'google',
-      'github',
-    ]);
+    // trustedProviders is intentionally unset — only providers that return a
+    // verified email should be allowed to link onto an existing user.
+    expect(captured.options?.account?.accountLinking?.trustedProviders).toBeUndefined();
   });
 
   it('omits social providers when creds are missing', () => {

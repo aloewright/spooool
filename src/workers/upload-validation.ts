@@ -181,13 +181,15 @@ export type DetectedContainer =
 
 // ISO BMFF major brands we accept. The brand also implies a sane codec — e.g.
 // 'avc1' → H.264, 'av01' → AV1, 'hev1'/'hvc1' → HEVC. Anything outside this
-// list (proprietary brands like 'jpm ', encrypted-only brands, etc.) is
-// rejected so we don't pay for a Stream transcode that will fail.
+// list (proprietary brands like 'jpm ', encrypted-only brands, and audio-only
+// brands like 'M4A '/'M4P '/'M4B ' which would otherwise let an .m4a renamed
+// to .mp4 slip past) is rejected so we don't pay for a Stream transcode that
+// will fail.
 const ISO_BMFF_MP4_BRANDS = new Set<string>([
   'isom', 'iso2', 'iso4', 'iso5', 'iso6', 'iso7', 'iso8', 'iso9',
   'mp41', 'mp42', 'mp4v', 'mp71', 'MSNV', 'msnv', 'NDXC', 'NDXM', 'NDSC',
   'avc1', 'av01', 'hev1', 'hvc1', 'dby1', 'dash', 'dsms', 'msdh', 'msix',
-  'mmp4', 'M4V ', 'M4A ', 'M4P ', 'M4B ',
+  'mmp4', 'M4V ',
 ]);
 const ISO_BMFF_MOV_BRANDS = new Set<string>(['qt  ']);
 const ISO_BMFF_3GP_BRANDS = new Set<string>([

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signUp, useSession } from '../lib/auth-client';
+import { SocialSignIn } from '../components/SocialSignIn';
 
 export function Signup(): JSX.Element {
   const location = useLocation();
@@ -108,6 +109,8 @@ export function Signup(): JSX.Element {
             {submitting ? 'Creating…' : 'Create account'}
           </button>
         </div>
+
+        <SocialSignIn callbackURL={next} />
       </form>
 
       {error ? <p className="status-error">{error}</p> : null}

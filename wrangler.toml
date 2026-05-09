@@ -127,6 +127,10 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # RESEND_API_KEY          (REST key from resend.com/api-keys; lifecycle email is fail-open without it)
 # RESEND_AUDIENCE_ID      (audience to upsert contacts into; contact sync skipped without it)
 # RESEND_FROM             (optional — From header, e.g. "spooool <hello@spooool.com>")
+# GOOGLE_CLIENT_ID        (ALO-130 — OAuth client id from console.cloud.google.com; social login skipped without both)
+# GOOGLE_CLIENT_SECRET    (ALO-130 — OAuth client secret)
+# GITHUB_CLIENT_ID        (ALO-130 — OAuth app client id from github.com/settings/developers)
+# GITHUB_CLIENT_SECRET    (ALO-130 — OAuth app client secret)
 #
 # Frontend env vars (Doppler-injected at build time via `doppler run -- npm run build`):
 # VITE_SENTRY_DSN         (same DSN — Vite exposes this to the browser bundle)

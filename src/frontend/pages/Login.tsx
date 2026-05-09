@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
+import { SocialSignIn } from '../components/SocialSignIn';
 
 export function Login(): JSX.Element {
   const location = useLocation();
@@ -84,6 +85,8 @@ export function Login(): JSX.Element {
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <Link to="/forgot-password" className="ds-meta">Forgot your password?</Link>
         </div>
+
+        <SocialSignIn callbackURL={next} />
       </form>
 
       {error ? <p className="status-error">{error}</p> : null}

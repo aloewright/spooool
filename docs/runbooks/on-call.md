@@ -80,7 +80,7 @@ Time Travel restore covers anything in the last 30 days.
 
 ### Rate limiter blocking legitimate users
 
-* The `RATE_LIMIT_DO` Durable Object is the gate. If a single user is being
+* The `RATE_LIMITER` Durable Object is the gate. If a single user is being
   blocked unfairly, check `src/workers/rate-limit.ts` for the bucket and
   ceiling that fired.
 * Emergency knob: deploy with `RATE_LIMIT_DISABLED=1` set as a worker env var,

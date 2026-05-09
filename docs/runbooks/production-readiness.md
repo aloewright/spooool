@@ -10,7 +10,7 @@ is unchecked, prod is not ready.
 - [x] Logpush sink to R2 — `scripts/setup-logpush.sh`, R2 binding `LOGS`
 - [x] Analytics Engine for view + watch-time — `[[analytics_engine_datasets]]`, `src/workers/analytics.ts`
 - [x] Sentry on the frontend — `@sentry/react`, init via `VITE_SENTRY_DSN`
-- [x] Sentry on the worker — `@sentry/cloudflare`
+- [x] Sentry on the worker — `@sentry/cloudflare`, wrapped in `src/workers/index.ts`
 - [x] PostHog product analytics — `posthog-js`, RUM via `src/workers/rum.ts`
 - [x] `/api/health` liveness probe — `src/workers/health.ts`
 

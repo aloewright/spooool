@@ -70,4 +70,15 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
   });
+
+  it('0019_co_watch_index adds the watch_history(video_id) index (ALO-123)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_co_watch_index.sql'), 'utf8');
+    expect(sql).toMatch(/idx_watch_history_video\s+ON\s+watch_history\(video_id\)/i);
+  });
+
+  it('schema.sql mirrors watch_history + co-watch index', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS watch_history');
+    expect(schema).toContain('idx_watch_history_video');
+  });
 });

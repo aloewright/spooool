@@ -176,3 +176,17 @@ CREATE TABLE IF NOT EXISTS video_tags (
 
 CREATE INDEX IF NOT EXISTS idx_video_tags_tag ON video_tags(tag_slug);
 CREATE INDEX IF NOT EXISTS idx_video_tags_video ON video_tags(video_id);
+
+CREATE TABLE IF NOT EXISTS watch_history (
+  user_id TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  watched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, video_id),
+  FOREIGN KEY (user_id) REFERENCES user(id) ON DELETE CASCADE,
+  FOREIGN KEY (video_id) REFERENCES videos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_watch_history_user_recent
+  ON watch_history(user_id, watched_at DESC);
+CREATE INDEX IF NOT EXISTS idx_watch_history_video
+  ON watch_history(video_id);

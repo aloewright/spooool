@@ -66,6 +66,12 @@ type HistoryItem = {
   channel_username: string | null;
 };
 
+type TopTag = {
+  slug: string;
+  label: string;
+  video_count: number;
+};
+
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   return (
     <Link to="/" aria-label="spooool" className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}>
@@ -274,6 +280,10 @@ function Home(): JSX.Element {
   const [trendingError, setTrendingError] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryItem[] | null>(null);
   const [clearing, setClearing] = useState(false);
+  // ALO-123: top tags expose the category browse without requiring sign-in;
+  // hidden when the catalog has no tagged videos yet so we don't render an
+  // empty rail.
+  const [topTags, setTopTags] = useState<TopTag[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -293,6 +303,24 @@ function Home(): JSX.Element {
         if (!cancelled) {
           setTrendingError(err instanceof Error ? err.message : 'Unknown error');
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/tags?limit=12')
+      .then(async (r) => {
+        if (!r.ok) throw new Error('Failed to load tags');
+        return (await r.json()) as { tags: TopTag[] };
+      })
+      .then((data) => {
+        if (!cancelled) setTopTags(data.tags);
+      })
+      .catch(() => {
+        if (!cancelled) setTopTags([]);
       });
     return () => {
       cancelled = true;
@@ -403,6 +431,33 @@ function Home(): JSX.Element {
           </div>
         )}
       </section>
+
+      {topTags && topTags.length > 0 ? (
+        <section className="stack-sm" aria-label="Browse by topic">
+          <h2 className="ds-h3" style={{ margin: 0 }}>Browse by topic</h2>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 'var(--space-2)',
+            }}
+          >
+            {topTags.map((tag) => (
+              <Link
+                key={tag.slug}
+                to={`/tag/${encodeURIComponent(tag.slug)}`}
+                className="badge"
+                style={{ textDecoration: 'none' }}
+              >
+                {tag.label}
+                <span className="ds-meta" style={{ marginLeft: 6 }}>
+                  {tag.video_count}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className="stack-sm" aria-label="Get started">
         <h2 className="ds-h3" style={{ margin: 0 }}>Start here</h2>

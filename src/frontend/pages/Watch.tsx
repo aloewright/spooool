@@ -5,6 +5,7 @@ import { ReportButton } from '../components/ReportButton';
 import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
+import { formatViews } from '../lib/format-views';
 import { createNativePlayer, type NativePlayer } from '../lib/native-player';
 import { keyToPlayerAction } from '../lib/player-keys';
 import {
@@ -572,7 +573,9 @@ export function Watch(): JSX.Element {
       <div className="stack-sm">
         <h1 className="ds-h2">{video.title}</h1>
         <div className="row">
-          <span className="badge">{video.view_count} views</span>
+          <span className="badge" aria-label={`${video.view_count} views`}>
+            {formatViews(video.view_count)}
+          </span>
           <span className="badge">{video.channel_name ?? 'Unknown channel'}</span>
         </div>
       </div>
@@ -717,7 +720,7 @@ export function Watch(): JSX.Element {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{v.title}</div>
                     <div className="ds-meta" style={{ marginTop: 2 }}>
-                      {v.channel_name ?? 'Unknown channel'} · {v.view_count} views
+                      {v.channel_name ?? 'Unknown channel'} · {formatViews(v.view_count)}
                     </div>
                   </div>
                 </Link>

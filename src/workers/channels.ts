@@ -32,7 +32,8 @@ channelRoutes.get('/api/channels/:username', async (c) => {
     `SELECT u.id, u.email, u.name, u.username, u.displayName, u.bio, u.avatarUrl, u.bannerUrl,
             (SELECT COUNT(*) FROM subscriptions s WHERE s.channel_user_id = u.id) AS subscriberCount,
             (SELECT COUNT(*) FROM videos v WHERE v.user_id = u.id AND v.deleted_at IS NULL) AS videoCount,
-            (SELECT COALESCE(SUM(v.view_count), 0) FROM videos v WHERE v.user_id = u.id AND v.deleted_at IS NULL) AS totalViews
+            (SELECT COALESCE(SUM(v.view_count), 0) FROM videos v
+              WHERE v.user_id = u.id AND v.deleted_at IS NULL AND v.hidden_at IS NULL) AS totalViews
      FROM user u
      WHERE u.username = ?`,
   )

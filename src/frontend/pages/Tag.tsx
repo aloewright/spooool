@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { VideoPlaceholderIcon } from '../components/Icons';
+import { formatViews } from '../lib/format-views';
 
 interface TagVideo {
   id: string;
@@ -113,7 +114,7 @@ export function Tag(): JSX.Element {
                       ·{' '}
                     </>
                   ) : null}
-                  {v.view_count} views
+                  {formatViews(v.view_count)}
                 </div>
               </Link>
             </li>

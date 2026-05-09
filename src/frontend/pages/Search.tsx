@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { VideoPlaceholderIcon } from '../components/Icons';
+import { formatViews } from '../lib/format-views';
 
 interface SearchResult {
   id: string;
@@ -105,7 +106,7 @@ export function Search(): JSX.Element {
                       ·{' '}
                     </>
                   ) : null}
-                  {v.view_count} views
+                  {formatViews(v.view_count)}
                 </div>
                 {v.description && (
                   <p className="ds-meta" style={{ marginTop: 6 }}>

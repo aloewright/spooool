@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
+import { formatViews } from './lib/format-views';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the hls.js it depends on for
@@ -234,7 +235,7 @@ function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
       )}
       <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{video.title}</div>
       <div className="ds-meta" style={{ marginTop: 4 }}>
-        {video.channel_name ?? 'Unknown channel'} · {video.view_count} views
+        {video.channel_name ?? 'Unknown channel'} · {formatViews(video.view_count)}
       </div>
     </Link>
   );
@@ -262,7 +263,7 @@ function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
       )}
       <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
       <div className="ds-meta" style={{ marginTop: 4 }}>
-        {item.channel_name ?? 'Unknown channel'} · {item.view_count} views
+        {item.channel_name ?? 'Unknown channel'} · {formatViews(item.view_count)}
       </div>
     </Link>
   );

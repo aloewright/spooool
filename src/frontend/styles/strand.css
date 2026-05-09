@@ -546,3 +546,42 @@ input[type="file"].input {
 
 .fade-up { animation: fade-up 0.25s var(--ease-spring) both; }
 .fade-in { animation: fade-in 0.2s var(--ease-smooth) both; }
+
+/* ── Native video player (ALO-122 E3) ──────────────────────────
+   16:9 cap so the controls + thumbnail strip don't grow taller than the
+   viewport on tall portrait screens. Browsers respect aspect-ratio when
+   the source's intrinsic ratio matches; we keep object-fit:contain so
+   non-16:9 sources still letterbox cleanly inside the same box.
+*/
+.native-player {
+  width: 100%;
+  display: block;
+  background: black;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+  /* 16:9 of a desktop viewport gets too tall; cap to 80vh so the
+     metadata + comments stay reachable without scrolling on laptops. */
+  max-height: 80vh;
+}
+
+/* ── Mobile polish ─────────────────────────────────────────────
+   Tighten the watch page padding + drop heading sizes on phones so the
+   player + title fit above the fold. The 720px breakpoint matches the
+   `.app-main--narrow` width — anything below is a phone or split-pane.
+*/
+@media (max-width: 720px) {
+  .app-main {
+    padding: var(--space-4) var(--space-3);
+  }
+  .app-header {
+    padding: 0 var(--space-3);
+  }
+  .ds-h2 { font-size: var(--text-xl); }
+  .ds-h3 { font-size: var(--text-lg); }
+  .native-player {
+    /* No height cap on phones — the natural 16:9 ratio leaves room for
+       the title + Up next list below. */
+    max-height: none;
+    border-radius: 0;
+  }
+}

@@ -39,6 +39,17 @@ export type NativePlayerEvent =
   | 'timeupdate'
   | 'error';
 
+// ALO-122 (E3): a single rendition reported by hls.js for ABR introspection.
+// `index` is the position within the manifest's variant list; `bitrate` is in
+// bps as advertised by the manifest. `width` / `height` come from the variant
+// resolution attribute when present.
+export interface RenditionInfo {
+  index: number;
+  bitrate: number;
+  width?: number;
+  height?: number;
+}
+
 export interface NativePlayer {
   /** Releases the hls.js instance and clears the source. Safe to call twice. */
   dispose(): void;
@@ -64,6 +75,19 @@ export interface NativePlayer {
 
   /** Mirrors HTMLMediaElement.readyState (HAVE_NOTHING ... HAVE_ENOUGH_DATA). */
   readyState(): number;
+
+  /**
+   * ABR introspection (ALO-122 E3). Returns the manifest's variant list when
+   * we're driving HLS via hls.js, or an empty list for native HLS / direct
+   * sources where the browser hides ABR state. The returned objects are
+   * stable snapshots — callers get a fresh array on each call.
+   */
+  levels(): RenditionInfo[];
+  /**
+   * Index of the variant currently being played, or -1 when ABR info is not
+   * available (native HLS in Safari, direct R2 mp4, etc).
+   */
+  currentLevel(): number;
 
   on(event: NativePlayerEvent, handler: () => void): void;
   off(event: NativePlayerEvent, handler: () => void): void;
@@ -96,9 +120,18 @@ interface AttachOptions {
   HlsCtor?: typeof Hls;
 }
 
+// We only touch a tiny slice of the hls.js Hls instance. Typing it via the
+// shared interface (rather than reusing HlsType wholesale) avoids dragging
+// the eventEmitter generics through callers and keeps the test fakes simple.
+interface HlsInstance {
+  destroy(): void;
+  levels?: Array<{ bitrate?: number; width?: number; height?: number }>;
+  currentLevel?: number;
+}
+
 interface AttachResult {
   /** hls.js instance we own and must destroy on dispose, if any. */
-  hls?: { destroy: () => void };
+  hls?: HlsInstance;
 }
 
 // Installs the source on the element. Returns the hls.js instance (if one
@@ -108,7 +141,10 @@ export function attachSource(opts: AttachOptions): AttachResult {
   const HlsCtor = opts.HlsCtor ?? Hls;
 
   if (isHlsSource(source) && !nativeHlsSupported(element) && HlsCtor.isSupported()) {
-    const hls = new HlsCtor();
+    const hls = new HlsCtor() as unknown as HlsInstance & {
+      loadSource: (src: string) => void;
+      attachMedia: (el: HTMLMediaElement) => void;
+    };
     hls.loadSource(source.src);
     hls.attachMedia(element);
     return { hls };
@@ -189,6 +225,20 @@ export function createNativePlayer(
     },
     readyState(): number {
       return element.readyState;
+    },
+    levels(): RenditionInfo[] {
+      const list = hls?.levels;
+      if (!Array.isArray(list)) return [];
+      return list.map((lvl, idx) => ({
+        index: idx,
+        bitrate: typeof lvl.bitrate === 'number' ? lvl.bitrate : 0,
+        width: typeof lvl.width === 'number' ? lvl.width : undefined,
+        height: typeof lvl.height === 'number' ? lvl.height : undefined,
+      }));
+    },
+    currentLevel(): number {
+      const lvl = hls?.currentLevel;
+      return typeof lvl === 'number' ? lvl : -1;
     },
     on(event: NativePlayerEvent, handler: () => void): void {
       element.addEventListener(event, handler);

@@ -179,4 +179,40 @@ describe('createNativePlayer', () => {
     p.dispose();
     expect(() => p.dispose()).not.toThrow();
   });
+
+  it('reports an empty ABR ladder when not driven by hls.js', () => {
+    const el = makeFakeVideo({ canPlayHls: true });
+    const FakeCtor = FakeHls as unknown as typeof import('hls.js').default;
+    const p = createNativePlayer(el, { src: 'x.mp4', type: 'video/mp4' }, { HlsCtor: FakeCtor });
+    expect(p.levels()).toEqual([]);
+    expect(p.currentLevel()).toBe(-1);
+    p.dispose();
+  });
+
+  it('reflects hls.js-reported variant ladder + current level', () => {
+    class LadderHls {
+      static isSupported = vi.fn(() => true);
+      loadSource = vi.fn();
+      attachMedia = vi.fn();
+      destroy = vi.fn();
+      levels = [
+        { bitrate: 500_000, width: 640, height: 360 },
+        { bitrate: 1_500_000, width: 1280, height: 720 },
+      ];
+      currentLevel = 1;
+    }
+    const el = makeFakeVideo({ canPlayHls: false });
+    const FakeCtor = LadderHls as unknown as typeof import('hls.js').default;
+    const p = createNativePlayer(
+      el,
+      { src: 'https://x/m.m3u8', type: 'application/x-mpegURL' },
+      { HlsCtor: FakeCtor },
+    );
+    const levels = p.levels();
+    expect(levels).toHaveLength(2);
+    expect(levels[0]).toEqual({ index: 0, bitrate: 500_000, width: 640, height: 360 });
+    expect(levels[1]?.height).toBe(720);
+    expect(p.currentLevel()).toBe(1);
+    p.dispose();
+  });
 });

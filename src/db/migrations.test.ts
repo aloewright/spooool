@@ -71,14 +71,12 @@ describe('D1 migrations', () => {
     expect(schema).toContain('idx_video_tags_tag');
   });
 
-  it('0019_video_captions adds captions table for WebVTT tracks (ALO-122)', () => {
+  it('0019_video_captions adds video_captions table + index (ALO-122)', () => {
     const sql = readFileSync(join(MIGRATIONS_DIR, '0019_video_captions.sql'), 'utf8');
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS video_captions/);
-    expect(sql).toMatch(/lang TEXT NOT NULL/);
-    expect(sql).toMatch(/url TEXT NOT NULL/);
-    expect(sql).toMatch(/is_default INTEGER NOT NULL DEFAULT 0/);
-    expect(sql).toMatch(/PRIMARY KEY \(video_id, lang\)/);
-    expect(sql).toMatch(/idx_video_captions_video/);
+    expect(sql).toMatch(/PRIMARY KEY \(video_id, language\)/);
+    expect(sql).toMatch(/REFERENCES videos\(id\) ON DELETE CASCADE/);
+    expect(sql).toMatch(/idx_video_captions_video\s+ON\s+video_captions\(video_id\)/i);
   });
 
   it('schema.sql mirrors the captions table from 0019', () => {

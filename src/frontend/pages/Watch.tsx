@@ -29,13 +29,6 @@ function formatHms(total: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 }
 
-type CaptionTrack = {
-  lang: string;
-  label: string;
-  url: string;
-  default?: boolean;
-};
-
 type VideoResponse = {
   id: string;
   title: string;
@@ -46,7 +39,6 @@ type VideoResponse = {
   stream_video_id?: string;
   r2_key?: string;
   status?: string;
-  captions?: CaptionTrack[];
 };
 
 type PlaybackSource = { src: string; type: string } | null;
@@ -57,6 +49,13 @@ type UpNextVideo = {
   thumbnail_url?: string | null;
   channel_name?: string | null;
   view_count: number;
+};
+
+type CaptionTrack = {
+  language: string;
+  label: string;
+  isDefault: boolean;
+  src: string;
 };
 
 export function Watch(): JSX.Element {
@@ -71,6 +70,7 @@ export function Watch(): JSX.Element {
   const upNextRef = useRef<UpNextVideo[]>([]);
   const autoAdvanceRef = useRef<boolean>(false);
   const [video, setVideo] = useState<VideoResponse | null>(null);
+  const [captions, setCaptions] = useState<CaptionTrack[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [likes, setLikes] = useState<{ count: number; liked: boolean } | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
@@ -128,6 +128,28 @@ export function Watch(): JSX.Element {
       })
       .then((data) => setVideo(data))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
+  }, [id]);
+
+  // ALO-122 (E3): pull the available WebVTT caption tracks. Empty list when the
+  // uploader hasn't attached captions; failures fall back silently — the
+  // <video> still plays without subtitles.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void fetch(`/api/videos/${encodeURIComponent(id)}/captions`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('failed');
+        return (await r.json()) as { tracks: CaptionTrack[] };
+      })
+      .then((data) => {
+        if (!cancelled) setCaptions(data.tracks);
+      })
+      .catch(() => {
+        if (!cancelled) setCaptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // ALO-145: record this watch in the signed-in user's history. Fire-and-forget;
@@ -540,17 +562,16 @@ export function Watch(): JSX.Element {
           className="native-player"
           playsInline
           preload="metadata"
-          crossOrigin="anonymous"
           style={{ width: '100%', display: 'block', background: 'black' }}
         >
-          {(video.captions ?? []).map((t) => (
+          {captions.map((track) => (
             <track
-              key={t.lang}
+              key={track.language}
               kind="subtitles"
-              src={t.url}
-              srcLang={t.lang}
-              label={t.label}
-              default={t.default ?? false}
+              srcLang={track.language}
+              label={track.label}
+              src={track.src}
+              default={track.isDefault}
             />
           ))}
         </video>

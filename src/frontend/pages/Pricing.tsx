@@ -1,144 +1,161 @@
-// ALO-127: pricing page. Free tier vs membership, billed via Stripe.
-// Copy is pre-launch; numbers reflect the public-launch plan but are still
-// subject to change before the first paid signup goes live.
+// ALO-127 — public pricing surface for the E8 launch. Numbers here are
+// intentionally hard-coded marketing copy; once Stripe + entitlements ship
+// (separate ticket), the membership CTAs should call into a checkout flow
+// instead of a mailto: link.
 
 import { Link } from 'react-router-dom';
 
 interface Tier {
   name: string;
+  tagline: string;
   price: string;
   cadence: string;
-  tagline: string;
-  cta: { label: string; to: string };
   features: string[];
-  highlight?: boolean;
+  cta: { label: string; to: string };
+  highlighted?: boolean;
 }
 
 const TIERS: Tier[] = [
   {
     name: 'Free',
+    tagline: 'For getting started — no card, no commitment.',
     price: '$0',
     cadence: 'forever',
-    tagline: 'Everything you need to start sharing.',
-    cta: { label: 'Create an account', to: '/signup' },
     features: [
       '5 GB of storage',
-      'Unlimited views',
-      'HLS streaming + adaptive bitrate',
-      'Public channel page',
-      'Comments, likes, watch history',
+      'Unlimited public uploads',
+      '1080p streaming',
+      'Comments, likes, and channels',
+      'Basic analytics',
     ],
+    cta: { label: 'Create a free account', to: '/signup' },
   },
   {
-    name: 'Member',
-    price: '$6',
+    name: 'Creator',
+    tagline: 'For people who post weekly and want their own corner of the web.',
+    price: '$8',
     cadence: 'per month',
-    tagline: 'For creators who want more room and the small touches.',
-    cta: { label: 'Join the waitlist', to: '/about#waitlist' },
     features: [
       '100 GB of storage',
-      '4K source preservation',
-      'Custom channel art + bio',
-      'Priority encoding',
+      '4K streaming',
+      'Custom channel URL + theme',
+      'Per-video tag/category control',
+      'Priority encoding queue',
       'Email support',
     ],
-    highlight: true,
+    cta: { label: 'Join the waitlist', to: '/waitlist?tier=creator' },
+    highlighted: true,
   },
   {
     name: 'Studio',
-    price: '$24',
+    tagline: 'For teams and prolific channels with audience growth as a job.',
+    price: '$32',
     cadence: 'per month',
-    tagline: 'Bigger libraries, team access, and DMCA help.',
-    cta: { label: 'Talk to us', to: 'mailto:hello@spooool.com' },
     features: [
       '1 TB of storage',
-      'Up to 5 collaborators per channel',
-      'Bulk upload + scheduling',
-      'DMCA assistance',
-      'Priority email support',
+      'Multi-seat channel admin',
+      'Stream pre-publish review',
+      'Advanced retention analytics',
+      'DMCA fast-track',
+      'Direct line to support',
     ],
+    cta: { label: 'Join the waitlist', to: '/waitlist?tier=studio' },
   },
 ];
 
+function TierCard({ tier }: { tier: Tier }): JSX.Element {
+  return (
+    <article
+      className={tier.highlighted ? 'card stack' : 'card stack'}
+      style={{
+        borderColor: tier.highlighted
+          ? 'color-mix(in oklch, var(--ring), transparent 40%)'
+          : undefined,
+        boxShadow: tier.highlighted ? 'var(--shadow-float)' : undefined,
+      }}
+    >
+      <div className="stack-sm">
+        <span className="ds-label">{tier.name}</span>
+        <h2 className="ds-h2" style={{ margin: 0 }}>
+          {tier.price}{' '}
+          <span className="ds-meta" style={{ fontWeight: 400 }}>
+            {tier.cadence}
+          </span>
+        </h2>
+        <p className="ds-meta">{tier.tagline}</p>
+      </div>
+      <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 8 }}>
+        {tier.features.map((feature) => (
+          <li key={feature} style={{ display: 'flex', gap: 8 }}>
+            <span aria-hidden="true">✓</span>
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+      <Link to={tier.cta.to}>
+        <button
+          type="button"
+          className={tier.highlighted ? 'btn' : 'btn btn--secondary'}
+          style={{ width: '100%' }}
+        >
+          {tier.cta.label}
+        </button>
+      </Link>
+    </article>
+  );
+}
+
 export function Pricing(): JSX.Element {
   return (
-    <main className="app-main app-main--narrow stack-lg fade-in">
-      <section className="stack-sm" style={{ textAlign: 'center', paddingTop: 'var(--space-6)' }}>
-        <h1 className="ds-h1" style={{ margin: 0 }}>Simple pricing.</h1>
-        <p className="ds-lede" style={{ maxWidth: 520, margin: '0 auto' }}>
-          Free for everyone. Pay when you outgrow it — no ads, ever.
+    <main className="app-main stack-lg fade-in">
+      <section
+        className="stack-sm"
+        style={{ alignItems: 'center', textAlign: 'center', paddingTop: 'var(--space-8)' }}
+      >
+        <span className="ds-label">Pricing</span>
+        <h1 className="ds-h1" style={{ margin: 0 }}>
+          Simple plans. Honest pricing.
+        </h1>
+        <p className="ds-lede" style={{ maxWidth: 560, margin: '0 auto' }}>
+          spooool is free for everyone. Upgrade only when storage or features call
+          for it — never for the basics.
         </p>
       </section>
 
       <section
-        aria-label="Plans"
+        aria-label="Pricing tiers"
         style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-          gap: 'var(--space-3)',
+          gap: 'var(--space-4)',
         }}
       >
         {TIERS.map((tier) => (
-          <article
-            key={tier.name}
-            className="suggestion-card stack-sm"
-            style={{
-              borderColor: tier.highlight ? 'var(--accent)' : undefined,
-              boxShadow: tier.highlight ? '0 0 0 1px var(--accent)' : undefined,
-            }}
-          >
-            <header className="stack-sm">
-              <div style={{ fontWeight: 700, fontSize: 'var(--text-lg)' }}>{tier.name}</div>
-              <div>
-                <span style={{ fontSize: 'var(--text-xl)', fontWeight: 800 }}>{tier.price}</span>{' '}
-                <span className="ds-meta">{tier.cadence}</span>
-              </div>
-              <p className="ds-meta" style={{ margin: 0 }}>
-                {tier.tagline}
-              </p>
-            </header>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }} className="stack-sm">
-              {tier.features.map((feature) => (
-                <li key={feature} className="ds-meta">
-                  · {feature}
-                </li>
-              ))}
-            </ul>
-            {tier.cta.to.startsWith('mailto:') ? (
-              <a href={tier.cta.to} className="btn btn--secondary btn--sm">
-                {tier.cta.label}
-              </a>
-            ) : (
-              <Link to={tier.cta.to} className="btn btn--secondary btn--sm">
-                {tier.cta.label}
-              </Link>
-            )}
-          </article>
+          <TierCard key={tier.name} tier={tier} />
         ))}
       </section>
 
-      <section className="stack-sm" aria-label="FAQ">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Common questions</h2>
-        <details>
-          <summary>Can I switch plans later?</summary>
-          <p className="ds-meta">
-            Yes. Upgrade or downgrade any time from{' '}
-            <Link to="/settings/account">Account settings</Link>. Storage above your new
-            plan&apos;s limit stays accessible but uploads pause until you&apos;re back under.
+      <section className="stack-sm">
+        <h2 className="ds-h3" style={{ margin: 0 }}>FAQ</h2>
+        <details className="card card--tight">
+          <summary>What happens if I exceed my storage quota?</summary>
+          <p className="ds-meta" style={{ marginTop: 8 }}>
+            New uploads are rejected with a clear error until you delete videos
+            or upgrade. Existing videos keep playing — we never lock content
+            you&apos;ve already published.
           </p>
         </details>
-        <details>
-          <summary>Are there any ads or trackers?</summary>
-          <p className="ds-meta">
-            No ads. We use first-party analytics (PostHog) for product metrics — no third-party
-            ad networks. See our <Link to="/legal/privacy">Privacy Policy</Link>.
+        <details className="card card--tight">
+          <summary>Is there a free trial of paid tiers?</summary>
+          <p className="ds-meta" style={{ marginTop: 8 }}>
+            The Free tier is permanent — there&apos;s no trial. Once paid tiers
+            launch, every plan is monthly with no contract; cancel any time.
           </p>
         </details>
-        <details>
-          <summary>What happens if I exceed my storage?</summary>
-          <p className="ds-meta">
-            New uploads return a 413 with code <code>storage_quota_exceeded</code>. Existing
-            videos keep streaming.
+        <details className="card card--tight">
+          <summary>Do you sell my data?</summary>
+          <p className="ds-meta" style={{ marginTop: 8 }}>
+            No. See <Link to="/legal/privacy">Privacy Policy</Link>.
           </p>
         </details>
       </section>

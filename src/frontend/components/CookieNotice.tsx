@@ -1,38 +1,40 @@
-// ALO-127: minimal cookie notice. We use first-party analytics only and
-// strictly necessary auth cookies, but the banner is required for EU/UK
-// visitors and good practice everywhere. Stored choice lives in
-// localStorage under `cookie-notice-ack` so the banner stays dismissed
-// across reloads and browsing sessions on the same device.
+// ALO-127 — first-visit cookie notice. We don't run third-party ad cookies,
+// but PostHog autocapture and the auth session cookie are enough that GDPR
+// / CCPA notice is required. The banner is dismissed via localStorage so it
+// shows once per browser, not once per session.
 
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-const STORAGE_KEY = 'cookie-notice-ack';
+const STORAGE_KEY = 'spooool:cookie-notice-dismissed-at';
 
 export function CookieNotice(): JSX.Element | null {
-  const [show, setShow] = useState(false);
+  // Default to hidden so the banner doesn't flash on every render before
+  // localStorage is read; the effect flips it open on first load if needed.
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      const ack = window.localStorage.getItem(STORAGE_KEY);
-      if (!ack) setShow(true);
+      const dismissed = window.localStorage.getItem(STORAGE_KEY);
+      if (!dismissed) setVisible(true);
     } catch {
-      // Private mode / disabled storage — show the notice each visit; harmless.
-      setShow(true);
+      // localStorage may throw in private mode / disabled storage. In that
+      // case we'd show the banner every visit, which is the safer default.
+      setVisible(true);
     }
   }, []);
 
-  if (!show) return null;
-
-  const dismiss = (): void => {
+  function dismiss(): void {
+    setVisible(false);
     try {
-      window.localStorage.setItem(STORAGE_KEY, '1');
+      window.localStorage.setItem(STORAGE_KEY, String(Date.now()));
     } catch {
-      // ignore — the in-memory state below is the user-facing dismissal.
+      // Best-effort — if storage is blocked we just won't remember.
     }
-    setShow(false);
-  };
+  }
+
+  if (!visible) return null;
 
   return (
     <div
@@ -40,28 +42,28 @@ export function CookieNotice(): JSX.Element | null {
       aria-label="Cookie notice"
       style={{
         position: 'fixed',
-        left: 'var(--space-3)',
-        right: 'var(--space-3)',
-        bottom: 'var(--space-3)',
-        zIndex: 60,
-        maxWidth: 560,
-        marginLeft: 'auto',
-        marginRight: 'auto',
-        padding: 'var(--space-3)',
-        background: 'var(--surface)',
+        left: 'var(--space-4)',
+        right: 'var(--space-4)',
+        bottom: 'var(--space-4)',
+        zIndex: 50,
+        maxWidth: 720,
+        margin: '0 auto',
+        background: 'var(--card)',
+        color: 'var(--card-foreground)',
         border: '1px solid var(--border)',
-        borderRadius: 12,
-        boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 'var(--space-2)',
+        borderRadius: 'var(--radius-lg)',
+        boxShadow: 'var(--shadow-float)',
+        padding: 'var(--space-4) var(--space-5)',
+        display: 'grid',
+        gridTemplateColumns: '1fr auto',
+        gap: 'var(--space-4)',
         alignItems: 'center',
-        justifyContent: 'space-between',
       }}
     >
-      <p className="ds-meta" style={{ margin: 0, flex: '1 1 240px' }}>
-        We use cookies for sign-in and first-party product analytics. No ad networks. See our{' '}
-        <Link to="/legal/privacy">Privacy Policy</Link>.
+      <p className="ds-meta" style={{ margin: 0 }}>
+        spooool uses essential cookies to keep you signed in, and analytics
+        cookies to count how many people watch what. We don&apos;t sell your
+        data. <Link to="/legal/privacy">Read our Privacy Policy</Link>.
       </p>
       <button type="button" className="btn btn--secondary btn--sm" onClick={dismiss}>
         Got it

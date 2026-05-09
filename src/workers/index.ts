@@ -34,6 +34,7 @@ import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
+import { waitlistRoutes } from './waitlist';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
 
@@ -149,6 +150,7 @@ app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
+app.route('/', waitlistRoutes);
 app.route('/', relatedRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);

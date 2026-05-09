@@ -243,6 +243,14 @@ function buildStaticUrls(origin: string, channelRows: { username: string; update
   const urls: SitemapUrl[] = [
     { loc: `${origin}/`, changefreq: 'hourly', priority: 1.0 },
     { loc: `${origin}/search`, changefreq: 'daily', priority: 0.8 },
+    // ALO-127 — public launch surface that marketing/SEO want indexed.
+    { loc: `${origin}/about`, changefreq: 'monthly', priority: 0.7 },
+    { loc: `${origin}/pricing`, changefreq: 'monthly', priority: 0.6 },
+    { loc: `${origin}/help`, changefreq: 'monthly', priority: 0.5 },
+    { loc: `${origin}/waitlist`, changefreq: 'weekly', priority: 0.7 },
+    { loc: `${origin}/status`, changefreq: 'always', priority: 0.4 },
+    { loc: `${origin}/legal/tos`, changefreq: 'monthly', priority: 0.3 },
+    { loc: `${origin}/legal/privacy`, changefreq: 'monthly', priority: 0.3 },
   ];
   for (const row of channelRows) {
     urls.push({

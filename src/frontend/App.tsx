@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParam
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { CookieNotice } from './components/CookieNotice';
+import { Onboarding } from './components/Onboarding';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the hls.js it depends on for
@@ -39,6 +40,7 @@ const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
 const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
+const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
 const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
 const Help = lazy(() => import('./pages/Help').then((m) => ({ default: m.Help })));
 const About = lazy(() => import('./pages/About').then((m) => ({ default: m.About })));
@@ -450,6 +452,7 @@ function Home(): JSX.Element {
         display: 'flex',
         justifyContent: 'center',
         gap: 'var(--space-4)',
+        flexWrap: 'wrap',
         padding: 'var(--space-6) var(--space-4)',
         borderTop: '1px solid var(--border)',
       }}
@@ -458,8 +461,9 @@ function Home(): JSX.Element {
       <Link to="/pricing">Pricing</Link>
       <Link to="/help">Help</Link>
       <Link to="/status">Status</Link>
-      <Link to="/legal/tos">Terms</Link>
-      <Link to="/legal/privacy">Privacy</Link>
+      <Link to="/waitlist">Beta</Link>
+      <Link to="/legal/tos">Terms of Service</Link>
+      <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/legal/dmca">DMCA</Link>
     </footer>
     </>
@@ -489,7 +493,6 @@ export default function App(): JSX.Element {
   return (
     <div className="app-shell">
       <AppHeader />
-      <CookieNotice />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
           <Route path="/" element={<Home />} />
@@ -554,12 +557,15 @@ export default function App(): JSX.Element {
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route path="/waitlist" element={<Waitlist />} />
           <Route path="/status" element={<Status />} />
           <Route path="/help" element={<Help />} />
           <Route path="/about" element={<About />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      <CookieNotice />
+      <Onboarding />
     </div>
   );
 }

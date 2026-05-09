@@ -40,6 +40,15 @@ export const SEARCH_BUCKET: RateLimitBucket = {
   refillPerSecond: 1,
 };
 
+// 5 waitlist signups per hour per IP. The waitlist endpoint is unauthenticated
+// public-launch surface (ALO-127); a tighter cap stops bots from flooding the
+// list while still letting a household / office share a connection.
+export const WAITLIST_BUCKET: RateLimitBucket = {
+  name: 'waitlist',
+  capacity: 5,
+  refillPerSecond: 5 / 3600,
+};
+
 interface RateLimiterBinding {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;

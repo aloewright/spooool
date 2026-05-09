@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signUp, useSession } from '../lib/auth-client';
+import { markOnboardingPending } from '../components/Onboarding';
 
 export function Signup(): JSX.Element {
   const location = useLocation();
@@ -48,6 +49,9 @@ export function Signup(): JSX.Element {
         track('signup_completed', { method: 'email_password' });
       });
     }
+    // ALO-127: queue the first-run onboarding modal. It pops on the next
+    // route the user lands on (Home or wherever `next` points).
+    markOnboardingPending();
     navigate(next, { replace: true });
   }
 

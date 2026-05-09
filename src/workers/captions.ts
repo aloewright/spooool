@@ -214,27 +214,29 @@ captionsRoutes.put('/api/videos/:id/captions/:lang', async (c) => {
 
   // If the caller marked this track as default, clear other defaults so the
   // player only sees one. Otherwise leave the existing flag alone — re-uploads
-  // shouldn't silently demote the default.
+  // shouldn't silently demote the default. Wrap the clear+upsert in a single
+  // D1 batch so two concurrent PUTs can't both win the "is default" race.
+  const statements: D1PreparedStatement[] = [];
   if (isDefault) {
-    await c.env.DB.prepare(
-      'UPDATE video_captions SET is_default = 0 WHERE video_id = ? AND language != ?',
-    )
-      .bind(id, language)
-      .run();
+    statements.push(
+      c.env.DB.prepare(
+        'UPDATE video_captions SET is_default = 0 WHERE video_id = ? AND language != ?',
+      ).bind(id, language),
+    );
   }
-
-  await c.env.DB.prepare(
-    `INSERT INTO video_captions (video_id, language, label, r2_key, is_default, bytes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-     ON CONFLICT(video_id, language) DO UPDATE SET
-       label = excluded.label,
-       r2_key = excluded.r2_key,
-       is_default = CASE WHEN ? = 1 THEN 1 ELSE video_captions.is_default END,
-       bytes = excluded.bytes,
-       updated_at = CURRENT_TIMESTAMP`,
-  )
-    .bind(id, language, label, r2Key, isDefault ? 1 : 0, bytes, isDefault ? 1 : 0)
-    .run();
+  statements.push(
+    c.env.DB.prepare(
+      `INSERT INTO video_captions (video_id, language, label, r2_key, is_default, bytes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(video_id, language) DO UPDATE SET
+         label = excluded.label,
+         r2_key = excluded.r2_key,
+         is_default = CASE WHEN ? = 1 THEN 1 ELSE video_captions.is_default END,
+         bytes = excluded.bytes,
+         updated_at = CURRENT_TIMESTAMP`,
+    ).bind(id, language, label, r2Key, isDefault ? 1 : 0, bytes, isDefault ? 1 : 0),
+  );
+  await c.env.DB.batch(statements);
 
   return c.json({
     language,

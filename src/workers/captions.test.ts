@@ -29,11 +29,13 @@ interface FakeDBResult {
   db: D1Database;
   prepares: string[];
   binds: unknown[][];
+  batches: FakeStmt[][];
 }
 
 function fakeDB(spec: FakeDBSpec): FakeDBResult {
   const prepares: string[] = [];
   const binds: unknown[][] = [];
+  const batches: FakeStmt[][] = [];
   const prepare = (sql: string): FakeStmt => {
     prepares.push(sql);
     let lastBind: unknown[] = [];
@@ -70,10 +72,15 @@ function fakeDB(spec: FakeDBSpec): FakeDBResult {
     void lastBind;
     return stmt;
   };
+  const batch = async (statements: FakeStmt[]) => {
+    batches.push(statements);
+    return statements.map(() => ({ success: true, results: [] }));
+  };
   return {
-    db: { prepare } as unknown as D1Database,
+    db: { prepare, batch } as unknown as D1Database,
     prepares,
     binds,
+    batches,
   };
 }
 
@@ -372,7 +379,7 @@ describe('PUT /api/videos/:id/captions/:lang', () => {
   });
 
   it('writes to R2 and inserts a row on a fresh upload', async () => {
-    const { db, prepares } = fakeDB({ videoOwner: 'u1' });
+    const { db, prepares, batches } = fakeDB({ videoOwner: 'u1' });
     const { bucket, puts } = fakeR2();
     const res = await buildApp({ id: 'u1' }).request(
       '/api/videos/v1/captions/EN',
@@ -390,9 +397,29 @@ describe('PUT /api/videos/:id/captions/:lang', () => {
     // First prepare loads owner; second clears other defaults; third upserts.
     expect(prepares.some((sql) => /UPDATE video_captions SET is_default = 0/.test(sql))).toBe(true);
     expect(prepares.some((sql) => /INSERT INTO video_captions/.test(sql))).toBe(true);
+    // Default-flag clear and upsert must run atomically — see captions.ts comment.
+    expect(batches.length).toBe(1);
+    expect(batches[0]?.length).toBe(2);
     const body = (await res.json()) as { language: string; isDefault: boolean };
     expect(body.language).toBe('en');
     expect(body.isDefault).toBe(true);
+  });
+
+  it('skips the default-clear UPDATE when isDefault is false', async () => {
+    const { db, batches } = fakeDB({ videoOwner: 'u1' });
+    const { bucket } = fakeR2();
+    const res = await buildApp({ id: 'u1' }).request(
+      '/api/videos/v1/captions/en',
+      {
+        method: 'PUT',
+        headers: { 'x-caption-label': 'English' },
+        body: VALID_VTT,
+      },
+      { DB: db, VIDEOS: bucket },
+    );
+    expect(res.status).toBe(200);
+    expect(batches.length).toBe(1);
+    expect(batches[0]?.length).toBe(1);
   });
 
   it('413s when the body exceeds MAX_VTT_BYTES', async () => {

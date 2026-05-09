@@ -82,5 +82,10 @@ describe('D1 migrations', () => {
     expect(sql).toMatch(/AFTER INSERT ON video_tags/);
     expect(sql).toMatch(/AFTER DELETE ON video_tags/);
     expect(sql).toMatch(/AFTER UPDATE OF label ON tags/);
+    // The drop+recreate has to put back the video/user triggers too.
+    expect(sql).toMatch(/CREATE TRIGGER\s+videos_fts_ai/);
+    expect(sql).toMatch(/CREATE TRIGGER\s+videos_fts_au/);
+    expect(sql).toMatch(/CREATE TRIGGER\s+videos_fts_ad/);
+    expect(sql).toMatch(/CREATE TRIGGER\s+user_name_videos_fts/);
   });
 });

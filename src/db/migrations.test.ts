@@ -70,4 +70,17 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
   });
+
+  it('0019_inbox_email_digest adds digest_sent_at column + partial index (ALO-124)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_inbox_email_digest.sql'), 'utf8');
+    expect(sql).toMatch(/ALTER TABLE subscription_inbox ADD COLUMN digest_sent_at/);
+    expect(sql).toMatch(/idx_inbox_digest_pending/);
+  });
+
+  it('schema.sql mirrors subscription_inbox + the digest column from 0019', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS subscription_inbox');
+    expect(schema).toContain('digest_sent_at');
+    expect(schema).toContain('idx_inbox_digest_pending');
+  });
 });

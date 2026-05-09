@@ -41,6 +41,7 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://spooool.com',
       watchUrl: 'https://spooool.com/watch/abc',
+      videoId: 'abc',
       video: baseVideo,
     });
     expect(out).toContain('<meta property="og:type" content="video.other" />');
@@ -56,25 +57,38 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, title: 'A & B "fun"', description: '<script>x</script>' },
     });
     expect(out).toContain('A &amp; B &quot;fun&quot;');
     expect(out).toContain('&lt;script&gt;x&lt;/script&gt;');
   });
 
-  it('falls back to a thumbnail of /icon.png when none is set', () => {
+  it('falls back to the dynamic OG card endpoint when no thumbnail is set', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: 'vid-1',
       video: { ...baseVideo, thumbnail_url: null },
     });
-    expect(out).toContain('og:image" content="https://x.test/icon.png"');
+    expect(out).toContain('og:image" content="https://x.test/api/og/video/vid-1.svg"');
+  });
+
+  it('URL-encodes the video id in the fallback OG card URL', () => {
+    const out = buildOgMetaTags({
+      origin: 'https://x.test',
+      watchUrl: 'https://x.test/watch/1',
+      videoId: 'a/b c',
+      video: { ...baseVideo, thumbnail_url: null },
+    });
+    expect(out).toContain('og:image" content="https://x.test/api/og/video/a%2Fb%20c.svg"');
   });
 
   it('falls back the description to a sensible default when null', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, description: null },
     });
     expect(out).toContain('Watch on Spooool — Alice');
@@ -84,6 +98,7 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, title: 'a'.repeat(120), description: 'b'.repeat(500) },
     });
     expect(out).toMatch(/og:title" content="a{69}…/);

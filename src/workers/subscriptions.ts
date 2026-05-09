@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { runInboxDigestSweep, type InboxDigestEnv } from './inbox-digest';
+import { isAdmin as isAdminRole } from './roles';
 
-export interface SubscriptionsEnv {
+export interface SubscriptionsEnv extends InboxDigestEnv {
   DB: D1Database;
+  ADMIN_EMAILS?: string;
 }
 
-type SessionUser = { id: string } | null;
+type SessionUser = { id: string; email: string; name: string } | null;
 type SubscriptionsVariables = { user: SessionUser };
 
 const inboxQuerySchema = z.object({
@@ -152,4 +155,34 @@ subscriptionRoutes.post('/api/users/me/inbox/seen', async (c) => {
     .bind(user.id)
     .run();
   return c.json({ ok: true });
+});
+
+// Lightweight count for the header notification badge. Returns the number of
+// unseen rows in the user's inbox without paginating any of the data — the
+// inbox feed itself is what the /inbox page uses.
+subscriptionRoutes.get('/api/users/me/inbox/unseen-count', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS c
+     FROM subscription_inbox i
+     JOIN videos v ON v.id = i.video_id AND v.deleted_at IS NULL AND v.hidden_at IS NULL
+     WHERE i.subscriber_user_id = ? AND i.seen_at IS NULL`,
+  )
+    .bind(user.id)
+    .first<{ c: number }>();
+  return c.json({ unseen: Number(row?.c ?? 0) });
+});
+
+// Admin-only manual trigger for the digest sweep. Useful for one-off catch-up
+// runs without waiting for the cron, and as the test surface for the digest
+// pipeline. The cron caller is `scheduled` in src/workers/index.ts.
+subscriptionRoutes.post('/api/admin/inbox/digest/run', async (c) => {
+  const user = c.get('user');
+  if (!(await isAdminRole(c.env, user))) {
+    return c.json({ error: 'Forbidden' }, 403);
+  }
+  const stats = await runInboxDigestSweep(c.env);
+  return c.json({ ok: true, stats });
 });

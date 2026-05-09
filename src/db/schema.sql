@@ -121,6 +121,25 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   UNIQUE (subscriber_user_id, channel_user_id)
 );
 
+CREATE TABLE IF NOT EXISTS subscription_inbox (
+  subscriber_user_id TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  channel_user_id TEXT NOT NULL,
+  added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  seen_at TEXT,
+  digest_sent_at TEXT,
+  PRIMARY KEY (subscriber_user_id, video_id),
+  FOREIGN KEY (subscriber_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (video_id) REFERENCES videos(id),
+  FOREIGN KEY (channel_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_user_added
+  ON subscription_inbox(subscriber_user_id, added_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inbox_digest_pending
+  ON subscription_inbox(subscriber_user_id, added_at DESC)
+  WHERE seen_at IS NULL AND digest_sent_at IS NULL;
+
 CREATE TABLE IF NOT EXISTS playlists (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,

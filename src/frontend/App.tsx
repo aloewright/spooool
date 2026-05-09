@@ -75,39 +75,74 @@ function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   );
 }
 
-function InboxBadge(): JSX.Element {
-  const [count, setCount] = useState<number>(0);
+// ALO-124: badge on the inbox link showing how many unseen items the
+// signed-in user has. Polls every 60s while the page is visible — long
+// enough that fan-out has settled, short enough that "you have new uploads"
+// feels live without hammering D1.
+const INBOX_POLL_MS = 60_000;
+const INBOX_BADGE_CAP = 99;
+
+function InboxLink(): JSX.Element {
+  const [unseen, setUnseen] = useState<number>(0);
+
   useEffect(() => {
     let cancelled = false;
-    void fetch('/api/users/me/inbox?unseenOnly=1&limit=100', { credentials: 'include' })
-      .then(async (r) => (r.ok ? ((await r.json()) as { items: unknown[] }) : { items: [] }))
-      .then((data) => {
-        if (!cancelled) setCount(data.items.length);
-      })
-      .catch(() => {});
+    const fetchCount = async (): Promise<void> => {
+      try {
+        const res = await fetch('/api/users/me/inbox/unseen-count', {
+          credentials: 'same-origin',
+        });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { unseen?: number };
+        if (!cancelled) setUnseen(Number(data.unseen ?? 0));
+      } catch {
+        // best-effort: a transient failure shouldn't blank the badge
+      }
+    };
+    void fetchCount();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void fetchCount();
+    }, INBOX_POLL_MS);
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') void fetchCount();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
+
+  const label = unseen > 0
+    ? `Inbox (${unseen > INBOX_BADGE_CAP ? `${INBOX_BADGE_CAP}+` : unseen} unseen)`
+    : 'Inbox';
+
   return (
-    <Link to="/inbox" aria-label={`Inbox${count > 0 ? `, ${count} unseen` : ''}`}>
+    <Link to="/inbox" aria-label={label} style={{ position: 'relative', display: 'inline-flex' }}>
       <button type="button" className="btn btn--ghost btn--sm">
         Inbox
-        {count > 0 && (
+        {unseen > 0 ? (
           <span
+            aria-hidden="true"
             style={{
               marginLeft: 6,
-              background: 'var(--color-accent, #06f)',
-              color: '#fff',
-              borderRadius: 999,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 18,
+              height: 18,
               padding: '0 6px',
-              fontSize: 12,
+              borderRadius: 999,
+              fontSize: 11,
               fontWeight: 700,
+              background: 'var(--accent)',
+              color: 'var(--bg)',
             }}
           >
-            {count > 99 ? '99+' : count}
+            {unseen > INBOX_BADGE_CAP ? `${INBOX_BADGE_CAP}+` : unseen}
           </span>
-        )}
+        ) : null}
       </button>
     </Link>
   );
@@ -137,10 +172,10 @@ function HeaderNav(): JSX.Element {
   return (
     <nav className="app-header__nav">
       <span className="ds-meta">{session.user.email}</span>
+      <InboxLink />
       <Link to="/upload">
         <button type="button" className="btn btn--secondary btn--sm">Upload</button>
       </Link>
-      <InboxBadge />
       <Link to="/profile">
         <button type="button" className="btn btn--ghost btn--sm">Profile</button>
       </Link>
@@ -544,6 +579,14 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route
+            path="/inbox"
+            element={
+              <RequireAuth>
+                <Inbox />
+              </RequireAuth>
+            }
+          />
           <Route path="/channel/:username" element={<Channel />} />
           <Route path="/search" element={<Search />} />
           <Route path="/tag/:slug" element={<Tag />} />
@@ -568,14 +611,6 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <AccountSettings />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/inbox"
-            element={
-              <RequireAuth>
-                <Inbox />
               </RequireAuth>
             }
           />

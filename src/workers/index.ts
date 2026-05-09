@@ -14,7 +14,9 @@ import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
+import { ogImageRoutes } from './og-image';
 import { ogMetaRoutes } from './og-meta';
+import { runInboxDigestSweep } from './inbox-digest';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -154,6 +156,9 @@ app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
+// /api/og/video/:id.svg — per-video OG share card (ALO-124). Pure JSON-API
+// route so it gets mounted before the /watch/:id intercept.
+app.route('/', ogImageRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.
@@ -178,7 +183,8 @@ const workerHandlers = {
   },
   async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext): Promise<void> {
     // ALO-132: hard-delete users whose 30-day grace window has elapsed.
-    // The cron is configured in wrangler.toml under [triggers] crons.
+    // ALO-124: send subscription-inbox email digests to subscribers with
+    // unseen rows. Both run from the same daily cron in wrangler.toml.
     ctx.waitUntil(
       (async () => {
         try {
@@ -189,6 +195,10 @@ const workerHandlers = {
           const restored = await runDmcaRestoreSweep(env);
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
+          }
+          const digest = await runInboxDigestSweep(env);
+          if (digest.recipients > 0) {
+            console.log('[inbox-digest]', { cron: controller.cron, ...digest });
           }
         } catch (err) {
           console.error('scheduled sweep failed', {

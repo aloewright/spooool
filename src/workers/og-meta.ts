@@ -47,6 +47,7 @@ export function clampForMeta(value: string | null | undefined, max: number): str
 export function buildOgMetaTags(args: {
   origin: string;
   watchUrl: string;
+  videoId: string;
   video: Pick<VideoMetaRow, 'title' | 'description' | 'thumbnail_url' | 'channel_name'>;
 }): string {
   const { origin, watchUrl, video } = args;
@@ -55,7 +56,13 @@ export function buildOgMetaTags(args: {
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // ALO-124: when a video has no thumbnail (still encoding, very old upload,
+  // or thumbnail generation failed) fall back to the dynamic OG card endpoint
+  // instead of the static /icon.png so social previews still surface the
+  // video's title + channel.
+  const image =
+    video.thumbnail_url ??
+    `${origin}/api/og/video/${encodeURIComponent(args.videoId)}.svg`;
 
   const escape = (v: string): string =>
     v
@@ -133,7 +140,7 @@ ogMetaRoutes.get('/watch/:id', async (c) => {
 
   const origin = new URL(c.req.url).origin;
   const watchUrl = `${origin}/watch/${encodeURIComponent(video.id)}`;
-  const tags = buildOgMetaTags({ origin, watchUrl, video });
+  const tags = buildOgMetaTags({ origin, watchUrl, videoId: video.id, video });
 
   // Strip any pre-existing og:* / twitter:* meta from the static HTML so we
   // don't emit duplicates. Then inject the per-video tags before </head>.

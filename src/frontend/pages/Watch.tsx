@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Comments } from '../components/Comments';
+import { PlayerControls } from '../components/PlayerControls';
 import { ReportButton } from '../components/ReportButton';
 import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
@@ -76,6 +77,9 @@ export function Watch(): JSX.Element {
   const [resumeOffer, setResumeOffer] = useState<number | null>(null);
   const videoEl = useRef<HTMLVideoElement | null>(null);
   const playerRef = useRef<NativePlayer | null>(null);
+  // Mirror the player ref into state so PlayerControls re-renders when the
+  // player is created/disposed across source changes.
+  const [player, setPlayer] = useState<NativePlayer | null>(null);
 
   // ALO-147: ?t= deep link wins over a stored resume position.
   const startAt = useMemo(
@@ -277,12 +281,16 @@ export function Watch(): JSX.Element {
     }
 
     playerRef.current?.dispose();
-    el.controls = true;
+    // ALO-141: native UA controls are hidden — the Strand-themed overlay
+    // handles play/pause/seek/volume/fullscreen.
+    el.controls = false;
     playerRef.current = createNativePlayer(el, playbackSource);
+    setPlayer(playerRef.current);
 
     return () => {
       playerRef.current?.dispose();
       playerRef.current = null;
+      setPlayer(null);
     };
   }, [playbackSource]);
 
@@ -517,13 +525,9 @@ export function Watch(): JSX.Element {
   return (
     <main className="app-main stack-lg fade-in">
       <div
-        className="card--tight"
+        className="player"
         style={{
-          padding: 0,
-          overflow: 'hidden',
-          borderRadius: 'var(--radius-2xl)',
           border: '1px solid color-mix(in oklch, var(--border), transparent 30%)',
-          background: 'oklch(0 0 0)',
           boxShadow: 'var(--shadow-card)',
         }}
       >
@@ -532,8 +536,17 @@ export function Watch(): JSX.Element {
           className="native-player"
           playsInline
           preload="metadata"
-          style={{ width: '100%', display: 'block', background: 'black' }}
+          onClick={() => {
+            const p = playerRef.current;
+            if (!p) return;
+            if (p.paused()) {
+              void p.play();
+            } else {
+              p.pause();
+            }
+          }}
         />
+        <PlayerControls player={player} />
       </div>
       {resumeOffer != null && (
         <div

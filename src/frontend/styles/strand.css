@@ -546,3 +546,328 @@ input[type="file"].input {
 
 .fade-up { animation: fade-up 0.25s var(--ease-spring) both; }
 .fade-in { animation: fade-in 0.2s var(--ease-smooth) both; }
+
+/* ── Video player (ALO-141) ──────────────────────────────────
+   Custom Strand-themed controls layered over the native <video>.
+   The native UA controls are suppressed via `controls={false}` on
+   the element; we keep the element itself for keyboard shortcuts +
+   accessibility tree (aria-label on the wrapper). */
+.player {
+  position: relative;
+  width: 100%;
+  display: block;
+  background: oklch(0 0 0);
+  color: oklch(0.985 0 0);
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.player video {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: oklch(0 0 0);
+}
+
+.player__controls {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  /* Tap targets need clicks; only the bar + buttons re-enable it. */
+  transition: opacity 200ms var(--ease-smooth);
+  opacity: 1;
+}
+
+.player__controls > * {
+  pointer-events: auto;
+}
+
+.player__controls--idle {
+  opacity: 0;
+  cursor: none;
+}
+
+.player__controls--idle .player__bar {
+  transform: translateY(8px);
+}
+
+.player__center {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.player__bigplay {
+  pointer-events: auto;
+  appearance: none;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: color-mix(in oklch, oklch(0 0 0), transparent 30%);
+  color: oklch(0.985 0 0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    transform 150ms var(--ease-spring),
+    background 150ms var(--ease-smooth);
+  box-shadow: var(--shadow-float);
+}
+
+.player__bigplay:hover {
+  transform: scale(1.04);
+  background: color-mix(in oklch, oklch(0 0 0), transparent 15%);
+}
+
+.player__bigplay svg {
+  width: 28px;
+  height: 28px;
+}
+
+.player__spinner {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, oklch(0.985 0 0), transparent 70%);
+  border-top-color: oklch(0.985 0 0);
+  animation: player-spin 0.8s linear infinite;
+}
+
+@keyframes player-spin {
+  to { transform: rotate(360deg); }
+}
+
+.player__bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-3);
+  background: linear-gradient(
+    to top,
+    oklch(0 0 0 / 0.7) 0%,
+    oklch(0 0 0 / 0.5) 50%,
+    oklch(0 0 0 / 0) 100%
+  );
+  transition: transform 200ms var(--ease-smooth);
+}
+
+.player__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: oklch(0.985 0 0);
+}
+
+.player__spacer {
+  flex: 1;
+}
+
+.player__btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: oklch(0.985 0 0);
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    background 150ms var(--ease-smooth),
+    transform 80ms var(--ease-smooth);
+}
+
+.player__btn:hover {
+  background: color-mix(in oklch, oklch(0.985 0 0), transparent 85%);
+}
+
+.player__btn:active {
+  transform: translateY(1px);
+}
+
+.player__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, oklch(0.985 0 0), transparent 50%);
+}
+
+.player__time {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  color: color-mix(in oklch, oklch(0.985 0 0), transparent 15%);
+  padding: 0 var(--space-1);
+  min-width: 0;
+}
+
+.player__volume {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.player__volume-slider {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0;
+  height: 4px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: width 200ms var(--ease-smooth);
+  /* Hidden until the volume group is hovered/focused. Keeps the bar tight
+     on small displays without sacrificing accessibility — the mute button
+     is always reachable. */
+  overflow: hidden;
+}
+
+.player__volume:hover .player__volume-slider,
+.player__volume:focus-within .player__volume-slider {
+  width: 80px;
+}
+
+@media (max-width: 480px) {
+  .player__volume-slider {
+    display: none;
+  }
+}
+
+.player__volume-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  background: color-mix(in oklch, oklch(0.985 0 0), transparent 75%);
+  border-radius: var(--radius-pill);
+}
+
+.player__volume-slider::-moz-range-track {
+  height: 4px;
+  background: color-mix(in oklch, oklch(0.985 0 0), transparent 75%);
+  border-radius: var(--radius-pill);
+}
+
+.player__volume-slider::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: oklch(0.985 0 0);
+  border: none;
+  cursor: pointer;
+}
+
+.player__volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: oklch(0.985 0 0);
+  border: none;
+  cursor: pointer;
+}
+
+.player__scrubber-wrap {
+  position: relative;
+  height: 18px;
+  display: flex;
+  align-items: center;
+}
+
+.player__scrubber-track {
+  position: absolute;
+  inset: 0 0 0 0;
+  margin: auto 0;
+  height: 4px;
+  background: color-mix(in oklch, oklch(0.985 0 0), transparent 80%);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.player__scrubber-buffered {
+  position: absolute;
+  inset: 0;
+  width: var(--player-buffered, 0%);
+  background: color-mix(in oklch, oklch(0.985 0 0), transparent 60%);
+  border-radius: var(--radius-pill);
+}
+
+.player__scrubber-played {
+  position: absolute;
+  inset: 0;
+  width: var(--player-played, 0%);
+  background: oklch(0.985 0 0);
+  border-radius: var(--radius-pill);
+}
+
+.player__scrubber {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 18px;
+  background: transparent;
+  margin: 0;
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+}
+
+.player__scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+  border-radius: var(--radius-pill);
+}
+
+.player__scrubber::-moz-range-track {
+  height: 4px;
+  background: transparent;
+  border-radius: var(--radius-pill);
+}
+
+.player__scrubber::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: oklch(0.985 0 0);
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms var(--ease-smooth);
+}
+
+.player__scrubber::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: oklch(0.985 0 0);
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms var(--ease-smooth);
+}
+
+.player__scrubber:hover::-webkit-slider-thumb,
+.player__scrubber:focus-visible::-webkit-slider-thumb,
+.player__controls:hover .player__scrubber::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.player__scrubber:hover::-moz-range-thumb,
+.player__scrubber:focus-visible::-moz-range-thumb,
+.player__controls:hover .player__scrubber::-moz-range-thumb {
+  opacity: 1;
+}
+
+.player__scrubber:focus-visible {
+  outline: none;
+}

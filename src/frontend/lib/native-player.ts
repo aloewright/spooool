@@ -33,10 +33,16 @@ export interface NativePlayerSource {
 
 export type NativePlayerEvent =
   | 'loadedmetadata'
+  | 'durationchange'
   | 'play'
+  | 'playing'
   | 'pause'
   | 'ended'
   | 'timeupdate'
+  | 'progress'
+  | 'volumechange'
+  | 'waiting'
+  | 'canplay'
   | 'error';
 
 export interface NativePlayer {
@@ -57,6 +63,13 @@ export interface NativePlayer {
 
   muted(): boolean;
   setMuted(value: boolean): void;
+
+  /** Volume in [0, 1]. */
+  volume(): number;
+  setVolume(value: number): void;
+
+  /** End time of the buffered range that contains `currentTime`, or 0. */
+  bufferedAhead(): number;
 
   isFullscreen(): boolean;
   requestFullscreen(): Promise<void>;
@@ -173,6 +186,30 @@ export function createNativePlayer(
     },
     setMuted(value: boolean): void {
       element.muted = value;
+    },
+    volume(): number {
+      const v = element.volume;
+      return Number.isFinite(v) ? v : 1;
+    },
+    setVolume(value: number): void {
+      const clamped = Math.min(1, Math.max(0, value));
+      element.volume = clamped;
+      // Setting volume above 0 should also implicitly unmute, matching the
+      // user's intent when they drag the slider up from a muted state.
+      if (clamped > 0 && element.muted) element.muted = false;
+    },
+    bufferedAhead(): number {
+      const ranges = element.buffered;
+      if (!ranges || ranges.length === 0) return 0;
+      const t = element.currentTime;
+      for (let i = 0; i < ranges.length; i += 1) {
+        const start = ranges.start(i);
+        const end = ranges.end(i);
+        if (t >= start && t <= end) return end;
+      }
+      // No range contains currentTime — return the furthest end seen so the
+      // scrubber still shows progress on a fresh play.
+      return ranges.end(ranges.length - 1);
     },
     isFullscreen(): boolean {
       return typeof document !== 'undefined' && document.fullscreenElement === element;

@@ -15,6 +15,8 @@ function makeFakeVideo(opts: { canPlayHls?: boolean } = {}): HTMLVideoElement {
     duration: NaN,
     paused: true,
     muted: false,
+    volume: 1,
+    buffered: { length: 0, start: () => 0, end: () => 0 } as TimeRanges,
     readyState: 0,
     controls: false,
     canPlayType: vi.fn((t: string) => {
@@ -178,5 +180,40 @@ describe('createNativePlayer', () => {
     const p = createNativePlayer(el, { src: 'x.mp4', type: 'video/mp4' }, { HlsCtor: FakeCtor });
     p.dispose();
     expect(() => p.dispose()).not.toThrow();
+  });
+
+  it('setVolume clamps to [0, 1] and unmutes when raising from 0', () => {
+    const el = makeFakeVideo({ canPlayHls: true });
+    (el as unknown as { muted: boolean }).muted = true;
+    const FakeCtor = FakeHls as unknown as typeof import('hls.js').default;
+    const p = createNativePlayer(el, { src: 'x.mp4', type: 'video/mp4' }, { HlsCtor: FakeCtor });
+    p.setVolume(2);
+    expect((el as unknown as { volume: number }).volume).toBe(1);
+    expect((el as unknown as { muted: boolean }).muted).toBe(false);
+    p.setVolume(-0.5);
+    expect((el as unknown as { volume: number }).volume).toBe(0);
+    p.dispose();
+  });
+
+  it('bufferedAhead returns the end of the range containing currentTime', () => {
+    const el = makeFakeVideo({ canPlayHls: true });
+    (el as unknown as { currentTime: number }).currentTime = 30;
+    (el as unknown as { buffered: TimeRanges }).buffered = {
+      length: 2,
+      start: (i: number): number => (i === 0 ? 0 : 60),
+      end: (i: number): number => (i === 0 ? 45 : 90),
+    } as unknown as TimeRanges;
+    const FakeCtor = FakeHls as unknown as typeof import('hls.js').default;
+    const p = createNativePlayer(el, { src: 'x.mp4', type: 'video/mp4' }, { HlsCtor: FakeCtor });
+    expect(p.bufferedAhead()).toBe(45);
+    p.dispose();
+  });
+
+  it('bufferedAhead returns 0 when no ranges are buffered', () => {
+    const el = makeFakeVideo({ canPlayHls: true });
+    const FakeCtor = FakeHls as unknown as typeof import('hls.js').default;
+    const p = createNativePlayer(el, { src: 'x.mp4', type: 'video/mp4' }, { HlsCtor: FakeCtor });
+    expect(p.bufferedAhead()).toBe(0);
+    p.dispose();
   });
 });

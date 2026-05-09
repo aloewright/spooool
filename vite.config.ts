@@ -7,15 +7,15 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     // Threshold is informational; with manualChunks below the largest async
-    // chunk is the watch-page bundle including hls.js (~150KB raw / ~40KB gz).
-    chunkSizeWarningLimit: 600,
+    // chunk is the watch-page bundle including video.js + VHS.
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
         manualChunks(id: string): string | undefined {
           if (!id.includes('node_modules')) return undefined;
-          // ALO-204: hls.js is only loaded when the watch page mounts, so
-          // isolate it from the eager vendor chunk.
-          if (id.includes('hls.js')) return 'hls';
+          // ALO-204: video.js + VHS are only loaded when the watch page
+          // mounts (lazy route), so keep them out of the eager vendor chunk.
+          if (id.includes('video.js') || id.includes('@videojs')) return 'videojs';
           // ALO-166: PostHog is dynamic-imported from main.tsx after first
           // paint; isolate so the eager vendor chunk stays small.
           if (id.includes('posthog-js')) return 'posthog';

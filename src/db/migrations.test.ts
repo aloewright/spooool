@@ -70,4 +70,17 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS video_tags');
     expect(schema).toContain('idx_video_tags_tag');
   });
+
+  it('0019_videos_fts_tags adds tags to the FTS index + sync triggers (ALO-150)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0019_videos_fts_tags.sql'), 'utf8');
+    // FTS5 doesn't support adding columns, so the migration drops and recreates.
+    expect(sql).toMatch(/DROP TABLE IF EXISTS videos_fts/);
+    expect(sql).toMatch(/CREATE VIRTUAL TABLE videos_fts USING fts5\([^)]*tags[^)]*\)/s);
+    // Backfill aggregates each video's tags into the new FTS column.
+    expect(sql).toMatch(/GROUP_CONCAT\(t\.label/);
+    // Triggers on video_tags and tags keep the FTS row in sync with mutations.
+    expect(sql).toMatch(/AFTER INSERT ON video_tags/);
+    expect(sql).toMatch(/AFTER DELETE ON video_tags/);
+    expect(sql).toMatch(/AFTER UPDATE OF label ON tags/);
+  });
 });

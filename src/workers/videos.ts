@@ -3,6 +3,16 @@ import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
 import {
+  completedPartsForR2,
+  deleteManifest,
+  loadManifest,
+  manifestProgress,
+  partNumberForChunkIndex,
+  saveManifest,
+  totalBytesInManifest,
+  type UploadManifest,
+} from './chunked-upload';
+import {
   UPLOAD_INIT_BUCKET,
   rateLimit,
   rateLimitHeaders,
@@ -70,14 +80,6 @@ const trendingQuerySchema = z.object({
 const uploadMetadataSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(5000).optional().default(''),
-});
-
-const uploadMetaPersistedSchema = z.object({
-  videoId: z.string(),
-  r2Key: z.string(),
-  title: z.string(),
-  description: z.string(),
-  chunkCount: z.number().int().positive(),
 });
 
 export const videoRoutes = new Hono<{
@@ -304,79 +306,6 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   });
 });
 
-// ALO-134: resume endpoint. Lets a client that disconnected mid-upload
-// query which parts have already been received, so it can pick up at the
-// next missing chunkIndex. Manifest lives in KV under the same baseKvKey
-// the chunk handler writes to, with 24h TTL.
-videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
-  const user = c.get('user');
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  const uploadId = c.req.param('uploadId');
-  const baseKvKey = `upload:${user.id}:${uploadId}`;
-  const [uploadMetaJson, partsJson] = await Promise.all([
-    c.env.SESSIONS.get(`${baseKvKey}:meta`),
-    c.env.SESSIONS.get(`${baseKvKey}:parts`),
-  ]);
-  if (!uploadMetaJson) {
-    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
-  }
-  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
-  const partsMap = partsJson
-    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
-    : {};
-  // Manifest stores R2 part numbers (1-indexed); clients work in 0-indexed
-  // chunkIndex space — translate at the boundary so callers don't have to.
-  const receivedChunks = Object.keys(partsMap)
-    .map((p) => Number(p) - 1)
-    .sort((a, b) => a - b);
-  const receivedBytes = Object.values(partsMap).reduce((sum, p) => sum + p.size, 0);
-  let nextChunkIndex: number | null = null;
-  for (let i = 0; i < uploadMeta.chunkCount; i++) {
-    if (!receivedChunks.includes(i)) {
-      nextChunkIndex = i;
-      break;
-    }
-  }
-  return c.json({
-    uploadId,
-    chunkCount: uploadMeta.chunkCount,
-    receivedChunks,
-    receivedBytes,
-    nextChunkIndex,
-    complete: nextChunkIndex === null,
-  });
-});
-
-videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
-  const user = c.get('user');
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401);
-  }
-  const uploadId = c.req.param('uploadId');
-  const baseKvKey = `upload:${user.id}:${uploadId}`;
-  const mpidKey = `${baseKvKey}:mpid`;
-  const metaKey = `${baseKvKey}:meta`;
-  const partsKey = `${baseKvKey}:parts`;
-  const [multipartUploadId, uploadMetaJson] = await Promise.all([
-    c.env.SESSIONS.get(mpidKey),
-    c.env.SESSIONS.get(metaKey),
-  ]);
-  if (!uploadMetaJson || !multipartUploadId) {
-    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
-  }
-  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
-  const multipart = c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
-  await multipart.abort().catch(() => {});
-  await Promise.all([
-    c.env.SESSIONS.delete(mpidKey),
-    c.env.SESSIONS.delete(metaKey),
-    c.env.SESSIONS.delete(partsKey),
-  ]);
-  return c.json({ status: 'aborted', uploadId });
-});
-
 videoRoutes.post('/api/videos/upload', async (c) => {
   const env = c.env;
   const user = c.get('user');
@@ -503,62 +432,60 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     return c.json({ id: videoId, status: 'queued' }, 201);
   }
 
-  const resolvedUploadId = uploadId ?? crypto.randomUUID();
+  // Resumable multipart path. Either the client is starting a fresh upload
+  // (no uploadId, chunkIndex===0) or resuming an existing one (uploadId
+  // provided; any chunkIndex in [0, chunkCount-1]).
+  let resolvedUploadId = uploadId ?? '';
+  let manifest: UploadManifest | null = uploadId
+    ? await loadManifest(env, user.id, uploadId)
+    : null;
 
-  const baseKvKey = `upload:${user.id}:${resolvedUploadId}`;
-  const mpidKey = `${baseKvKey}:mpid`;
-  const metaKey = `${baseKvKey}:meta`;
-  const partsKey = `${baseKvKey}:parts`;
-
-  if (chunkIndex === 0) {
+  if (!manifest) {
+    // No manifest in KV — must be a fresh init. Anything else is a stale or
+    // forged uploadId; tell the client to restart from chunk 0.
+    if (chunkIndex !== 0) {
+      return c.json({ error: 'Missing upload session. Start with chunkIndex=0.' }, 400);
+    }
+    resolvedUploadId = uploadId ?? crypto.randomUUID();
     const videoId = crypto.randomUUID();
     const r2Key = `${user.id}/${videoId}/${rawFile.name}`;
-    const multipart = await env.VIDEOS.createMultipartUpload(r2Key, {
+    const created = await env.VIDEOS.createMultipartUpload(r2Key, {
       httpMetadata: { contentType: rawFile.type },
     });
-
-    const firstPart = await multipart.uploadPart(1, rawFile.stream());
-
-    await env.SESSIONS.put(mpidKey, multipart.uploadId, { expirationTtl: 86400 });
-    await env.SESSIONS.put(
-      metaKey,
-      JSON.stringify({
-        videoId,
-        r2Key,
-        title: metadataParsed.data.title,
-        description: metadataParsed.data.description,
-        chunkCount,
-      }),
-      { expirationTtl: 86400 },
-    );
-    await env.SESSIONS.put(
-      partsKey,
-      JSON.stringify({ '1': { etag: firstPart.etag, size: rawFile.size } } as Record<
-        string,
-        { etag: string; size: number }
-      >),
-      { expirationTtl: 86400 },
-    );
-    return c.json({ status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId }, 202);
+    manifest = {
+      videoId,
+      r2Key,
+      multipartUploadId: created.uploadId,
+      title: metadataParsed.data.title,
+      description: metadataParsed.data.description,
+      fileName: rawFile.name,
+      contentType: rawFile.type,
+      chunkCount,
+      parts: {},
+      createdAt: Date.now(),
+    };
+  } else {
+    // Existing manifest: enforce that chunkCount stays consistent — a client
+    // resuming the same upload must use the same total chunk count.
+    if (manifest.chunkCount !== chunkCount) {
+      return c.json(
+        {
+          error: 'chunkCount mismatch with existing upload session',
+          code: 'chunk_count_mismatch',
+        },
+        400,
+      );
+    }
+    resolvedUploadId = uploadId as string;
   }
 
-  const [multipartUploadId, uploadMetaJson, partsJson] = await Promise.all([
-    env.SESSIONS.get(mpidKey),
-    env.SESSIONS.get(metaKey),
-    env.SESSIONS.get(partsKey),
-  ]);
+  const partNumber = partNumberForChunkIndex(chunkIndex);
+  const existingPart = manifest.parts[String(partNumber)];
 
-  if (!multipartUploadId || !uploadMetaJson) {
-    return c.json({ error: 'Missing upload session. Start with chunkIndex=0.' }, 400);
-  }
-
-  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
-
-  const uploadedPartsMap = partsJson
-    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
-    : {};
-
-  const priorBytes = Object.values(uploadedPartsMap).reduce((sum, part) => sum + part.size, 0);
+  // Precompute the prospective post-upload byte total so we can reject
+  // before paying the R2 write. If this chunk replaces an existing part
+  // (idempotent retry), subtract the old size from the prior total.
+  const priorBytes = totalBytesInManifest(manifest) - (existingPart?.size ?? 0);
   if (priorBytes + rawFile.size > MAX_VIDEO_BYTES) {
     return c.json(
       { error: `Upload exceeds ${MAX_VIDEO_BYTES} bytes`, code: 'file_too_large' },
@@ -566,20 +493,28 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     );
   }
 
-  const multipart = env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
-  const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
+  const multipart = env.VIDEOS.resumeMultipartUpload(
+    manifest.r2Key,
+    manifest.multipartUploadId,
+  );
+  const uploadedPart = await multipart.uploadPart(partNumber, rawFile.stream());
 
-  uploadedPartsMap[String(chunkIndex + 1)] = { etag: uploadedPart.etag, size: rawFile.size };
-  await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), { expirationTtl: 86400 });
+  manifest.parts[String(partNumber)] = { etag: uploadedPart.etag, size: rawFile.size };
 
-  if (chunkIndex < chunkCount - 1) {
-    return c.json({ status: 'chunk_received', chunkIndex, chunkCount }, 202);
+  // Persist the updated manifest *before* completion so a crash between
+  // uploadPart and complete leaves a recoverable manifest with one extra
+  // part, not a lost one.
+  await saveManifest(env, user.id, resolvedUploadId, manifest);
+
+  if (Object.keys(manifest.parts).length < chunkCount) {
+    return c.json(
+      { status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId },
+      202,
+    );
   }
 
-  const completedParts = Object.entries(uploadedPartsMap)
-    .map(([partNumber, part]) => ({ partNumber: Number(partNumber), etag: part.etag }))
-    .sort((a, b) => a.partNumber - b.partNumber);
-
+  // All chunks present — commit.
+  const completedParts = completedPartsForR2(manifest);
   if (completedParts.length !== chunkCount) {
     return c.json({ error: 'Missing one or more chunks before completion' }, 400);
   }
@@ -587,15 +522,11 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // ALO-139: authoritative quota check at completion. Catches the case
   // where the first-chunk precheck passed but a parallel upload (or a
   // very large total via many small chunks) would push the user over.
-  const totalBytes = priorBytes + rawFile.size;
+  const totalBytes = totalBytesInManifest(manifest);
   const finalUsage = await getStorageUsage(env, user.id);
   if (!hasRoomFor(finalUsage, totalBytes)) {
     await multipart.abort().catch(() => {});
-    await Promise.all([
-      env.SESSIONS.delete(mpidKey),
-      env.SESSIONS.delete(metaKey),
-      env.SESSIONS.delete(partsKey),
-    ]);
+    await deleteManifest(env, user.id, resolvedUploadId);
     return c.json(
       {
         error: 'Storage quota exceeded.',
@@ -613,26 +544,67 @@ videoRoutes.post('/api/videos/upload', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
   )
     .bind(
-      uploadMeta.videoId,
+      manifest.videoId,
       user.id,
-      uploadMeta.title,
-      uploadMeta.description,
-      uploadMeta.r2Key,
+      manifest.title,
+      manifest.description,
+      manifest.r2Key,
       totalBytes,
       'queued',
     )
     .run();
 
-  await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
+  await env.VIDEO_ENCODING.send({ videoId: manifest.videoId, r2Key: manifest.r2Key });
   await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
-    videoId: uploadMeta.videoId,
+    videoId: manifest.videoId,
     channelUserId: user.id,
   });
   await bumpTrendingCacheVersion(env.CACHE);
 
-  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+  await deleteManifest(env, user.id, resolvedUploadId);
 
-  return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
+  return c.json({ id: manifest.videoId, status: 'queued' }, 201);
+});
+
+// ALO-134: status query. Lets a client that disconnected mid-upload
+// fetch the manifest and resume from `nextChunkIndex`. Clients can
+// alternately walk `receivedChunks` to fill any gaps.
+videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
+  const user = c.get('user');
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const uploadId = c.req.param('uploadId');
+  const manifest = await loadManifest(c.env, user.id, uploadId);
+  if (!manifest) {
+    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
+  }
+  return c.json(manifestProgress(uploadId, manifest));
+});
+
+// ALO-134: explicit abort. Releases the in-flight R2 multipart upload (so
+// the user isn't billed for orphan parts) and clears the manifest. Idempotent
+// — calling DELETE on an already-cleared upload returns 404 with the same
+// code so the client can treat it as success.
+videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
+  const user = c.get('user');
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const uploadId = c.req.param('uploadId');
+  const manifest = await loadManifest(c.env, user.id, uploadId);
+  if (!manifest) {
+    return c.json({ error: 'Upload session not found', code: 'upload_not_found' }, 404);
+  }
+  const multipart = c.env.VIDEOS.resumeMultipartUpload(
+    manifest.r2Key,
+    manifest.multipartUploadId,
+  );
+  // R2 abort can fail if the upload was already aborted or completed;
+  // either way the manifest should still go.
+  await multipart.abort().catch(() => {});
+  await deleteManifest(c.env, user.id, uploadId);
+  return c.json({ success: true, uploadId });
 });
 
 videoRoutes.delete('/api/videos/:id', async (c) => {

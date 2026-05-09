@@ -56,7 +56,28 @@ type CachedVideoMeta = {
   channel_username: string | null;
   hidden_at: string | null;
   dmca_status: string | null;
+  // ALO-136: when the R2+FFmpeg fallback path produced HLS variants, this
+  // is the R2 key of the master playlist (e.g. `<userId>/<videoId>/hls/master.m3u8`).
+  // Null on rows that were Stream-encoded or still encoding.
+  playback_hls_path: string | null;
 };
+
+// ALO-136: derive the playback HLS manifest URL. Stream-encoded videos
+// publish absolute videodelivery.net URLs into `playback_hls_url`; the
+// FFmpeg fallback writes the master.m3u8 R2 key into `playback_hls_path`
+// and the frontend fetches it through /api/videos/:id/hls/master.m3u8.
+// Returning a single `playback_url` field on the API response lets the
+// player stay agnostic of which encoder produced the asset.
+export function derivePlaybackUrl(
+  videoId: string,
+  row: { playback_hls_path?: string | null; playback_hls_url?: string | null },
+): string | null {
+  if (row.playback_hls_url) return row.playback_hls_url;
+  if (!row.playback_hls_path) return null;
+  const slash = row.playback_hls_path.lastIndexOf('/');
+  const masterFile = slash >= 0 ? row.playback_hls_path.slice(slash + 1) : row.playback_hls_path;
+  return `/api/videos/${videoId}/hls/${masterFile}`;
+}
 
 const listVideosQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
@@ -156,6 +177,7 @@ videoRoutes.get('/api/videos/:id', async (c) => {
     video = await c.env.DB.prepare(
       `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id, v.status,
               v.view_count, v.created_at, v.updated_at, v.hidden_at, v.dmca_status,
+              v.playback_hls_path,
               u.name AS channel_name, u.username AS channel_username
        FROM videos v
        LEFT JOIN user u ON u.id = v.user_id
@@ -215,6 +237,10 @@ videoRoutes.get('/api/videos/:id', async (c) => {
   return c.json({
     ...video,
     view_count: viewCount,
+    // ALO-136: convenience field for the player. Hides whether the URL
+    // came from Cloudflare Stream or the R2+FFmpeg fallback. Null while
+    // the row is still encoding.
+    playback_url: derivePlaybackUrl(id, video as { playback_hls_path?: string | null; playback_hls_url?: string | null }),
   });
 });
 

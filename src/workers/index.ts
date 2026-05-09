@@ -5,6 +5,8 @@ import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
+import { handleFfmpegWebhook } from './ffmpeg-webhook';
+import { hlsRoutes } from './hls';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
@@ -47,6 +49,13 @@ type SessionUser = {
 type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
+  STREAM_ENABLED?: string;
+  CF_STREAM_API_TOKEN?: string;
+  // ALO-136: R2 + FFmpeg fallback encoding path. URL is the encoder
+  // service entry point; SECRET is the shared HMAC used to sign both the
+  // outbound dispatch and the inbound completion webhook.
+  FFMPEG_ENCODER_URL?: string;
+  FFMPEG_ENCODER_SECRET?: string;
   ALLOWED_ORIGINS?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
@@ -83,6 +92,11 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+// ALO-136: completion callback from the R2 + FFmpeg fallback encoder.
+// HMAC-signed (FFMPEG_ENCODER_SECRET); CSRF middleware exempts the
+// /api/webhooks/* prefix because external services can't carry an
+// Origin / Referer matching our allow-list.
+app.post('/api/webhooks/ffmpeg', handleFfmpegWebhook());
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -149,6 +163,11 @@ app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
+// ALO-136: HLS variants from the R2 + FFmpeg fallback path. Mounted
+// after videoRoutes so /api/videos/:id/stream (raw R2) still wins for
+// ranges and the new /api/videos/:id/hls/* prefix is the only thing
+// hlsRoutes claims.
+app.route('/', hlsRoutes);
 app.route('/', relatedRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);

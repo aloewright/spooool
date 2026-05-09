@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Hono } from 'hono';
-import { videoRoutes, type VideoRoutesEnv } from './videos';
+import { derivePlaybackUrl, videoRoutes, type VideoRoutesEnv } from './videos';
 
 interface QuotaState {
   used: number;
@@ -139,5 +139,50 @@ describe('upload storage-quota gate', () => {
     fd.set('chunkCount', '1');
     const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });
     expect(res.status).toBe(201);
+  });
+});
+
+// ALO-136: derivePlaybackUrl picks the right URL whether the row was
+// encoded by Cloudflare Stream (absolute videodelivery.net URL) or by the
+// R2+FFmpeg fallback (relative R2 master playlist key served by us).
+describe('derivePlaybackUrl', () => {
+  it('returns the Stream URL when present', () => {
+    expect(
+      derivePlaybackUrl('v1', {
+        playback_hls_url: 'https://videodelivery.net/abc/manifest/video.m3u8',
+        playback_hls_path: null,
+      }),
+    ).toBe('https://videodelivery.net/abc/manifest/video.m3u8');
+  });
+
+  it('builds the in-app URL from the R2 master playlist key', () => {
+    expect(
+      derivePlaybackUrl('v1', {
+        playback_hls_url: null,
+        playback_hls_path: 'user-1/v1/hls/master.m3u8',
+      }),
+    ).toBe('/api/videos/v1/hls/master.m3u8');
+  });
+
+  it('preserves a non-default master playlist filename', () => {
+    expect(
+      derivePlaybackUrl('v1', {
+        playback_hls_url: null,
+        playback_hls_path: 'user-1/v1/hls/index.m3u8',
+      }),
+    ).toBe('/api/videos/v1/hls/index.m3u8');
+  });
+
+  it('returns null when neither URL nor path is set (still encoding)', () => {
+    expect(derivePlaybackUrl('v1', { playback_hls_url: null, playback_hls_path: null })).toBeNull();
+  });
+
+  it('prefers the Stream URL over the path when both are set (Stream re-encode wins)', () => {
+    expect(
+      derivePlaybackUrl('v1', {
+        playback_hls_url: 'https://videodelivery.net/abc/manifest/video.m3u8',
+        playback_hls_path: 'user-1/v1/hls/master.m3u8',
+      }),
+    ).toBe('https://videodelivery.net/abc/manifest/video.m3u8');
   });
 });

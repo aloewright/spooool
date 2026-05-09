@@ -268,12 +268,22 @@ GET    /api/channels/:username/videos   # Get channel videos
 
 ```
 1. Upload video → R2 (raw)
-2. Scheduled Worker triggers encoding
-3. FFmpeg container encodes to HLS
-4. Store output segments + manifest in R2
-5. Generate signed URLs
-6. Client plays via R2-hosted HLS manifest
+2. Worker enqueues a job on the VIDEO_ENCODING queue
+3. encoding.ts dispatches POST → FFMPEG_ENCODER_URL with the source/output R2 keys
+4. Containerized FFmpeg downloads the source, transcodes to HLS variants,
+   uploads master.m3u8 + variant playlists + segments back to R2
+5. Encoder POSTs to /api/webhooks/ffmpeg (HMAC-signed) with the output prefix
+6. Webhook flips the row to `ready` and stores playback_hls_path
+7. Client plays via /api/videos/:id/hls/master.m3u8 (R2-backed)
 ```
+
+The fallback path is configured via two secrets:
+- `FFMPEG_ENCODER_URL` — entry point for the containerized encoder
+- `FFMPEG_ENCODER_SECRET` — shared HMAC secret for both directions
+
+When `STREAM_ENABLED !== 'true'` and `FFMPEG_ENCODER_URL` is unset, uploaded
+rows are marked `encoding` and held there until an encoder is wired up — they
+do not auto-fail, so you can roll the encoder out without flushing the queue.
 
 ## Performance Optimizations
 

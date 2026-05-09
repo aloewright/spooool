@@ -121,6 +121,11 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 # CF_STREAM_API_TOKEN
 # CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)
 # STREAM_ENABLED          (set to "true" to route uploads through Cloudflare Stream)
+# FFMPEG_ENCODER_URL      (ALO-136 — R2+FFmpeg fallback. URL of the containerized encoder
+#                          that downloads the source from R2, transcodes to HLS variants,
+#                          uploads them back to R2, and posts to /api/webhooks/ffmpeg)
+# FFMPEG_ENCODER_SECRET   (ALO-136 — shared HMAC secret used to sign the outbound dispatch
+#                          and verify the inbound completion webhook)
 # STRIPE_SECRET_KEY
 # STRIPE_WEBHOOK_SECRET
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)

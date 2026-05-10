@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { act } from 'react';
 import ReactDOM from 'react-dom/client';
+// React 18.2 (the package.json range) doesn't re-export `act` from the
+// `react` entry point; that landed in 18.3. Import from `react-dom/test-utils`
+// so this works for any 18.x patch the lockfile resolves to.
+import { act } from 'react-dom/test-utils';
 import * as Sentry from '@sentry/react';
 import { AppErrorFallback } from './AppErrorFallback';
 

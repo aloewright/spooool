@@ -133,10 +133,24 @@ async function stubWatchApis(page: Page): Promise<void> {
 }
 
 async function seedResumePosition(page: Page, seconds: number): Promise<void> {
+  // Merge into any existing positions map rather than clobbering it — the
+  // key holds positions for many videos, and a future test that seeds two
+  // ids would otherwise lose the first.
   await page.addInitScript(
     ([key, id, p]) => {
       try {
-        window.localStorage.setItem(key, JSON.stringify({ [id]: { p, t: Date.now() } }));
+        let existing: Record<string, { p: number; t: number }> = {};
+        const raw = window.localStorage.getItem(key);
+        if (raw) {
+          const parsed: unknown = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            existing = parsed as Record<string, { p: number; t: number }>;
+          }
+        }
+        window.localStorage.setItem(
+          key,
+          JSON.stringify({ ...existing, [id]: { p, t: Date.now() } }),
+        );
       } catch {
         // localStorage may be unavailable in the test browser context; skip.
       }

@@ -55,6 +55,7 @@
     "@vitest/coverage-v8": "^4.1.5",
     "concurrently": "^9.2.1",
     "esbuild": "^0.28.0",
+    "happy-dom": "^20.9.0",
     "oxlint": "^1.61.0",
     "prettier": "^3.8.3",
     "typescript": "^5.3.3",
@@ -63,7 +64,7 @@
     "wrangler": "^4.85.0"
   },
   "engines": {
-    "node": ">=18.0.0",
+    "node": ">=20.0.0",
     "npm": ">=9.0.0"
   },
   "keywords": [

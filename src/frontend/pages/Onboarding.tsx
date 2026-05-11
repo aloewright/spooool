@@ -1,7 +1,11 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
-import { hasCompletedOnboarding, markOnboardingComplete } from '../lib/onboarding';
+import {
+  getSafeStorage,
+  hasCompletedOnboarding,
+  markOnboardingComplete,
+} from '../lib/onboarding';
 
 type Step = 'username' | 'avatar' | 'first-upload';
 
@@ -96,7 +100,8 @@ export function Onboarding(): JSX.Element {
 
   const finish = useCallback((): void => {
     if (!session?.user) return;
-    markOnboardingComplete(session.user.id, window.localStorage);
+    const storage = getSafeStorage();
+    if (storage) markOnboardingComplete(session.user.id, storage);
     // Always tag the completion event with the step we were on so funnel
     // analytics can tell "finished via Continue" from "bailed via Maybe later".
     track('onboarding_completed', { exited_from: stepIndexRef.current });
@@ -175,7 +180,11 @@ export function Onboarding(): JSX.Element {
 
   // Already done — drop the user back to home instead of letting them
   // bounce into the flow a second time via bookmark or back button.
-  if (hasCompletedOnboarding(session.user.id, window.localStorage)) {
+  // `getSafeStorage()` returns null in browsers where the localStorage
+  // property access itself throws (Chrome with storage disabled); we
+  // gracefully run the flow again in that case.
+  const safeStorage = getSafeStorage();
+  if (safeStorage && hasCompletedOnboarding(session.user.id, safeStorage)) {
     return <Navigate to="/" replace />;
   }
 
@@ -269,7 +278,8 @@ export function Onboarding(): JSX.Element {
               className="btn"
               onClick={() => {
                 track('onboarding_upload_clicked', {});
-                markOnboardingComplete(session.user.id, window.localStorage);
+                const storage = getSafeStorage();
+                if (storage) markOnboardingComplete(session.user.id, storage);
               }}
             >
               Upload a video

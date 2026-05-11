@@ -75,7 +75,12 @@ export function Onboarding(): JSX.Element {
         setProfile(data);
         setUsername(data.username ?? '');
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Pre-fill is best-effort — fall back to empty inputs but
+        // surface the failure so observability picks it up.
+        console.error('onboarding: failed to load profile', err);
+      });
     return () => {
       cancelled = true;
     };

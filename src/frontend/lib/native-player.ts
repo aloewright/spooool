@@ -9,6 +9,8 @@
 // engines again without churning every keyboard / heartbeat / seek call site.
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
+// ALO-141: Strand-themed skin layered on top of the default video.js CSS.
+import '../styles/video-js-strand.css';
 
 // video.js 8 ships its own types but doesn't export the Player class directly
 // for downstream typing. ReturnType is the documented escape hatch.

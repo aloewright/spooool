@@ -48,7 +48,10 @@ export function Signup(): JSX.Element {
         track('signup_completed', { method: 'email_password' });
       });
     }
-    navigate(next, { replace: true });
+    // ALO-178: send new accounts through the 3-step onboarding unless they
+    // hit signup with an explicit redirect target (deep-link / post-login).
+    const target = next === '/' ? '/onboarding' : next;
+    navigate(target, { replace: true });
   }
 
   return (

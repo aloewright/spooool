@@ -37,6 +37,10 @@ const ForgotPassword = lazy(() =>
 const ResetPassword = lazy(() =>
   import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
 );
+const Onboarding = lazy(() =>
+  import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })),
+);
+const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -451,6 +455,7 @@ function Home(): JSX.Element {
     >
       <Link to="/legal/tos">Terms of Service</Link>
       <Link to="/legal/privacy">Privacy Policy</Link>
+      <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
     </footer>
     </>
@@ -543,6 +548,15 @@ export default function App(): JSX.Element {
           <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route
+            path="/onboarding"
+            element={
+              <RequireAuth>
+                <Onboarding />
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>

@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { markOnboardingComplete } from '../lib/onboarding';
@@ -55,6 +55,11 @@ export function Onboarding(): JSX.Element {
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [stepIndex, setStepIndex] = useState(0);
+  // Latest stepIndex in a ref so advance()/skip() decide based on the
+  // live value, not the value captured when the in-flight async handler
+  // was created. Without this, a Skip click during an upload would let
+  // the upload's success handler advance past the last step.
+  const stepIndexRef = useRef(0);
   const [username, setUsername] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [busy, setBusy] = useState(false);
@@ -89,12 +94,13 @@ export function Onboarding(): JSX.Element {
 
   const advance = useCallback((): void => {
     setError(null);
-    if (stepIndex >= STEPS.length - 1) {
+    if (stepIndexRef.current >= STEPS.length - 1) {
       finish();
       return;
     }
-    setStepIndex((i) => i + 1);
-  }, [stepIndex, finish]);
+    stepIndexRef.current += 1;
+    setStepIndex(stepIndexRef.current);
+  }, [finish]);
 
   const skip = useCallback((): void => {
     track('onboarding_step_skipped', { step });

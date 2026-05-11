@@ -1,0 +1,154 @@
+/* ============================================================
+   Strand-themed video.js skin (ALO-141)
+   Overrides the default video.js skin to match Strand tokens.
+   Loaded after video.js/dist/video-js.css inside the watch
+   chunk, so the cascade order means our rules win without !important.
+   ============================================================ */
+
+.video-js {
+  font-family: var(--font-sans);
+  background-color: oklch(0 0 0);
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+
+/* Big play button — centered Strand pill, accent ring on hover */
+.video-js .vjs-big-play-button {
+  width: 88px;
+  height: 88px;
+  margin-top: -44px;
+  margin-left: -44px;
+  border: 1px solid color-mix(in oklch, oklch(1 0 0), transparent 75%);
+  border-radius: 50%;
+  background: color-mix(in oklch, oklch(0 0 0), transparent 30%);
+  color: oklch(1 0 0);
+  line-height: 86px;
+  font-size: 36px;
+  transition:
+    background 150ms var(--ease-smooth),
+    border-color 150ms var(--ease-smooth),
+    transform 80ms var(--ease-smooth);
+}
+.video-js:hover .vjs-big-play-button,
+.video-js .vjs-big-play-button:focus {
+  background: color-mix(in oklch, var(--accent-blue), transparent 35%);
+  border-color: color-mix(in oklch, oklch(1 0 0), transparent 55%);
+  outline: none;
+}
+.video-js .vjs-big-play-button:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring), transparent 50%);
+}
+
+/* Control bar — translucent Strand panel pinned to bottom */
+.video-js .vjs-control-bar {
+  height: 44px;
+  background: linear-gradient(
+    to top,
+    color-mix(in oklch, oklch(0 0 0), transparent 10%) 0%,
+    color-mix(in oklch, oklch(0 0 0), transparent 40%) 60%,
+    transparent 100%
+  );
+  color: oklch(1 0 0);
+  padding: 0 var(--space-2);
+}
+
+.video-js .vjs-button > .vjs-icon-placeholder:before {
+  line-height: 44px;
+  font-size: 1.5em;
+}
+
+.video-js .vjs-button:focus,
+.video-js .vjs-button:hover {
+  outline: none;
+  color: oklch(1 0 0);
+}
+.video-js .vjs-button:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--ring), transparent 30%);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Progress bar — slimmer track, accent fill */
+.video-js .vjs-progress-control {
+  height: 44px;
+}
+.video-js .vjs-progress-holder {
+  height: 4px;
+  margin: 0 var(--space-2);
+  background: color-mix(in oklch, oklch(1 0 0), transparent 75%);
+  border-radius: var(--radius-pill);
+  transition: height 120ms var(--ease-smooth);
+}
+.video-js .vjs-progress-control:hover .vjs-progress-holder {
+  height: 6px;
+}
+.video-js .vjs-load-progress,
+.video-js .vjs-load-progress div {
+  background: color-mix(in oklch, oklch(1 0 0), transparent 55%);
+  border-radius: var(--radius-pill);
+}
+.video-js .vjs-play-progress {
+  background: var(--accent-blue);
+  border-radius: var(--radius-pill);
+}
+.video-js .vjs-play-progress:before {
+  display: none;
+}
+.video-js .vjs-progress-control:hover .vjs-play-progress:before {
+  display: block;
+  font-size: 0.9em;
+  top: -0.45em;
+  color: var(--accent-blue);
+}
+
+/* Volume — match the progress bar style */
+.video-js .vjs-volume-bar {
+  background: color-mix(in oklch, oklch(1 0 0), transparent 75%);
+  border-radius: var(--radius-pill);
+}
+.video-js .vjs-volume-level {
+  background: oklch(1 0 0);
+  border-radius: var(--radius-pill);
+}
+.video-js .vjs-volume-level:before {
+  display: none;
+}
+
+/* Time display — tabular nums so the layout doesn't jitter */
+.video-js .vjs-current-time,
+.video-js .vjs-duration,
+.video-js .vjs-time-divider,
+.video-js .vjs-remaining-time {
+  font-feature-settings: "tnum";
+  font-size: var(--text-sm);
+  line-height: 44px;
+  padding: 0 4px;
+}
+
+/* Loading spinner — Strand accent */
+.video-js .vjs-loading-spinner {
+  border-color: color-mix(in oklch, oklch(1 0 0), transparent 80%);
+  border-top-color: var(--accent-blue);
+}
+
+/* Error display — readable Strand surface, not a black void */
+.video-js .vjs-error-display {
+  background: color-mix(in oklch, oklch(0 0 0), transparent 15%);
+}
+.video-js .vjs-error-display .vjs-modal-dialog-content {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  color: oklch(1 0 0);
+}
+
+/* Text track / captions — Strand readable backdrop, not the default
+   white-on-white that disappears against bright frames */
+.video-js .vjs-text-track-display {
+  font-family: var(--font-sans);
+}
+.video-js .vjs-text-track-cue > div {
+  background: color-mix(in oklch, oklch(0 0 0), transparent 25%) !important;
+  border-radius: var(--radius-sm);
+  padding: 0 6px;
+}

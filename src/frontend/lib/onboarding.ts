@@ -40,3 +40,15 @@ export function markOnboardingComplete(
     // recoverable here — the user just gets re-prompted next visit.
   }
 }
+
+// Chrome with storage disabled throws SecurityError on the property
+// access `window.localStorage` itself, before any get/setItem call.
+// Centralising the safe lookup here lets call sites pass the result
+// (or null) into the helpers above without sprinkling try/catch.
+export function getSafeStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}

@@ -70,8 +70,19 @@ export function Onboarding(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const step = STEPS[stepIndex];
 
+  // Pre-compute completion so the profile-load and analytics effects can
+  // skip their work for users who are about to be redirected. The render
+  // path below still short-circuits with <Navigate />; this just stops the
+  // first-mount network request + spurious `onboarding_step_viewed` event
+  // from firing on the way there.
+  const alreadyCompleted = useMemo(() => {
+    if (!session?.user) return false;
+    const storage = getSafeStorage();
+    return storage ? hasCompletedOnboarding(session.user.id, storage) : false;
+  }, [session?.user]);
+
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user || alreadyCompleted) return;
     let cancelled = false;
     void loadProfile()
       .then((data) => {
@@ -88,15 +99,16 @@ export function Onboarding(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [session?.user]);
+  }, [session?.user, alreadyCompleted]);
 
-  // Only emit step-view events once we know the user is signed in; otherwise
-  // we burn a dynamic-import + posthog round-trip for sessions that bounce
-  // straight back to /login.
+  // Only emit step-view events once we know the user is signed in AND
+  // they're going to actually see the step — otherwise we burn a dynamic
+  // import + posthog round-trip for sessions that bounce straight back to
+  // /login or to / (because they already finished).
   useEffect(() => {
-    if (!session?.user) return;
+    if (!session?.user || alreadyCompleted) return;
     track('onboarding_step_viewed', { step });
-  }, [session?.user, step]);
+  }, [session?.user, alreadyCompleted, step]);
 
   const finish = useCallback((): void => {
     if (!session?.user) return;
@@ -180,11 +192,9 @@ export function Onboarding(): JSX.Element {
 
   // Already done — drop the user back to home instead of letting them
   // bounce into the flow a second time via bookmark or back button.
-  // `getSafeStorage()` returns null in browsers where the localStorage
-  // property access itself throws (Chrome with storage disabled); we
-  // gracefully run the flow again in that case.
-  const safeStorage = getSafeStorage();
-  if (safeStorage && hasCompletedOnboarding(session.user.id, safeStorage)) {
+  // `alreadyCompleted` falls back to `false` when localStorage is
+  // unavailable, so a disabled-storage Chrome config still runs the flow.
+  if (alreadyCompleted) {
     return <Navigate to="/" replace />;
   }
 

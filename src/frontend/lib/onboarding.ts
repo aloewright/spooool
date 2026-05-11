@@ -47,7 +47,10 @@ export function markOnboardingComplete(
 // (or null) into the helpers above without sprinkling try/catch.
 export function getSafeStorage(): Storage | null {
   try {
-    return window.localStorage;
+    // `?? null` keeps the return type honest in non-browser contexts where
+    // `window.localStorage` is `undefined` rather than throwing (mocked
+    // test setups, SSR shims).
+    return window.localStorage ?? null;
   } catch {
     return null;
   }

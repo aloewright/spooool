@@ -1,7 +1,7 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
-import { markOnboardingComplete } from '../lib/onboarding';
+import { hasCompletedOnboarding, markOnboardingComplete } from '../lib/onboarding';
 
 type Step = 'username' | 'avatar' | 'first-upload';
 
@@ -55,6 +55,11 @@ export function Onboarding(): JSX.Element {
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [stepIndex, setStepIndex] = useState(0);
+  // Latest stepIndex in a ref so advance()/skip() decide based on the
+  // live value, not the value captured when the in-flight async handler
+  // was created. Without this, a Skip click during an upload would let
+  // the upload's success handler advance past the last step.
+  const stepIndexRef = useRef(0);
   const [username, setUsername] = useState('');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [busy, setBusy] = useState(false);
@@ -70,31 +75,43 @@ export function Onboarding(): JSX.Element {
         setProfile(data);
         setUsername(data.username ?? '');
       })
-      .catch(() => undefined);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Pre-fill is best-effort — fall back to empty inputs but
+        // surface the failure so observability picks it up.
+        console.error('onboarding: failed to load profile', err);
+      });
     return () => {
       cancelled = true;
     };
   }, [session?.user]);
 
+  // Only emit step-view events once we know the user is signed in; otherwise
+  // we burn a dynamic-import + posthog round-trip for sessions that bounce
+  // straight back to /login.
   useEffect(() => {
+    if (!session?.user) return;
     track('onboarding_step_viewed', { step });
-  }, [step]);
+  }, [session?.user, step]);
 
   const finish = useCallback((): void => {
     if (!session?.user) return;
     markOnboardingComplete(session.user.id, window.localStorage);
-    track('onboarding_completed', { step });
+    // Always tag the completion event with the step we were on so funnel
+    // analytics can tell "finished via Continue" from "bailed via Maybe later".
+    track('onboarding_completed', { exited_from: stepIndexRef.current });
     navigate('/', { replace: true });
-  }, [navigate, session?.user, step]);
+  }, [navigate, session?.user]);
 
   const advance = useCallback((): void => {
     setError(null);
-    if (stepIndex >= STEPS.length - 1) {
+    if (stepIndexRef.current >= STEPS.length - 1) {
       finish();
       return;
     }
-    setStepIndex((i) => i + 1);
-  }, [stepIndex, finish]);
+    stepIndexRef.current += 1;
+    setStepIndex(stepIndexRef.current);
+  }, [finish]);
 
   const skip = useCallback((): void => {
     track('onboarding_step_skipped', { step });
@@ -156,6 +173,12 @@ export function Onboarding(): JSX.Element {
     return <Navigate to="/login" replace />;
   }
 
+  // Already done — drop the user back to home instead of letting them
+  // bounce into the flow a second time via bookmark or back button.
+  if (hasCompletedOnboarding(session.user.id, window.localStorage)) {
+    return <Navigate to="/" replace />;
+  }
+
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
       <div className="stack-sm" style={{ paddingTop: 'var(--space-6)' }}>
@@ -179,7 +202,7 @@ export function Onboarding(): JSX.Element {
               autoFocus
             />
             <span className="ds-meta">
-              Lowercase letters, numbers, _ or -. 2–30 chars. This is your channel URL.
+              Lowercase letters, numbers, _ or -. 2–30 chars. Leave blank to skip.
             </span>
           </div>
           <div className="row" style={{ justifyContent: 'space-between' }}>

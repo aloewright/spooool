@@ -2,7 +2,10 @@
    Strand-themed video.js skin (ALO-141)
    Overrides the default video.js skin to match Strand tokens.
    Loaded after video.js/dist/video-js.css inside the watch
-   chunk, so the cascade order means our rules win without !important.
+   chunk, so cascade order is enough for nearly every rule.
+   The one exception is .vjs-text-track-cue > div: video.js sets
+   the cue background inline at runtime from VTT, so cascade
+   alone can't beat it — that rule uses !important by necessity.
    ============================================================ */
 
 .video-js {

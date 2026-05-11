@@ -20,7 +20,13 @@ export function hasCompletedOnboarding(
   userId: string,
   storage: Pick<Storage, 'getItem'>,
 ): boolean {
-  return storage.getItem(key(userId)) === 'done';
+  try {
+    return storage.getItem(key(userId)) === 'done';
+  } catch {
+    // Same failure modes as setItem (private mode / disabled storage).
+    // Treat as "not completed" so the flow re-runs rather than crashing.
+    return false;
+  }
 }
 
 export function markOnboardingComplete(

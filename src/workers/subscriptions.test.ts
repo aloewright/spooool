@@ -27,9 +27,15 @@ function subscriptionKey(subscriber: string, channel: string): string {
   return `${subscriber}|${channel}`;
 }
 
+// Whitespace-insensitive — the formatter elsewhere can re-wrap the SQL
+// without breaking this test fixture.
+const ME_SUBSCRIPTIONS_JOIN_RE = /FROM\s+subscriptions\s+s\s+JOIN\s+user\s+u/i;
+
 function fakeDB(spec: FakeDBSpec): D1Database {
-  spec.subscriptions ??= new Set();
-  spec.runs ??= [];
+  const subscriptions = spec.subscriptions ?? new Set<string>();
+  const runs = spec.runs ?? [];
+  spec.subscriptions = subscriptions;
+  spec.runs = runs;
   const prepare = (sql: string): FakeStmt => {
     let bound: unknown[] = [];
     const stmt: FakeStmt = {
@@ -43,16 +49,16 @@ function fakeDB(spec: FakeDBSpec): D1Database {
           return (spec.channels?.[username] ?? null) as never;
         }
         if (sql.startsWith('SELECT COUNT(*)')) {
-          return { c: spec.subscriberCount ?? spec.subscriptions!.size } as never;
+          return { c: spec.subscriberCount ?? subscriptions.size } as never;
         }
         if (sql.startsWith('SELECT 1 FROM subscriptions')) {
           const [sub, ch] = bound as [string, string];
-          return (spec.subscriptions!.has(subscriptionKey(sub, ch)) ? { '1': 1 } : null) as never;
+          return (subscriptions.has(subscriptionKey(sub, ch)) ? { '1': 1 } : null) as never;
         }
         return null;
       },
       all: async () => {
-        if (sql.includes('FROM subscriptions s\n     JOIN user u')) {
+        if (ME_SUBSCRIPTIONS_JOIN_RE.test(sql)) {
           return { results: (spec.meSubscriptions ?? []) as never[] };
         }
         if (sql.includes('FROM subscription_inbox')) {
@@ -61,13 +67,13 @@ function fakeDB(spec: FakeDBSpec): D1Database {
         return { results: [] as never[] };
       },
       run: async () => {
-        spec.runs!.push({ sql, bound: [...bound] });
+        runs.push({ sql, bound: [...bound] });
         if (sql.startsWith('INSERT INTO subscriptions')) {
           const [, subscriber, channel] = bound as [string, string, string];
-          spec.subscriptions!.add(subscriptionKey(subscriber, channel));
+          subscriptions.add(subscriptionKey(subscriber, channel));
         } else if (sql.startsWith('DELETE FROM subscriptions')) {
           const [subscriber, channel] = bound as [string, string];
-          spec.subscriptions!.delete(subscriptionKey(subscriber, channel));
+          subscriptions.delete(subscriptionKey(subscriber, channel));
         }
         return { success: true, meta: { changes: 1 } };
       },
@@ -134,12 +140,15 @@ describe('POST /api/channels/:username/subscribe', () => {
   });
 
   it('inserts a row and reports subscribed=true', async () => {
-    const spec: FakeDBSpec = { channels: { alice: { id: 'u1' } } };
-    const req = buildApp(fakeDB(spec), { id: 'me' });
+    const subscriptions = new Set<string>();
+    const req = buildApp(
+      fakeDB({ channels: { alice: { id: 'u1' } }, subscriptions }),
+      { id: 'me' },
+    );
     const res = await req('/api/channels/alice/subscribe', { method: 'POST' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ subscribed: true });
-    expect(spec.subscriptions!.has(subscriptionKey('me', 'u1'))).toBe(true);
+    expect(subscriptions.has(subscriptionKey('me', 'u1'))).toBe(true);
   });
 });
 
@@ -151,14 +160,15 @@ describe('DELETE /api/channels/:username/subscribe', () => {
   });
 
   it('removes the row and reports subscribed=false', async () => {
-    const spec: FakeDBSpec = {
-      channels: { alice: { id: 'u1' } },
-      subscriptions: new Set([subscriptionKey('me', 'u1')]),
-    };
-    const req = buildApp(fakeDB(spec), { id: 'me' });
+    const subscriptions = new Set([subscriptionKey('me', 'u1')]);
+    const req = buildApp(
+      fakeDB({ channels: { alice: { id: 'u1' } }, subscriptions }),
+      { id: 'me' },
+    );
     const res = await req('/api/channels/alice/subscribe', { method: 'DELETE' });
     expect(res.status).toBe(200);
-    expect(spec.subscriptions!.has(subscriptionKey('me', 'u1'))).toBe(false);
+    expect(await res.json()).toEqual({ subscribed: false });
+    expect(subscriptions.has(subscriptionKey('me', 'u1'))).toBe(false);
   });
 });
 

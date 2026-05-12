@@ -139,7 +139,7 @@ describe('GET /api/channels/:username/videos', () => {
     expect(res.status).toBe(400);
   });
 
-  it('caps limit to 50', async () => {
+  it('rejects limit above 50', async () => {
     const req = buildApp(fakeDB({}));
     const res = await req('/api/channels/alice/videos?limit=999');
     expect(res.status).toBe(400);

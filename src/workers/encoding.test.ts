@@ -120,11 +120,12 @@ describe('handleEncodingMessage', () => {
       ),
     ).rejects.toThrow(/Encoding failed/);
 
+    // queued→encoding fires before the config check in sendToStream throws,
+    // so we always observe both transitions even when no API call goes out.
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    // queued→encoding then →failed (or just →failed when config is missing
-    // before any encoding-state write); only the failed write is guaranteed.
-    expect(updates.length).toBeGreaterThanOrEqual(1);
-    expect(updates[updates.length - 1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(2);
+    expect(updates[0].bound[0]).toBe('encoding');
+    expect(updates[1].bound[0]).toBe('failed');
   });
 
   it('marks the video failed when the Stream API responds non-2xx', async () => {
@@ -145,7 +146,9 @@ describe('handleEncodingMessage', () => {
     ).rejects.toThrow(/Stream API failed: 429/);
 
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates[updates.length - 1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(2);
+    expect(updates[0].bound[0]).toBe('encoding');
+    expect(updates[1].bound[0]).toBe('failed');
   });
 
   it('marks the video failed when the Stream API response is missing the uid', async () => {
@@ -165,6 +168,8 @@ describe('handleEncodingMessage', () => {
       ),
     ).rejects.toThrow(/missing video uid/);
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates[updates.length - 1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(2);
+    expect(updates[0].bound[0]).toBe('encoding');
+    expect(updates[1].bound[0]).toBe('failed');
   });
 });

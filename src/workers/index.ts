@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
+import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
 import { createAuth, type AuthEnv } from '../auth';
@@ -56,6 +57,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   RESEND_API_KEY?: string;
   RESEND_AUDIENCE_ID?: string;
   RESEND_FROM?: string;
+  // ALO-176: storage cost alert threshold in bytes. Defaults to 100 GiB when
+  // unset. The daily cron mails ADMIN_EMAILS once a day if SUM(videos.bytes)
+  // crosses the threshold.
+  COST_STORAGE_ALERT_BYTES?: string;
   // Cloudflare static assets binding (auto-injected when [assets] is set in
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.
@@ -147,6 +152,7 @@ app.route('/', moderationRoutes);
 app.route('/', rolesRoutes);
 app.route('/', accountRoutes);
 app.route('/', dmcaRoutes);
+app.route('/', costsRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
@@ -190,6 +196,15 @@ const workerHandlers = {
           if (restored.length > 0) {
             console.log('[dmca-restore-sweep]', { cron: controller.cron, restored });
           }
+          // ALO-176: cost monitor — log even when no alert fires so we have
+          // a daily heartbeat in Workers Logs to chart bill growth against.
+          const costs = await runCostMonitorSweep(env);
+          console.log('[cost-monitor]', {
+            cron: controller.cron,
+            alerts: costs.alerts.length,
+            sent: costs.sent,
+            reason: costs.reason,
+          });
         } catch (err) {
           console.error('scheduled sweep failed', {
             error: err instanceof Error ? err.message : String(err),

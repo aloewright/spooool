@@ -145,11 +145,26 @@ export function Upload(): JSX.Element {
       return;
     }
 
+    // ALO-184: PostHog funnel event so we can chart Upload start → complete.
+    // File size is bucketed in MB to avoid surfacing odd byte values in the
+    // event explorer; never includes title/description (PII risk).
+    const sizeMb = Math.round(file.size / (1024 * 1024));
+    void import('../lib/analytics').then(({ track }) =>
+      track('upload_started', { size_mb: sizeMb, chunk_count: Math.ceil(file.size / CHUNK_SIZE) }),
+    );
+
     try {
       await uploadInChunks(file, title, description, setProgress);
       setStatus('Upload complete');
+      void import('../lib/analytics').then(({ track }) =>
+        track('upload_completed', { size_mb: sizeMb }),
+      );
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setError(message);
+      void import('../lib/analytics').then(({ track }) =>
+        track('upload_failed', { size_mb: sizeMb, reason: message.slice(0, 200) }),
+      );
     }
   }
 

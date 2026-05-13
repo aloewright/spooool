@@ -31,12 +31,16 @@ export function Login(): JSX.Element {
     // sessions across devices / cookie clears.
     const userId = data?.user?.id;
     if (userId) {
-      void import('../lib/analytics').then(({ identify, track }) => {
-        identify(userId);
-        // ALO-184: separate from signup_completed so we can chart returning vs
-        // new-user funnels. No email or password ever leaves the browser.
-        track('login_completed', { method: 'email_password' });
-      });
+      // .catch silences chunk-load failures so a transient asset error can't
+      // surface as an unhandled rejection on the login completion path.
+      void import('../lib/analytics')
+        .then(({ identify, track }) => {
+          identify(userId);
+          // ALO-184: separate from signup_completed so we can chart returning
+          // vs new-user funnels. No email or password ever leaves the browser.
+          track('login_completed', { method: 'email_password' });
+        })
+        .catch(() => undefined);
     }
     navigate(next, { replace: true });
   }

@@ -118,7 +118,18 @@ export function Watch(): JSX.Element {
         }
         return (await response.json()) as VideoResponse;
       })
-      .then((data) => setVideo(data))
+      .then((data) => {
+        setVideo(data);
+        // ALO-184: emit one event per Watch mount for funnel analysis.
+        // We use the public video id (not D1 row id) since that's already in
+        // the URL. No PII. Catches a chunk-load failure so the watch path
+        // never raises an unhandled promise rejection on telemetry alone.
+        void import('../lib/analytics')
+          .then(({ track }) =>
+            track('video_view', { video_id: data.id, channel: data.channel_username ?? null }),
+          )
+          .catch(() => undefined);
+      })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 
@@ -240,6 +251,14 @@ export function Watch(): JSX.Element {
         subscribed: !wasSubscribed,
         subscriberCount: Math.max(0, (s?.subscriberCount ?? 0) + (wasSubscribed ? -1 : 1)),
       }));
+      void import('../lib/analytics')
+        .then(({ track }) =>
+          track('subscribe_toggled', {
+            channel: channelUsername,
+            subscribed: !wasSubscribed,
+          }),
+        )
+        .catch(() => undefined);
     } catch (err: unknown) {
       setSubError(err instanceof Error ? err.message : 'Failed to update subscription');
     } finally {
@@ -263,6 +282,9 @@ export function Watch(): JSX.Element {
       if (!r.ok) throw new Error('Failed to update like');
       const data = (await r.json()) as { likes: number; liked: boolean };
       setLikes({ count: data.likes, liked: data.liked });
+      void import('../lib/analytics')
+        .then(({ track }) => track('video_like_toggled', { video_id: id, liked: data.liked }))
+        .catch(() => undefined);
     } catch (err: unknown) {
       setLikeError(err instanceof Error ? err.message : 'Failed to update like');
     } finally {

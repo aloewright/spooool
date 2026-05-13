@@ -84,6 +84,20 @@ async function uploadInChunks(
   return lastResponse;
 }
 
+// Maps the chunk-upload error message back to a low-cardinality bucket so
+// analytics never receives raw server text. uploadInChunks throws messages
+// of the form "Upload failed (<status>): <detail>" — we key on the status.
+export function classifyUploadError(message: string): string {
+  const match = /Upload failed \((\d{3})\)/.exec(message);
+  if (!match) return 'network_error';
+  const status = Number(match[1]);
+  if (status === 413) return 'http_413';
+  if (status === 429) return 'http_429';
+  if (status >= 400 && status < 500) return 'http_4xx';
+  if (status >= 500) return 'http_5xx';
+  return 'unknown';
+}
+
 async function resendVerification(): Promise<{ ok: boolean; error: string | null }> {
   // ALO-128: ask better-auth to re-issue the verification email. The session
   // cookie identifies the user, so the body is empty.
@@ -145,11 +159,32 @@ export function Upload(): JSX.Element {
       return;
     }
 
+    // ALO-184: PostHog funnel event so we can chart Upload start → complete.
+    // File size is bucketed in MB to avoid surfacing odd byte values in the
+    // event explorer; never includes title/description (PII risk).
+    const sizeMb = Math.round(file.size / (1024 * 1024));
+    // Import once and reuse so we don't dispatch three speculative chunk
+    // fetches on every submit. Module loader caches the promise but the
+    // intent reads more clearly when we capture it.
+    const analyticsPromise = import('../lib/analytics').catch(() => null);
+    const dispatch = (event: string, props: Record<string, unknown>): void => {
+      void analyticsPromise.then((mod) => mod?.track(event, props));
+    };
+    dispatch('upload_started', {
+      size_mb: sizeMb,
+      chunk_count: Math.ceil(file.size / CHUNK_SIZE),
+    });
+
     try {
       await uploadInChunks(file, title, description, setProgress);
       setStatus('Upload complete');
+      dispatch('upload_completed', { size_mb: sizeMb });
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
+      const message = err instanceof Error ? err.message : 'Upload failed';
+      setError(message);
+      // Bucket into a small enum so analytics never receives raw server text
+      // (which could embed paths, emails, or other internal detail).
+      dispatch('upload_failed', { size_mb: sizeMb, reason: classifyUploadError(message) });
     }
   }
 

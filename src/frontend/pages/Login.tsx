@@ -28,13 +28,19 @@ export function Login(): JSX.Element {
       return;
     }
     // ALO-166 / observability: re-identify the visitor so PostHog rejoins
-    // sessions across devices / cookie clears. track() is intentionally
-    // skipped for login — signups are the funnel event we care about.
+    // sessions across devices / cookie clears.
     const userId = data?.user?.id;
     if (userId) {
-      void import('../lib/analytics').then(({ identify }) => {
-        identify(userId);
-      });
+      // .catch silences chunk-load failures so a transient asset error can't
+      // surface as an unhandled rejection on the login completion path.
+      void import('../lib/analytics')
+        .then(({ identify, track }) => {
+          identify(userId);
+          // ALO-184: separate from signup_completed so we can chart returning
+          // vs new-user funnels. No email or password ever leaves the browser.
+          track('login_completed', { method: 'email_password' });
+        })
+        .catch(() => undefined);
     }
     navigate(next, { replace: true });
   }

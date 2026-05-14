@@ -1,9 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Comments } from '../components/Comments';
-import { ReportButton } from '../components/ReportButton';
-import { VideoTags } from '../components/VideoTags';
 import { useSession } from '../lib/auth-client';
+// ALO-283: keep Comments (459 LoC) + ReportButton + VideoTags out of the
+// initial Watch chunk. They render below the player (and Comments is below
+// the fold for most viewports), so the network cost only fires once the
+// player has had a chance to start streaming.
+const Comments = lazy(() =>
+  import('../components/Comments').then((m) => ({ default: m.Comments })),
+);
+const ReportButton = lazy(() =>
+  import('../components/ReportButton').then((m) => ({ default: m.ReportButton })),
+);
+const VideoTags = lazy(() =>
+  import('../components/VideoTags').then((m) => ({ default: m.VideoTags })),
+);
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
 import { createNativePlayer, type NativePlayer } from '../lib/native-player';
 import { keyToPlayerAction } from '../lib/player-keys';
@@ -599,7 +609,9 @@ export function Watch(): JSX.Element {
         </div>
       </div>
       <p>{video.description}</p>
-      <VideoTags videoId={video.id} />
+      <Suspense fallback={null}>
+        <VideoTags videoId={video.id} />
+      </Suspense>
       <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -635,7 +647,11 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
-        {id ? <ReportButton targetType="video" targetId={id} /> : null}
+        {id ? (
+          <Suspense fallback={null}>
+            <ReportButton targetType="video" targetId={id} />
+          </Suspense>
+        ) : null}
       </div>
       {/* ALO-158: web-intent links — no third-party SDKs, no tracking. The
           share URL omits ?t= so a re-watch starts from 0 by default. */}
@@ -748,7 +764,47 @@ export function Watch(): JSX.Element {
           </ul>
         </section>
       ) : null}
-      {id ? <Comments videoId={id} /> : null}
+      {id ? <CommentsSection videoId={id} /> : null}
     </main>
+  );
+}
+
+// ALO-283: Comments is the largest below-the-fold chunk. Wait until its
+// placeholder scrolls within ~600px of the viewport before kicking off the
+// dynamic import so users who never scroll never pay for it.
+function CommentsSection({ videoId }: { videoId: string }): JSX.Element {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (visible) return;
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === 'undefined') {
+      // Old browsers / SSR — just render immediately and let Suspense handle it.
+      setVisible(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '600px 0px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+
+  return (
+    <div ref={ref} style={{ minHeight: 120 }}>
+      {visible ? (
+        <Suspense fallback={<p className="ds-meta">Loading comments…</p>}>
+          <Comments videoId={videoId} />
+        </Suspense>
+      ) : null}
+    </div>
   );
 }

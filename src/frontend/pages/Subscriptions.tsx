@@ -25,7 +25,11 @@ interface InboxResponse {
 const PAGE_LIMIT = 50;
 
 function timeSince(iso: string): string {
-  const t = Date.parse(iso);
+  // SQLite's CURRENT_TIMESTAMP returns "YYYY-MM-DD HH:MM:SS" with no T or Z,
+  // which Safari's Date.parse can refuse or treat as local time. Normalize
+  // to ISO-8601 UTC before parsing.
+  const normalized = iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z';
+  const t = Date.parse(normalized);
   if (Number.isNaN(t)) return '';
   const seconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
   if (seconds < 60) return 'just now';
@@ -47,7 +51,7 @@ export function Subscriptions(): JSX.Element {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch(`/api/users/me/inbox?limit=${PAGE_LIMIT}`, { credentials: 'include' })
+    void fetch(`/api/users/me/inbox?limit=${PAGE_LIMIT}`, { credentials: 'same-origin' })
       .then(async (res) => {
         if (!res.ok) throw new Error('Failed to load subscriptions');
         return (await res.json()) as InboxResponse;
@@ -60,7 +64,7 @@ export function Subscriptions(): JSX.Element {
         // this call is non-fatal — the inbox itself loaded fine.
         void fetch('/api/users/me/inbox/seen', {
           method: 'POST',
-          credentials: 'include',
+          credentials: 'same-origin',
         }).catch(() => undefined);
       })
       .catch((err: unknown) => {
@@ -72,7 +76,7 @@ export function Subscriptions(): JSX.Element {
   }, []);
 
   return (
-    <main className="app-main stack">
+    <main className="app-main stack-lg fade-in">
       <h1 className="ds-h2" style={{ margin: 0 }}>Subscriptions</h1>
       <p className="ds-meta" style={{ margin: 0 }}>
         New videos from channels you follow.

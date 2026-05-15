@@ -42,6 +42,9 @@ const Onboarding = lazy(() =>
 );
 const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
+const Subscriptions = lazy(() =>
+  import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
+);
 
 function RouteFallback(): JSX.Element {
   return (
@@ -103,6 +106,9 @@ function HeaderNav(): JSX.Element {
   return (
     <nav className="app-header__nav">
       <span className="ds-meta">{session.user.email}</span>
+      <Link to="/subscriptions">
+        <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
+      </Link>
       <Link to="/upload">
         <button type="button" className="btn btn--secondary btn--sm">Upload</button>
       </Link>
@@ -556,6 +562,14 @@ export default function App(): JSX.Element {
           <Route path="/legal/tos" element={<Tos />} />
           <Route path="/legal/privacy" element={<Privacy />} />
           <Route path="/pricing" element={<Pricing />} />
+          <Route
+            path="/subscriptions"
+            element={
+              <RequireAuth>
+                <Subscriptions />
+              </RequireAuth>
+            }
+          />
           <Route
             path="/onboarding"
             element={

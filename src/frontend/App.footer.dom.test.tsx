@@ -57,21 +57,15 @@ describe('SiteFooter', () => {
     ]);
   });
 
-  it('renders the same footer regardless of the active route', () => {
-    for (const route of ['/watch/abc', '/profile', '/channel/alice', '/settings/account']) {
+  it.each(['/watch/abc', '/profile', '/channel/alice', '/settings/account'])(
+    'renders the same footer on route %s',
+    (route) => {
       mount(
         <MemoryRouter initialEntries={[route]}>
           <SiteFooter />
         </MemoryRouter>,
       );
       expect(footerLinkHrefs()).toHaveLength(4);
-      // Reset for the next iteration so afterEach's cleanup doesn't double-fire.
-      act(() => {
-        root!.unmount();
-      });
-      root = null;
-      container!.remove();
-      container = null;
-    }
-  });
+    },
+  );
 });

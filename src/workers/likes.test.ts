@@ -20,6 +20,12 @@ type Counters = { dbPrepare: number; kvGet: number; kvPut: number };
 function fakeDB(opts: {
   videoExists?: boolean;
   hasLikeForUser?: boolean;
+  // Total like count returned by COUNT(*). Decoupled from `hasLikeForUser`
+  // so a test can model "video has 7 likes from other users; current viewer
+  // has not liked".
+  totalLikes?: number;
+  // Override the post-toggle count returned by the COUNT(*) re-read on POST.
+  // When omitted the fake derives it from the natural ±1 swing.
   countAfterToggle?: number;
   counters?: Counters;
   insertCalls?: { current: number };
@@ -28,12 +34,14 @@ function fakeDB(opts: {
   const {
     videoExists = true,
     hasLikeForUser = false,
-    countAfterToggle = 0,
+    totalLikes = hasLikeForUser ? 1 : 0,
     counters,
     insertCalls,
     deleteCalls,
   } = opts;
   let liked = hasLikeForUser;
+  let count = totalLikes;
+  const explicitCountAfterToggle = opts.countAfterToggle;
 
   const prepare = (sql: string) => {
     if (counters) counters.dbPrepare += 1;
@@ -51,17 +59,23 @@ function fakeDB(opts: {
           return liked ? { 1: 1 } : null;
         }
         if (/SELECT COUNT\(\*\) AS c FROM video_likes/.test(sql)) {
-          return { c: liked ? countAfterToggle : 0 };
+          return { c: count };
         }
         return null;
       },
       all: async () => ({ results: [] }),
       run: async () => {
         if (/^INSERT INTO video_likes/.test(sql)) {
-          liked = true;
+          if (!liked) {
+            liked = true;
+            count = explicitCountAfterToggle ?? count + 1;
+          }
           if (insertCalls) insertCalls.current += 1;
         } else if (/^DELETE FROM video_likes/.test(sql)) {
-          liked = false;
+          if (liked) {
+            liked = false;
+            count = explicitCountAfterToggle ?? Math.max(0, count - 1);
+          }
           if (deleteCalls) deleteCalls.current += 1;
         }
         void bound;
@@ -136,8 +150,9 @@ describe('GET /api/videos/:id/like', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ likes: 42, liked: false });
     expect(counters.kvPut).toBe(0);
-    // 2 D1 prepares: one for `videoExists`, one for the per-user `liked` flag.
-    // The COUNT(*) read is skipped because the cache served the count.
+    // 1 D1 prepare: just the `videoExists` check. The per-user `liked` lookup
+    // is skipped for anonymous viewers, and the COUNT(*) read is skipped
+    // because the cache served the count.
     expect(counters.dbPrepare).toBe(1);
   });
 
@@ -163,6 +178,21 @@ describe('GET /api/videos/:id/like', () => {
     const body = (await res.json()) as { liked: boolean; likes: number };
     expect(body.liked).toBe(false);
     expect(body.likes).toBe(5);
+  });
+
+  it('cache miss surfaces the true D1 count even when the viewer has no like', async () => {
+    // Regression guard: previously the fake derived COUNT(*) from `liked`,
+    // which made this scenario untestable. The route must report the real
+    // total (7) for an anonymous viewer of a video that other users liked.
+    const counters: Counters = { dbPrepare: 0, kvGet: 0, kvPut: 0 };
+    const req = buildApp({
+      DB: fakeDB({ videoExists: true, totalLikes: 7, counters }),
+      CACHE: fakeCache({ counters }),
+    });
+    const res = await req('/api/videos/v1/like');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ likes: 7, liked: false });
+    expect(counters.kvPut).toBe(1);
   });
 
   it('drops a malformed cached value and re-reads from D1', async () => {

@@ -341,7 +341,6 @@ function Home(): JSX.Element {
   };
 
   return (
-    <>
     <main className="app-main app-main--narrow stack-lg fade-in">
       <section
         className="stack-sm"
@@ -443,6 +442,14 @@ function Home(): JSX.Element {
         </div>
       </section>
     </main>
+  );
+}
+
+// ALO-405: rendered at the bottom of the app shell so every route — not just
+// Home — exposes the legal + pricing links. GDPR / ToS / DMCA links must be
+// reachable from /watch, /channel, /settings, etc., not only from /.
+export function SiteFooter(): JSX.Element {
+  return (
     <footer
       className="app-footer ds-meta"
       style={{
@@ -458,7 +465,6 @@ function Home(): JSX.Element {
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
     </footer>
-    </>
   );
 }
 
@@ -560,6 +566,7 @@ export default function App(): JSX.Element {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspense>
+      <SiteFooter />
     </div>
   );
 }

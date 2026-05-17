@@ -7,14 +7,9 @@ import { Link, useLocation } from 'react-router-dom';
 // with HTTP 200 — see wrangler.toml `not_found_handling = "single-page-application"`
 // — so the best we can do for crawlers is inject `<meta name="robots" content="noindex">`
 // from the client when this route renders.
-const ROBOTS_META_ID = 'spooool-not-found-robots';
-
 function installNoindexMeta(): () => void {
   if (typeof document === 'undefined') return () => undefined;
-  const existing = document.getElementById(ROBOTS_META_ID) as HTMLMetaElement | null;
-  if (existing) return () => existing.remove();
   const meta = document.createElement('meta');
-  meta.id = ROBOTS_META_ID;
   meta.name = 'robots';
   meta.content = 'noindex';
   document.head.appendChild(meta);
@@ -39,7 +34,10 @@ export function NotFound(): JSX.Element {
       >
         <span className="ds-label">404</span>
         <h1 className="ds-h2">Page not found</h1>
-        <p className="ds-lede" style={{ maxWidth: 480 }}>
+        <p
+          className="ds-lede"
+          style={{ maxWidth: 480, overflowWrap: 'break-word', wordBreak: 'break-all' }}
+        >
           We couldn't find <code>{location.pathname}</code>. The link may be broken or the
           page may have moved.
         </p>

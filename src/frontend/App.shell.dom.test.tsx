@@ -5,6 +5,10 @@ import { act } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 
+// React requires this flag to suppress the "not configured to support act(...)"
+// warning and to actually flush effects/lazy resolutions inside act().
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 // ALO-407 / ALO-408: the `SiteFooter` unit test in App.footer.dom.test.tsx
 // mounts the footer in isolation, so a regression in App.tsx that dropped the
 // `<SiteFooter />` line from the shell would slip through. These tests mount
@@ -53,13 +57,19 @@ async function mountAt(route: string): Promise<void> {
       </MemoryRouter>,
     );
   });
-  // Suspense fallback → lazy chunk resolution happens on the microtask queue.
-  // A few rounds of flush make sure the page chunk has rendered before we
-  // assert on its DOM, so the suite isn't flaky against `lazy()` boundaries.
-  for (let i = 0; i < 5; i++) {
+  // Suspense fallback → lazy chunk → component render takes multiple
+  // turns of the event loop (dynamic import is a macrotask, then React
+  // re-renders on the next microtask). Poll the DOM until the Loading
+  // fallback is gone *and* a heading has appeared rather than guessing
+  // a fixed flush count — robust against future lazy-loaded sub-trees.
+  const yieldMacrotask = () => new Promise<void>((r) => setTimeout(r, 0));
+  for (let i = 0; i < 50; i++) {
     await act(async () => {
-      await Promise.resolve();
+      await yieldMacrotask();
     });
+    const heading = container!.querySelector('h1, h2');
+    const onlyLoading = container!.textContent?.trim() === 'Loading…';
+    if (heading && !onlyLoading) return;
   }
 }
 

@@ -1,6 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { NotFound } from './pages/NotFound';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
@@ -42,6 +41,7 @@ const Onboarding = lazy(() =>
   import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })),
 );
 const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
+const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 function RouteFallback(): JSX.Element {
   return (

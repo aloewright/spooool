@@ -83,11 +83,18 @@ function makeRow(overrides: Partial<VideoRow> = {}): VideoRow {
 function fakeDB(opts: { row: VideoRow | null; counters: Counters }): D1Database {
   const { row, counters } = opts;
   const prepare = (sql: string) => {
-    if (META_SELECT_RE.test(sql)) counters.metaSelects += 1;
     const stmt = {
       bind: (..._values: unknown[]) => stmt,
       first: async () => {
-        if (META_SELECT_RE.test(sql)) return row;
+        // Count on first() rather than prepare() — D1's prepare is lazy and
+        // the metric we actually care about is "did the route execute a
+        // meta SELECT". In practice every prepare in the route is followed
+        // by an immediate first/all/run, so the count is the same; this
+        // form is just self-documenting.
+        if (META_SELECT_RE.test(sql)) {
+          counters.metaSelects += 1;
+          return row;
+        }
         return null;
       },
       all: async () => ({ results: [] }),

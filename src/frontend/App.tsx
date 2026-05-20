@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { LogOut, Moon, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
@@ -74,11 +75,112 @@ type HistoryItem = {
   channel_username: string | null;
 };
 
-function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
+function SpoolWave({
+  fontPx,
+  paced = false,
+}: {
+  fontPx: number;
+  paced?: boolean;
+}): JSX.Element {
+  // Cursive-script "loop-dee-loop" path translated 1:1 from the lottie
+  // spiral bezier data. Each loop is 4 cubic segments; we repeat the
+  // pattern 6× across a 0..48 viewBox so dashoffset can scroll the
+  // visible window continuously. viewBox aspect (4:1) matches the
+  // rendered box so preserveAspectRatio="none" doesn't distort. Loops
+  // sit AT the text baseline going UP (y=12 = baseline, y=0 = x-height).
+  const width = Math.round(fontPx * 2);
+  const height = Math.round(fontPx * 0.5);
+  const loops = [0, 8, 16, 24, 32, 40]
+    .map((x) => {
+      return [
+        `C ${x + 4.452} 12, ${x + 6.736} 8.284, ${x + 7.025} 4.988`,
+        `C ${x + 7.255} 2.361, ${x + 6.218} 0, ${x + 4} 0`,
+        `C ${x + 1.782} 0, ${x + 0.745} 2.361, ${x + 0.975} 4.988`,
+        `C ${x + 1.264} 8.284, ${x + 3.548} 12, ${x + 8} 12`,
+      ].join(' ');
+    })
+    .join(' ');
   return (
-    <Link to="/" aria-label="spooool" className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}>
-      spooool
+    <svg
+      viewBox="0 0 48 12"
+      width={width}
+      height={height}
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      style={{ display: 'inline-block', verticalAlign: 'baseline', overflow: 'visible' }}
+    >
+      <path
+        d={`M 0 12 ${loops}`}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={fontPx * 0.04}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        pathLength={100}
+        className={paced ? 'spooool-wave--paced' : 'spooool-wave'}
+      />
+    </svg>
+  );
+}
+
+function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
+  const fontPx = size === 'sm' ? 30 : 52;
+  return (
+    <Link
+      to="/"
+      aria-label="spooool"
+      className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}
+      style={{ display: 'inline-flex', alignItems: 'baseline', gap: 0 }}
+    >
+      <span aria-hidden="true">sp</span>
+      <SpoolWave fontPx={fontPx} />
+      <span aria-hidden="true" style={{ marginLeft: '-0.05em' }}>l</span>
     </Link>
+  );
+}
+
+const SPLASH_DURATION_MS = 3200;
+const SPLASH_FADE_MS = 600;
+
+function Splash({ onDone }: { onDone: () => void }): JSX.Element {
+  const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    const dismiss = window.setTimeout(() => setLeaving(true), SPLASH_DURATION_MS);
+    return () => window.clearTimeout(dismiss);
+  }, []);
+
+  useEffect(() => {
+    if (!leaving) return;
+    const finish = window.setTimeout(onDone, SPLASH_FADE_MS);
+    return () => window.clearTimeout(finish);
+  }, [leaving, onDone]);
+
+  // Click-to-skip — start the leave animation immediately.
+  const skip = () => setLeaving(true);
+
+  // Splash mark gets its own font sizing (clamp() on the wrapper) so the
+  // SVG width tracks the rendered font size. We size the wave at a
+  // representative middle value; CSS clamps the mark itself.
+  const splashFontPx = 120;
+  return (
+    <div
+      className={leaving ? 'splash splash--leaving' : 'splash'}
+      onClick={skip}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') skip();
+      }}
+      aria-label="spooool — tap to enter"
+    >
+      <span className="splash__mark">
+        <span aria-hidden="true">sp</span>
+        <SpoolWave fontPx={splashFontPx} paced />
+        <span aria-hidden="true" style={{ marginLeft: '-0.05em' }}>l</span>
+      </span>
+      <span className="splash__hint">tap to enter</span>
+    </div>
   );
 }
 
@@ -103,21 +205,35 @@ function HeaderNav(): JSX.Element {
     );
   }
 
+  const iconBtn: React.CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: '9999px',
+    border: 'none',
+    background: 'transparent',
+    color: 'var(--foreground)',
+    cursor: 'pointer',
+    padding: 0,
+  };
   return (
     <nav className="app-header__nav">
-      <span className="ds-meta">{session.user.email}</span>
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
       </Link>
-      <Link to="/upload">
-        <button type="button" className="btn btn--secondary btn--sm">Upload</button>
+      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user.email}`} style={iconBtn}>
+        <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link to="/profile">
-        <button type="button" className="btn btn--ghost btn--sm">Profile</button>
+      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user.email}`} style={iconBtn}>
+        <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
         type="button"
-        className="btn btn--ghost btn--sm"
+        aria-label="Sign out"
+        title="Sign out"
+        style={iconBtn}
         onClick={() => {
           // ALO-166: tear down the PostHog identity before navigating so
           // the next visitor on a shared device starts a fresh session.
@@ -125,7 +241,7 @@ function HeaderNav(): JSX.Element {
           void signOut().then(() => navigate('/', { replace: true }));
         }}
       >
-        Sign out
+        <LogOut aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </button>
     </nav>
   );
@@ -184,17 +300,54 @@ function ThemeToggle(): JSX.Element {
     window.localStorage.setItem('theme', theme);
   }, [theme]);
 
+  // Springy cross-fade between Sun and Moon. Both glyphs are absolutely
+  // positioned in the same 32px slot; only opacity / translateY / scale
+  // change so the transition reads as a single icon morphing.
+  const ease = 'cubic-bezier(0.34, 1.56, 0.64, 1)';
+  const iconBase: React.CSSProperties = {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    transition: `opacity 300ms ${ease}, transform 300ms ${ease}`,
+  };
   return (
     <button
       type="button"
-      className="btn btn--ghost btn--sm"
+      onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
       aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
       title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-      onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        borderRadius: '9999px',
+        border: 'none',
+        background: 'transparent',
+        color: 'var(--foreground)',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        padding: 0,
+      }}
     >
-      <span aria-hidden="true" style={{ fontSize: 16, lineHeight: 1 }}>
-        {theme === 'dark' ? '🌞' : '🌙'}
-      </span>
+      <Sun
+        aria-hidden="true"
+        style={{
+          ...iconBase,
+          opacity: theme === 'light' ? 1 : 0,
+          transform: theme === 'light' ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.5)',
+        }}
+      />
+      <Moon
+        aria-hidden="true"
+        style={{
+          ...iconBase,
+          opacity: theme === 'dark' ? 1 : 0,
+          transform: theme === 'dark' ? 'translateY(0) scale(1)' : 'translateY(20px) scale(0.5)',
+        }}
+      />
     </button>
   );
 }
@@ -358,7 +511,6 @@ function Home(): JSX.Element {
           paddingBottom: 'var(--space-4)',
         }}
       >
-        <Wordmark />
         <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
           A video host that respects your time. Upload, stream, share — no friction.
         </p>
@@ -414,17 +566,34 @@ function Home(): JSX.Element {
         )}
       </section>
 
-      <section className="stack-sm" aria-label="Get started">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Start here</h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-            gap: 'var(--space-3)',
-          }}
-        >
-          {SUGGESTIONS.map((item) => (
-            <Link key={item.title} to={item.to} className="suggestion-card">
+      <section
+        className="stack-sm"
+        aria-label="Get started"
+        style={{
+          paddingTop: 'var(--space-8)',
+          paddingLeft: 'var(--space-4)',
+          paddingRight: 'var(--space-4)',
+          marginTop: 'var(--space-6)',
+        }}
+      >
+        <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>Start here</h2>
+        <div className="suggestion-grid">
+          {SUGGESTIONS.map((item, i) => (
+            <Link
+              key={item.title}
+              to={item.to}
+              className="suggestion-card suggestion-card--glow"
+              // Hover-only border-trace; per-card duration so consecutive
+              // hovers feel slightly different.
+              style={
+                {
+                  '--trace-duration': ['1.6s', '2s', '1.8s'][i],
+                } as React.CSSProperties
+              }
+            >
+              <span className="suggestion-card__border" aria-hidden="true">
+                <span className="suggestion-card__shine" />
+              </span>
               <div
                 style={{
                   display: 'flex',
@@ -434,8 +603,6 @@ function Home(): JSX.Element {
                   height: 44,
                   borderRadius: 10,
                   marginBottom: 'var(--space-2)',
-                  background: 'color-mix(in oklch, var(--accent), transparent 85%)',
-                  color: 'var(--accent)',
                 }}
               >
                 <item.Icon />
@@ -494,7 +661,26 @@ function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
   return children;
 }
 
+function useSplash(): { show: boolean; dismiss: () => void } {
+  // First-visit splash. sessionStorage scopes it per browser tab session
+  // so users don't see it on every internal navigation.
+  const [show, setShow] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    if (window.location.pathname !== '/') return false;
+    return window.sessionStorage.getItem('splash:seen') !== '1';
+  });
+  const dismiss = () => {
+    window.sessionStorage.setItem('splash:seen', '1');
+    setShow(false);
+  };
+  return { show, dismiss };
+}
+
 export default function App(): JSX.Element {
+  const splash = useSplash();
+  if (splash.show) {
+    return <Splash onDone={splash.dismiss} />;
+  }
   return (
     <div className="app-shell">
       <AppHeader />

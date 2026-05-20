@@ -27,6 +27,9 @@ beforeEach(() => {
     status: 200,
     headers: { 'content-type': 'application/json' },
   })));
+  // Bypass the first-visit splash — shell tests render route content, not the
+  // splash. Production gates Splash on `sessionStorage.splash:seen !== '1'`.
+  window.sessionStorage.setItem('splash:seen', '1');
 });
 
 afterEach(() => {

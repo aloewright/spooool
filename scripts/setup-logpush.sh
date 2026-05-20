@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ALO-166 / observability: provision a Workers Logpush job that ships every
-# log line from the spooool worker to the cloudflare-tube-logs R2 bucket.
+# log line from the spooool worker to the spooool-logs R2 bucket.
 #
 # Logpush jobs are account-level resources and aren't managed by wrangler,
 # so this script is the one-shot setup. Re-running is idempotent: it lists
@@ -11,7 +11,7 @@
 #   CLOUDFLARE_ACCOUNT_ID  account id (visible in the dashboard sidebar)
 #
 # Optional env:
-#   LOGS_BUCKET            override the R2 bucket name (default: cloudflare-tube-logs)
+#   LOGS_BUCKET            override the R2 bucket name (default: spooool-logs)
 #   WORKER_NAME            override the worker name      (default: spooool)
 #
 # Usage:
@@ -24,7 +24,7 @@ set -euo pipefail
 : "${CLOUDFLARE_API_TOKEN:?missing CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?missing CLOUDFLARE_ACCOUNT_ID}"
 
-LOGS_BUCKET="${LOGS_BUCKET:-cloudflare-tube-logs}"
+LOGS_BUCKET="${LOGS_BUCKET:-spooool-logs}"
 WORKER_NAME="${WORKER_NAME:-spooool}"
 
 api() {

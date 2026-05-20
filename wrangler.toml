@@ -34,7 +34,7 @@ run_worker_first = [
 # R2 Bucket - Video Storage
 [[r2_buckets]]
 binding = "VIDEOS"
-bucket_name = "cloudflare-tube-videos"
+bucket_name = "spooool-videos"
 
 # R2 Bucket - Logpush sink (created via scripts/setup-logpush.sh).
 # Logpush jobs themselves are account-level resources and aren't
@@ -42,12 +42,15 @@ bucket_name = "cloudflare-tube-videos"
 # the job is created.
 [[r2_buckets]]
 binding = "LOGS"
-bucket_name = "cloudflare-tube-logs"
+bucket_name = "spooool-logs"
 
 # D1 Database - Metadata, Users, Comments
+# database_id is Cloudflare-issued and stable across rename; wrangler
+# binds by id, so changing database_name here without renaming in
+# Cloudflare is cosmetic — but `wrangler d1` CLI commands take the name.
 [[d1_databases]]
 binding = "DB"
-database_name = "cloudflare-tube-prod"
+database_name = "spooool-prod"
 database_id = "bcf1a3f9-3732-4770-aae2-774decf68171"
 migrations_dir = "src/db/migrations"
 

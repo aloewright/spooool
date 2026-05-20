@@ -21,7 +21,7 @@ choco install k6       # Windows
 
 ## Run
 
-Always set `BASE_URL` to a non-prod environment. **Never run these against `cloudflare-tube-prod`** without coordination — even at 1k VUs you'll burn Worker invocations + D1 quota + R2 egress quickly.
+Always set `BASE_URL` to a non-prod environment. **Never run these against `spooool-prod`** without coordination — even at 1k VUs you'll burn Worker invocations + D1 quota + R2 egress quickly.
 
 ```sh
 # Watch baseline

@@ -1,6 +1,6 @@
 # D1 backup + restore runbook (ALO-175)
 
-> **Database:** `cloudflare-tube-prod` (binding `DB`, id `bcf1a3f9-3732-4770-aae2-774decf68171`).
+> **Database:** `spooool-prod` (binding `DB`, id `bcf1a3f9-3732-4770-aae2-774decf68171`).
 > **Last drilled:** _fill in after the next quarterly drill._
 
 ## RPO / RTO targets
@@ -19,10 +19,10 @@ D1 ships with **Time Travel** — every transaction is journaled and you can res
 
 ```sh
 # How far back can we go?
-wrangler d1 time-travel info cloudflare-tube-prod
+wrangler d1 time-travel info spooool-prod
 
 # Get a bookmark for "right now" — record it before any risky migration
-wrangler d1 time-travel info cloudflare-tube-prod --json | jq -r .bookmark
+wrangler d1 time-travel info spooool-prod --json | jq -r .bookmark
 ```
 
 ## What we add on top
@@ -37,17 +37,17 @@ Run from a trusted developer machine (or a scheduled GitHub Action when we add o
 # 1. Export to a SQL file. Use --remote so the export targets the live DB,
 #    not a local miniflare snapshot.
 TS=$(date -u +%Y%m%d-%H%M%S)
-wrangler d1 export cloudflare-tube-prod \
+wrangler d1 export spooool-prod \
   --remote \
   --output "/tmp/d1-${TS}.sql"
 
 # 2. Upload to R2. The bucket below should already exist; create it once
-#    with `wrangler r2 bucket create cloudflare-tube-backups` if not.
-wrangler r2 object put "cloudflare-tube-backups/d1/cloudflare-tube-prod-${TS}.sql" \
+#    with `wrangler r2 bucket create spooool-backups` if not.
+wrangler r2 object put "spooool-backups/d1/spooool-prod-${TS}.sql" \
   --file "/tmp/d1-${TS}.sql"
 
 # 3. Verify the upload.
-wrangler r2 object get "cloudflare-tube-backups/d1/cloudflare-tube-prod-${TS}.sql" \
+wrangler r2 object get "spooool-backups/d1/spooool-prod-${TS}.sql" \
   --file /tmp/verify.sql && wc -l /tmp/verify.sql
 ```
 
@@ -61,16 +61,16 @@ Retention policy: keep **8 weekly snapshots** plus **the most recent 4 monthly s
 2. Find the bookmark just **before** the bad change:
    ```sh
    # Pick a timestamp ~1 minute before the incident
-   wrangler d1 time-travel restore cloudflare-tube-prod --timestamp '2026-05-04T18:42:00Z'
+   wrangler d1 time-travel restore spooool-prod --timestamp '2026-05-04T18:42:00Z'
    ```
    Or, if you stamped a bookmark before a risky migration:
    ```sh
-   wrangler d1 time-travel restore cloudflare-tube-prod --bookmark <bookmark-from-earlier>
+   wrangler d1 time-travel restore spooool-prod --bookmark <bookmark-from-earlier>
    ```
 3. The CLI will print a confirmation prompt — read it carefully. Time Travel is a destructive operation: it **rewinds the entire database**, dropping any writes that happened after the chosen point.
 4. Verify with a smoke query:
    ```sh
-   wrangler d1 execute cloudflare-tube-prod --remote --command \
+   wrangler d1 execute spooool-prod --remote --command \
      "SELECT COUNT(*) AS n, MAX(updated_at) AS latest FROM videos"
    ```
 5. Rerun the post-incident-affected migrations only if they were intended; otherwise the database is now back where it was before the incident.
@@ -79,26 +79,26 @@ Retention policy: keep **8 weekly snapshots** plus **the most recent 4 monthly s
 
 1. Recreate the D1 database. **Do not reuse the old name** if the old one might still be referenced anywhere — append a suffix:
    ```sh
-   wrangler d1 create cloudflare-tube-prod-restored
+   wrangler d1 create spooool-prod-restored
    ```
 2. Update `wrangler.toml` `database_id` to point at the new database. Hold off on deploying the worker until step 5.
 3. Pull the most recent SQL export from R2:
    ```sh
    wrangler r2 object get \
-     cloudflare-tube-backups/d1/cloudflare-tube-prod-<TS>.sql \
+     spooool-backups/d1/spooool-prod-<TS>.sql \
      --file /tmp/restore.sql
    ```
 4. Replay it:
    ```sh
-   wrangler d1 execute cloudflare-tube-prod-restored --remote --file /tmp/restore.sql
+   wrangler d1 execute spooool-prod-restored --remote --file /tmp/restore.sql
    ```
 5. Apply any migrations newer than the snapshot (necessary because the export captures only what was in the DB at backup time):
    ```sh
-   wrangler d1 migrations apply cloudflare-tube-prod-restored --remote
+   wrangler d1 migrations apply spooool-prod-restored --remote
    ```
 6. Smoke-test:
    ```sh
-   wrangler d1 execute cloudflare-tube-prod-restored --remote --command \
+   wrangler d1 execute spooool-prod-restored --remote --command \
      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
    ```
 7. Deploy the worker pointed at the new database. Watch `/api/health` for green status.
@@ -108,9 +108,9 @@ Retention policy: keep **8 weekly snapshots** plus **the most recent 4 monthly s
 Same flow as B, but create the new database with an explicit suffix and never repoint production at it:
 
 ```sh
-wrangler d1 create cloudflare-tube-staging-from-prod
-wrangler r2 object get cloudflare-tube-backups/d1/cloudflare-tube-prod-<TS>.sql --file /tmp/clone.sql
-wrangler d1 execute cloudflare-tube-staging-from-prod --remote --file /tmp/clone.sql
+wrangler d1 create spooool-staging-from-prod
+wrangler r2 object get spooool-backups/d1/spooool-prod-<TS>.sql --file /tmp/clone.sql
+wrangler d1 execute spooool-staging-from-prod --remote --file /tmp/clone.sql
 ```
 
 ## Drill cadence

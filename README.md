@@ -1,8 +1,11 @@
 # spooool
 
-A video host that respects your time. Built **entirely on Cloudflare infrastructure** — zero external dependencies for core functionality.
+[![CI](https://github.com/aloewright/spooool/actions/workflows/ci.yml/badge.svg)](https://github.com/aloewright/spooool/actions/workflows/ci.yml)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/aloewright/spooool)
+[![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/allosaurus)
 
-> **Note on infra naming.** The product was rebranded from "Cloudflare Tube" to **spooool**. The underlying R2 bucket (`cloudflare-tube-videos`) and D1 database (`cloudflare-tube-prod`) still use the legacy names; rename in Cloudflare and update `wrangler.toml` if you want them aligned.
+A video host that respects your time. Built **entirely on Cloudflare infrastructure** — zero external dependencies for core functionality.
 
 ## Architecture Overview
 
@@ -95,10 +98,10 @@ npm install
 wrangler login
 
 # Create R2 bucket
-wrangler r2 bucket create cloudflare-tube-videos
+wrangler r2 bucket create spooool-videos
 
 # Deploy database schema (includes better-auth tables)
-wrangler d1 migrations apply cloudflare-tube-prod
+wrangler d1 migrations apply spooool-prod --remote
 
 # Set the better-auth signing secret (32+ random bytes)
 openssl rand -hex 32 | wrangler secret put BETTER_AUTH_SECRET
@@ -114,7 +117,7 @@ CLOUDFLARE_ACCOUNT_ID=your_account_id
 CLOUDFLARE_API_TOKEN=your_api_token
 CLOUDFLARE_ZONE_ID=your_zone_id
 CF_STREAM_TOKEN=your_stream_token
-R2_BUCKET_NAME=cloudflare-tube-videos
+R2_BUCKET_NAME=spooool-videos
 R2_BUCKET_DOMAIN=https://yourdomain.r2.cloudflareaaccess.com
 DATABASE_URL=postgresql://...  # Only if using external DB
 ```
@@ -162,11 +165,11 @@ route = "api.spooool.com/*"
 
 [[r2_buckets]]
 binding = "VIDEOS"
-bucket_name = "cloudflare-tube-videos"
+bucket_name = "spooool-videos"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "cloudflare-tube-prod"
+database_name = "spooool-prod"
 database_id = "your_database_id"
 
 [[kv_namespaces]]
@@ -332,7 +335,7 @@ curl https://api.cloudflare.com/client/v4/accounts/{account_id}/stream/{video_id
   -H "Authorization: Bearer {token}"
 
 # Check R2 upload
-wrangler r2 object list cloudflare-tube-videos
+wrangler r2 object list spooool-videos
 ```
 
 ### High egress costs

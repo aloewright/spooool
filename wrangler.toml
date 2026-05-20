@@ -34,7 +34,7 @@ run_worker_first = [
 # R2 Bucket - Video Storage
 [[r2_buckets]]
 binding = "VIDEOS"
-bucket_name = "cloudflare-tube-videos"
+bucket_name = "spooool-videos"
 
 # R2 Bucket - Logpush sink (created via scripts/setup-logpush.sh).
 # Logpush jobs themselves are account-level resources and aren't
@@ -42,13 +42,17 @@ bucket_name = "cloudflare-tube-videos"
 # the job is created.
 [[r2_buckets]]
 binding = "LOGS"
-bucket_name = "cloudflare-tube-logs"
+bucket_name = "spooool-logs"
 
 # D1 Database - Metadata, Users, Comments
+# Recreated 2026-05-20 as part of the cloudflare-tube → spooool rename
+# (D1 has no in-place rename and `wrangler d1 export` chokes on the FTS5
+# virtual table, so the prod DB was rebuilt: new DB created, migrations
+# replayed, non-FTS table contents copied across).
 [[d1_databases]]
 binding = "DB"
-database_name = "cloudflare-tube-prod"
-database_id = "bcf1a3f9-3732-4770-aae2-774decf68171"
+database_name = "spooool-prod"
+database_id = "bbdd0163-a3d8-4bc7-805a-c23d2b08d4d7"
 migrations_dir = "src/db/migrations"
 
 # KV Namespace - Cache

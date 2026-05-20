@@ -101,7 +101,7 @@ wrangler login
 wrangler r2 bucket create spooool-videos
 
 # Deploy database schema (includes better-auth tables)
-wrangler d1 migrations apply spooool-prod
+wrangler d1 migrations apply spooool-prod --remote
 
 # Set the better-auth signing secret (32+ random bytes)
 openssl rand -hex 32 | wrangler secret put BETTER_AUTH_SECRET

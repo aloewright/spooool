@@ -69,8 +69,8 @@ For cost-conscious deployment:
 
 ### Phase 3 Features
 - Social features (likes, shares, pins)
-- Premium memberships (Stripe integration)
-- Channel monetization (Stripe Connect)
+- Premium memberships (Polar)
+- Channel monetization (Polar partner payouts)
 - Creator studio dashboard
 - Advanced analytics
 - A/B testing framework

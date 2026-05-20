@@ -109,7 +109,7 @@ export function Profile(): JSX.Element {
   }
 
   return (
-    <main className="app-main app-main--narrow stack-lg fade-in">
+    <main className="app-main app-main--narrow stack-xl fade-in">
       <div className="stack-sm">
         <span className="ds-label">Profile</span>
         <h1 className="ds-h2">Your channel</h1>

@@ -3,6 +3,10 @@
    Foundations: OKLCH near-greyscale, Nunito throughout (UI + wordmark).
    ============================================================ */
 
+/* Handwritten signature font for the spooool wordmark — Caveat from
+   Google Fonts. Loaded via @import; the wordmark is the only consumer. */
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&display=swap');
+
 @font-face {
   font-family: "Nunito";
   src: url("/fonts/Nunito-VariableFont_wght.ttf") format("truetype-variations");
@@ -265,18 +269,20 @@ code, kbd, pre, samp {
 }
 
 .ds-wordmark {
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 400;
-  font-size: 42px;
+  font-family: 'Caveat', 'Sour Gummy', var(--font-display);
+  font-style: normal;
+  font-weight: 600;
+  font-size: 52px;
   line-height: 1;
-  letter-spacing: -0.01em;
+  letter-spacing: 0.01em;
   color: var(--foreground);
+  position: relative;
 }
 
 .ds-wordmark--sm {
-  font-size: 22px;
+  font-size: 30px;
 }
+
 
 /* ── Layout ────────────────────────────────────────────────── */
 .app-shell {
@@ -321,7 +327,7 @@ code, kbd, pre, samp {
   width: 100%;
   max-width: 960px;
   margin: 0 auto;
-  padding: var(--space-8) var(--space-6);
+  padding: var(--space-12) var(--space-6) var(--space-8);
 }
 
 .app-main--narrow {
@@ -336,6 +342,7 @@ code, kbd, pre, samp {
 
 .stack-sm { gap: var(--space-2); }
 .stack-lg { gap: var(--space-6); }
+.stack-xl { gap: var(--space-8); }
 
 .row {
   display: flex;
@@ -351,12 +358,24 @@ code, kbd, pre, samp {
   border: 1px solid color-mix(in oklch, var(--border), transparent 30%);
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-card);
-  padding: var(--space-6);
+  padding: var(--space-8);
 }
 
 .card--tight {
   padding: var(--space-4);
   border-radius: var(--radius-lg);
+}
+
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-4);
+}
+
+@media (max-width: 720px) {
+  .suggestion-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .suggestion-card {
@@ -376,6 +395,210 @@ code, kbd, pre, samp {
   transform: translateY(-1px);
   box-shadow: var(--shadow-card);
   border-color: var(--border);
+}
+
+/* "Start here" suggestion cards. Baseline glow is gone; instead a thin
+   white highlight travels around the border at a per-card cadence
+   (durations + delays set inline), so the cards never sync. A subtle
+   white halo only kicks in on hover. */
+
+.suggestion-card--glow {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Outer container: same shape as the card, inverted-mask trick exposes
+   just the 1.5px border ring. Hidden until hover. */
+.suggestion-card__border {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  opacity: 0;
+  overflow: hidden;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  transition: opacity 200ms ease;
+}
+
+/* Inner gradient: oversized so rotation never reveals empty corners.
+   Conic-gradient with one bright "comet" peak, dim base elsewhere. */
+.suggestion-card__shine {
+  position: absolute;
+  inset: -50%;
+  background: conic-gradient(
+    rgb(255 255 255 / 1) 0deg,
+    rgb(255 255 255 / 0.6) 30deg,
+    rgb(255 255 255 / 0.2) 90deg,
+    rgb(255 255 255 / 0.2) 270deg,
+    rgb(255 255 255 / 0.6) 330deg,
+    rgb(255 255 255 / 1) 360deg
+  );
+}
+
+.suggestion-card--glow:hover .suggestion-card__border {
+  opacity: 1;
+}
+
+.suggestion-card--glow:hover .suggestion-card__shine {
+  animation: suggestion-shine-spin var(--trace-duration, 2s) linear infinite;
+}
+
+@keyframes suggestion-shine-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.suggestion-card--glow:hover {
+  box-shadow:
+    0 0 24px -4px rgb(255 255 255 / 0.18),
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    var(--shadow-card);
+}
+
+:root:not(.dark) .suggestion-card__shine {
+  background: conic-gradient(
+    rgb(0 0 0 / 0.85) 0deg,
+    rgb(0 0 0 / 0.5) 30deg,
+    rgb(0 0 0 / 0.15) 90deg,
+    rgb(0 0 0 / 0.15) 270deg,
+    rgb(0 0 0 / 0.5) 330deg,
+    rgb(0 0 0 / 0.85) 360deg
+  );
+}
+
+:root:not(.dark) .suggestion-card--glow:hover {
+  box-shadow:
+    0 0 24px -6px rgb(0 0 0 / 0.12),
+    var(--shadow-card);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .suggestion-card__shine {
+    animation: none;
+  }
+}
+
+/* Continuous wavy stroke for the SpoolWave SVG inside the wordmark.
+   stroke-dasharray + animated dashoffset = travelling trim window. */
+.spooool-wave {
+  stroke-dasharray: 32 68;
+  animation: spooool-wave-scroll 2.4s linear infinite;
+}
+
+@keyframes spooool-wave-scroll {
+  to {
+    stroke-dashoffset: 100;
+  }
+}
+
+/* Variable-pace variant used on the splash screen — the visible loop
+   window scrolls fast → slow → fast in a single 6s cycle so the loops
+   feel like they're being unspooled by hand. */
+.spooool-wave--paced {
+  stroke-dasharray: 32 68;
+  animation: spooool-wave-paced 6s ease-in-out infinite;
+}
+
+@keyframes spooool-wave-paced {
+  0% { stroke-dashoffset: 0; }
+  20% { stroke-dashoffset: 36; }
+  40% { stroke-dashoffset: 50; }
+  60% { stroke-dashoffset: 58; }
+  80% { stroke-dashoffset: 86; }
+  100% { stroke-dashoffset: 100; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spooool-wave,
+  .spooool-wave--paced {
+    animation: none;
+  }
+}
+
+/* Splash overlay shown on first navigation to "/" per session. Full
+   viewport, fades in/out, lets the wordmark animation take centre
+   stage before handing off to the Home route. */
+.splash {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--background);
+  cursor: pointer;
+  animation: splash-in 400ms ease forwards;
+}
+
+.splash--leaving {
+  animation: splash-out 600ms ease forwards;
+  pointer-events: none;
+}
+
+.splash__mark {
+  font-family: 'Caveat', var(--font-display);
+  font-style: normal;
+  font-weight: 600;
+  font-size: clamp(64px, 14vw, 168px);
+  line-height: 1;
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  user-select: none;
+  animation: splash-mark-in 800ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.splash__hint {
+  position: absolute;
+  bottom: var(--space-8);
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--muted-foreground);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  opacity: 0;
+  animation: splash-hint-in 600ms ease 1.6s forwards;
+}
+
+@keyframes splash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes splash-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes splash-mark-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes splash-hint-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 0.7; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash,
+  .splash--leaving,
+  .splash__mark,
+  .splash__hint {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* ── Button ────────────────────────────────────────────────── */

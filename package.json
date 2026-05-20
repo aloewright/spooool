@@ -22,8 +22,8 @@
     "type-check": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "db:migrate": "wrangler d1 migrations apply spooool-prod",
-    "db:migrate:staging": "wrangler d1 migrations apply spooool-staging --env staging",
+    "db:migrate": "wrangler d1 migrations apply spooool-prod --remote",
+    "db:migrate:staging": "wrangler d1 migrations apply spooool-staging --env staging --remote",
     "db:seed": "node scripts/seed-db.js",
     "worker:tail": "wrangler tail",
     "worker:logs": "wrangler tail --format json | jq ."

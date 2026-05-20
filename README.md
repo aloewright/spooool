@@ -1,12 +1,11 @@
 # spooool
 
 [![CI](https://github.com/aloewright/spooool/actions/workflows/ci.yml/badge.svg)](https://github.com/aloewright/spooool/actions/workflows/ci.yml)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/aloewright/spooool)
 [![Cloudflare](https://img.shields.io/badge/Cloudflare-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://www.buymeacoffee.com/allosaurus)
 
 A video host that respects your time. Built **entirely on Cloudflare infrastructure** — zero external dependencies for core functionality.
-
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/aloewright/spooool)
 
 ## Architecture Overview
 

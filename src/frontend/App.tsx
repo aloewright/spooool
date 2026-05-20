@@ -41,6 +41,7 @@ const Onboarding = lazy(() =>
   import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })),
 );
 const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
+const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -563,7 +564,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
       <SiteFooter />

@@ -98,16 +98,16 @@ export function classifyUploadError(message: string): string {
   return 'unknown';
 }
 
-async function resendVerification(): Promise<{ ok: boolean; error: string | null }> {
-  // ALO-128: ask better-auth to re-issue the verification email. The session
-  // cookie identifies the user, so the body is empty.
+async function resendVerification(email: string): Promise<{ ok: boolean; error: string | null }> {
+  // ALO-128: ask better-auth to re-issue the verification email. better-auth
+  // requires the email in the body and cross-checks it against the session.
   let res: Response;
   try {
     res = await fetch('/api/auth/send-verification-email', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ email }),
     });
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : 'Network error' };
@@ -207,7 +207,12 @@ export function Upload(): JSX.Element {
               type="button"
               className="btn btn--secondary btn--sm"
               onClick={() => {
-                void resendVerification().then((r) =>
+                const email = session?.user?.email;
+                if (!email) {
+                  setResendStatus('No email on session.');
+                  return;
+                }
+                void resendVerification(email).then((r) =>
                   setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed'),
                 );
               }}

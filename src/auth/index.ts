@@ -1,11 +1,26 @@
 import { betterAuth } from 'better-auth';
-import { sendLifecycleEmail, type ResendEnv } from '../workers/resend';
+import { sendLifecycleEmail, type ResendEnv, type ResendResult } from '../workers/resend';
 
 export type AuthEnv = ResendEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
 };
+
+// Without this, Resend rejections (unverified domain, sandbox key, etc.) are
+// swallowed silently — the auth callback resolves and better-auth replies
+// `status: true` while the email never leaves. Logging surfaces those cases
+// in `wrangler tail` so the operator can see the actual API response.
+function logResendResult(result: ResendResult, kind: string, to: string): void {
+  if (result.ok) return;
+  if (result.skipped) {
+    console.warn(`[auth] lifecycle email ${kind} -> ${to} skipped: ${result.reason}`);
+    return;
+  }
+  console.error(
+    `[auth] lifecycle email ${kind} -> ${to} failed: status=${result.status} message=${result.message}`,
+  );
+}
 
 export function createAuth(env: AuthEnv) {
   return betterAuth({
@@ -24,10 +39,11 @@ export function createAuth(env: AuthEnv) {
       // doesn't care, and we don't want a flaky upstream to swallow the
       // user's reset.
       sendResetPassword: async ({ user, url }) => {
-        await sendLifecycleEmail(env, user.email, {
+        const result = await sendLifecycleEmail(env, user.email, {
           kind: 'password_reset',
           resetUrl: url,
         });
+        logResendResult(result, 'password_reset', user.email);
       },
     },
     // ALO-128: email verification. better-auth issues a single-use token,
@@ -40,10 +56,11 @@ export function createAuth(env: AuthEnv) {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
-        await sendLifecycleEmail(env, user.email, {
+        const result = await sendLifecycleEmail(env, user.email, {
           kind: 'email_verification',
           verifyUrl: url,
         });
+        logResendResult(result, 'email_verification', user.email);
       },
     },
     session: {

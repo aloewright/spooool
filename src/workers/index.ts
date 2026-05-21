@@ -52,11 +52,9 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & {
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string };
-  // Resend (resend.com) REST API key. When unset, lifecycle calls
-  // fail-open — the contact / email is just skipped.
-  RESEND_API_KEY?: string;
-  RESEND_AUDIENCE_ID?: string;
-  RESEND_FROM?: string;
+  // Loops (loops.so) REST API key (ALO-143). When unset, lifecycle calls
+  // fail-open — the contact / event is just skipped.
+  LOOPS_API_KEY?: string;
   // ALO-176: storage cost alert threshold in bytes. Defaults to 100 GiB when
   // unset. The daily cron mails ADMIN_EMAILS once a day if SUM(videos.bytes)
   // crosses the threshold.

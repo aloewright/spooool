@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // Capture the options passed to better-auth so we can assert that the
-// password-reset and verification callbacks are wired and forward to Resend.
+// password-reset and verification callbacks are wired and forward to Loops.
 type CapturedOptions = {
   appName?: string;
   emailAndPassword?: {
@@ -35,19 +35,18 @@ vi.mock('better-auth', () => ({
   betterAuth: (options: CapturedOptions) => betterAuthSpy(options),
 }));
 
-const sendLifecycleEmailSpy = vi.fn<(env: unknown, to: string, msg: unknown) => Promise<unknown>>(
+const sendEventSpy = vi.fn<(env: unknown, args: unknown) => Promise<unknown>>(
   async () => ({ ok: true, status: 200 }),
 );
-vi.mock('../workers/resend', () => ({
-  sendLifecycleEmail: (env: unknown, to: string, msg: unknown) =>
-    sendLifecycleEmailSpy(env, to, msg),
+vi.mock('../workers/loops', () => ({
+  sendEvent: (env: unknown, args: unknown) => sendEventSpy(env, args),
 }));
 
 import { createAuth } from './index';
 
 describe('createAuth', () => {
   beforeEach(() => {
-    sendLifecycleEmailSpy.mockClear();
+    sendEventSpy.mockClear();
     betterAuthSpy.mockClear();
     captured.options = undefined;
   });
@@ -69,10 +68,10 @@ describe('createAuth', () => {
     expect(typeof captured.options?.emailAndPassword?.sendResetPassword).toBe('function');
   });
 
-  it('sendResetPassword forwards to Resend with the reset url', async () => {
+  it('sendResetPassword forwards to Loops with the reset url', async () => {
     createAuth({
       DB: {} as D1Database,
-      RESEND_API_KEY: 'k',
+      LOOPS_API_KEY: 'k',
     });
     const cb = captured.options?.emailAndPassword?.sendResetPassword;
     if (!cb) throw new Error('sendResetPassword callback missing');
@@ -81,16 +80,19 @@ describe('createAuth', () => {
       url: 'https://x/reset?token=tok',
       token: 'tok',
     });
-    expect(sendLifecycleEmailSpy).toHaveBeenCalledTimes(1);
-    expect(sendLifecycleEmailSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ RESEND_API_KEY: 'k' }),
-      'a@b.com',
-      { kind: 'password_reset', resetUrl: 'https://x/reset?token=tok' },
+    expect(sendEventSpy).toHaveBeenCalledTimes(1);
+    expect(sendEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ LOOPS_API_KEY: 'k' }),
+      {
+        email: 'a@b.com',
+        eventName: 'password_reset',
+        eventProperties: { resetUrl: 'https://x/reset?token=tok', userId: 'u1' },
+      },
     );
   });
 
-  it('sendResetPassword still resolves when RESEND_API_KEY is missing', async () => {
-    sendLifecycleEmailSpy.mockResolvedValueOnce({
+  it('sendResetPassword still resolves when LOOPS_API_KEY is missing', async () => {
+    sendEventSpy.mockResolvedValueOnce({
       ok: false,
       skipped: true,
       reason: 'no key',
@@ -114,8 +116,8 @@ describe('createAuth', () => {
     expect(typeof captured.options?.emailVerification?.sendVerificationEmail).toBe('function');
   });
 
-  it('sendVerificationEmail forwards to Resend with the verify url', async () => {
-    createAuth({ DB: {} as D1Database, RESEND_API_KEY: 'k' });
+  it('sendVerificationEmail forwards to Loops with the verify url', async () => {
+    createAuth({ DB: {} as D1Database, LOOPS_API_KEY: 'k' });
     const cb = captured.options?.emailVerification?.sendVerificationEmail;
     if (!cb) throw new Error('sendVerificationEmail callback missing');
     await cb({
@@ -123,11 +125,14 @@ describe('createAuth', () => {
       url: 'https://x/verify?token=tok',
       token: 'tok',
     });
-    expect(sendLifecycleEmailSpy).toHaveBeenCalledTimes(1);
-    expect(sendLifecycleEmailSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ RESEND_API_KEY: 'k' }),
-      'a@b.com',
-      { kind: 'email_verification', verifyUrl: 'https://x/verify?token=tok' },
+    expect(sendEventSpy).toHaveBeenCalledTimes(1);
+    expect(sendEventSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ LOOPS_API_KEY: 'k' }),
+      {
+        email: 'a@b.com',
+        eventName: 'email_verification',
+        eventProperties: { verifyUrl: 'https://x/verify?token=tok', userId: 'u1' },
+      },
     );
   });
 });

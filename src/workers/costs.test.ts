@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildCostAlertProps,
   evaluateAlerts,
   getCostSnapshot,
   parseThresholdBytes,
-  renderCostAlertEmail,
   runCostMonitorSweep,
   todayKey,
   type CostSnapshot,
@@ -100,14 +100,20 @@ describe('todayKey', () => {
   });
 });
 
-describe('renderCostAlertEmail', () => {
-  it('mentions the observed storage and threshold reason', () => {
-    const { subject, html } = renderCostAlertEmail(SAMPLE_SNAPSHOT, [
+describe('buildCostAlertProps', () => {
+  it('flattens snapshot + alerts into Loops eventProperties', () => {
+    const props = buildCostAlertProps(SAMPLE_SNAPSHOT, [
       { reason: 'storage_threshold', threshold_bytes: 50 * 1024 * 1024 * 1024, observed_bytes: SAMPLE_SNAPSHOT.storage.used_bytes },
     ]);
-    expect(subject).toContain('100.00 GiB');
-    expect(html).toContain('storage_threshold');
-    expect(html).toContain('Videos: 42');
+    expect(props).toMatchObject({
+      storage_gib: '100.00',
+      storage_usd_per_month: '1.50',
+      threshold_gib: '50.00',
+      alert_reasons: 'storage_threshold',
+      videos_total: 42,
+      users_total: 7,
+      comments_total: 12,
+    });
   });
 });
 
@@ -177,7 +183,7 @@ describe('runCostMonitorSweep', () => {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: fakeKv({ [todayKey()]: '1' }),
       ADMIN_EMAILS: 'ops@spooool.com',
-      RESEND_API_KEY: 'rk_test',
+      LOOPS_API_KEY: 'lp_test',
     } as unknown as CostsEnv;
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response('{}', { status: 200 }),
@@ -197,29 +203,42 @@ describe('runCostMonitorSweep', () => {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: fakeKv(),
       ADMIN_EMAILS: '',
-      RESEND_API_KEY: 'rk_test',
+      LOOPS_API_KEY: 'lp_test',
     } as unknown as CostsEnv;
     const result = await runCostMonitorSweep(env);
     expect(result.sent).toBe(false);
     expect(result.reason).toBe('no_admin_emails');
   });
 
-  it('sends an email per admin and writes the dedup marker', async () => {
+  it('fires a Loops cost_alert event per admin and writes the dedup marker', async () => {
     const cache = fakeKv();
     const env: CostsEnv = {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: cache,
       ADMIN_EMAILS: 'a@x.com, b@x.com',
-      RESEND_API_KEY: 'rk_test',
+      LOOPS_API_KEY: 'lp_test',
     } as unknown as CostsEnv;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({
+          url: input.toString(),
+          body: JSON.parse((init?.body as string) ?? '{}'),
+        });
+        return new Response('{}', { status: 200 });
+      },
     );
     try {
       const result = await runCostMonitorSweep(env);
       expect(result.sent).toBe(true);
       expect(result.reason).toBe('sent');
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(calls).toHaveLength(2);
+      expect(calls[0].url).toBe('https://app.loops.so/api/v1/events/send');
+      expect(calls[0].body).toMatchObject({
+        email: 'a@x.com',
+        eventName: 'cost_alert',
+      });
+      expect(calls[1].body).toMatchObject({ email: 'b@x.com', eventName: 'cost_alert' });
       expect(await cache.get(todayKey())).toBe('1');
     } finally {
       fetchSpy.mockRestore();

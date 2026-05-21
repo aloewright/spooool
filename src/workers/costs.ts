@@ -4,8 +4,9 @@
 // storage, video count, user count) and produces a back-of-the-envelope
 // monthly cost estimate. The /api/admin/costs endpoint exposes the snapshot
 // for the admin dashboard; runCostMonitorSweep is called from the daily
-// cron in src/workers/index.ts and dispatches a Resend alert email to the
-// configured admin list when any threshold trips.
+// cron in src/workers/index.ts and fires a `cost_alert` Loops event for
+// each configured admin when any threshold trips — the actual email body
+// lives in the Loops automation that listens for that event.
 //
 // Idempotency: the daily KV marker `costs:alert:YYYY-MM-DD` is set after a
 // successful send so a re-fired cron in the same UTC day stays silent.
@@ -13,11 +14,11 @@
 // rebooted, which is mostly noise.
 
 import { Hono } from 'hono';
+import { sendEvent, type LoopsEnv } from './loops';
 import { parseAdminEmails } from './moderation';
-import { sendEmail, type ResendEnv } from './resend';
 import { isAdmin } from './roles';
 
-export interface CostsEnv extends ResendEnv {
+export interface CostsEnv extends LoopsEnv {
   DB: D1Database;
   CACHE: KVNamespace;
   ADMIN_EMAILS?: string;
@@ -159,30 +160,33 @@ export function todayKey(now: Date = new Date()): string {
   return `costs:alert:${now.toISOString().slice(0, 10)}`;
 }
 
-export function renderCostAlertEmail(
+// Flat eventProperties payload for the Loops `cost_alert` automation. Kept
+// as primitives (no nested objects) so it round-trips cleanly through Loops'
+// custom-property system and so the template can `{{double-brace}}` each
+// field directly.
+export function buildCostAlertProps(
   snapshot: CostSnapshot,
   alerts: CostAlert[],
-): { subject: string; html: string } {
+): Record<string, string | number> {
   const gib = snapshot.storage.used_gib.toFixed(2);
   const usd = snapshot.storage.estimated_monthly_usd.toFixed(2);
-  const rows = alerts
-    .map((a) => {
-      const tGib = (a.threshold_bytes / (1024 * 1024 * 1024)).toFixed(2);
-      return `<li><b>${a.reason}</b> — observed ${gib} GiB ≥ threshold ${tGib} GiB</li>`;
-    })
-    .join('');
-  const subject = `spooool cost alert — ${gib} GiB stored (~$${usd}/mo)`;
-  const html = `<p>spooool cost monitor tripped at ${snapshot.generated_at}.</p>
-<ul>${rows}</ul>
-<p>Snapshot:</p>
-<ul>
-  <li>Storage: ${gib} GiB (est. ~$${usd}/mo, R2 only)</li>
-  <li>Videos: ${snapshot.videos.total} (${snapshot.videos.last_30d} in last 30d, ${snapshot.videos.soft_deleted} soft-deleted)</li>
-  <li>Users: ${snapshot.users.total} (${snapshot.users.last_30d} in last 30d)</li>
-  <li>Comments: ${snapshot.comments.total}</li>
-</ul>
-<p>Edit COST_STORAGE_ALERT_BYTES (wrangler) to retune.</p>`;
-  return { subject, html };
+  const reasons = alerts.map((a) => a.reason).join(',');
+  const thresholdGib = alerts.length
+    ? (alerts[0].threshold_bytes / (1024 * 1024 * 1024)).toFixed(2)
+    : '';
+  return {
+    generated_at: snapshot.generated_at,
+    storage_gib: gib,
+    storage_usd_per_month: usd,
+    threshold_gib: thresholdGib,
+    alert_reasons: reasons,
+    videos_total: snapshot.videos.total,
+    videos_last_30d: snapshot.videos.last_30d,
+    videos_soft_deleted: snapshot.videos.soft_deleted,
+    users_total: snapshot.users.total,
+    users_last_30d: snapshot.users.last_30d,
+    comments_total: snapshot.comments.total,
+  };
 }
 
 export interface SweepResult {
@@ -210,14 +214,18 @@ export async function runCostMonitorSweep(env: CostsEnv): Promise<SweepResult> {
     return { alerts, sent: false, reason: 'no_admin_emails' };
   }
 
-  const { subject, html } = renderCostAlertEmail(snapshot, alerts);
+  const eventProperties = buildCostAlertProps(snapshot, alerts);
   for (const to of recipients) {
-    await sendEmail(env, { to, subject, html });
+    await sendEvent(env, {
+      email: to,
+      eventName: 'cost_alert',
+      eventProperties,
+    });
   }
-  // Set the dedup marker only after the sends fire; if Resend returned an
-  // error result we still consider the day "delivered" — retrying would just
-  // re-mail every cron tick. Operators can manually clear the KV key to
-  // force a re-send during incident triage.
+  // Set the dedup marker only after the sends fire; if Loops returned an
+  // error result we still consider the day "delivered" — retrying would
+  // just re-page admins every cron tick. Operators can manually clear the
+  // KV key to force a re-send during incident triage.
   await env.CACHE.put(key, '1', { expirationTtl: 48 * 60 * 60 });
   return { alerts, sent: true, reason: 'sent' };
 }

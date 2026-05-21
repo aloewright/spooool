@@ -36,7 +36,7 @@ describe('POST /api/lifecycle/sync', () => {
     expect(res.status).toBe(401);
   });
 
-  it('reports a skipped contact result when RESEND_API_KEY is missing', async () => {
+  it('reports a skipped contact result when LOOPS_API_KEY is missing', async () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice Wright' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
@@ -62,20 +62,21 @@ describe('POST /api/lifecycle/sync', () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice Wright' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-      envFor({ RESEND_API_KEY: 're_k', RESEND_AUDIENCE_ID: 'aud_1' }),
+      envFor({ LOOPS_API_KEY: 'k' }),
     );
     expect(res.status).toBe(200);
     expect(captured).toHaveLength(1);
-    expect(captured[0].method).toBe('PATCH');
-    expect(captured[0].url).toBe('https://api.resend.com/audiences/aud_1/contacts/a%40x.test');
+    expect(captured[0].method).toBe('PUT');
+    expect(captured[0].url).toBe('https://app.loops.so/api/v1/contacts/update');
     expect(captured[0].body).toMatchObject({
       email: 'a@x.test',
-      first_name: 'Alice',
-      unsubscribed: false,
+      firstName: 'Alice',
+      userId: 'u1',
+      subscribed: true,
     });
   });
 
-  it('also sends the welcome email when isNewSignup=true', async () => {
+  it('also fires the signup event when isNewSignup=true', async () => {
     const captured: Array<{ url: string }> = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       captured.push({ url: input.toString() });
@@ -89,17 +90,17 @@ describe('POST /api/lifecycle/sync', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ isNewSignup: true }),
       },
-      envFor({ RESEND_API_KEY: 'k', RESEND_AUDIENCE_ID: 'aud_1' }),
+      envFor({ LOOPS_API_KEY: 'k' }),
     );
     expect(res.status).toBe(200);
     const urls = captured.map((c) => c.url);
     expect(urls).toEqual([
-      'https://api.resend.com/audiences/aud_1/contacts/a%40x.test',
-      'https://api.resend.com/emails',
+      'https://app.loops.so/api/v1/contacts/update',
+      'https://app.loops.so/api/v1/events/send',
     ]);
   });
 
-  it('returns 200 even when Resend upsert fails (lifecycle is best-effort)', async () => {
+  it('returns 200 even when Loops upsert fails (lifecycle is best-effort)', async () => {
     globalThis.fetch = vi.fn(
       async () =>
         new Response(JSON.stringify({ message: 'internal' }), {
@@ -111,7 +112,7 @@ describe('POST /api/lifecycle/sync', () => {
     const res = await buildApp({ id: 'u1', email: 'a@x.test', name: 'Alice' }).request(
       '/api/lifecycle/sync',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
-      envFor({ RESEND_API_KEY: 'k', RESEND_AUDIENCE_ID: 'aud_1' }),
+      envFor({ LOOPS_API_KEY: 'k' }),
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as {

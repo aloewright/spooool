@@ -1,15 +1,15 @@
-// Lifecycle endpoints that bridge the app to Resend. The frontend calls
-// /api/lifecycle/sync after a successful signup or account-settings save so
-// contact data lands in the Resend audience without us needing to
-// monkey-patch better-auth's user-creation hooks. The endpoint is
-// idempotent (Resend upserts by email), so calling it on every login is
-// also safe — but the frontend only fires it on signup + email change.
+// ALO-143: lifecycle endpoints that bridge the app to Loops. The frontend
+// calls /api/lifecycle/sync after a successful signup or account-settings
+// save so contact data lands in Loops without us needing to monkey-patch
+// better-auth's user-creation hooks. The endpoint is idempotent (Loops
+// upserts by email), so calling it on every login is also safe — but the
+// frontend only fires it on signup + email change.
 
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { sendLifecycleEmail, upsertContact, type ResendEnv } from './resend';
+import { sendEvent, upsertContact, type LoopsEnv } from './loops';
 
-export interface LifecycleEnv extends ResendEnv {
+export interface LifecycleEnv extends LoopsEnv {
   DB: D1Database;
 }
 
@@ -22,7 +22,8 @@ interface SessionUser {
 type LifecycleVariables = { user: SessionUser | null };
 
 const syncBodySchema = z.object({
-  /** Optional first-time hint — when true, also sends the welcome email. */
+  /** Optional first-time hint — when true, also fires the welcome event so
+      Loops can run the new-account automation. */
   isNewSignup: z.boolean().optional().default(false),
 }).default({ isNewSignup: false });
 
@@ -42,17 +43,19 @@ lifecycleRoutes.post('/api/lifecycle/sync', async (c) => {
   }
   const { isNewSignup } = parsed.data;
 
-  const firstName = firstWord(user.name);
   const upsertResult = await upsertContact(c.env, {
     email: user.email,
-    firstName,
+    firstName: firstWord(user.name),
+    userId: user.id,
+    subscribed: true,
   });
 
   let eventResult = null;
   if (isNewSignup) {
-    eventResult = await sendLifecycleEmail(c.env, user.email, {
-      kind: 'signup',
-      firstName,
+    eventResult = await sendEvent(c.env, {
+      email: user.email,
+      eventName: 'signup',
+      eventProperties: { userId: user.id },
     });
   }
 

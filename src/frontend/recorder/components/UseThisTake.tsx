@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import { WEBCAM_PREFIX } from "../config/cameras";
 import { RecordingStatus } from "../RecordButton";
 import { cancelTranscribeOnServer } from "../helpers/cancel-transcribe";
@@ -24,7 +24,14 @@ export const UseThisTake: React.FC<{
   setRecordingStatus: React.Dispatch<React.SetStateAction<RecordingStatus>>;
   setStatus: React.Dispatch<React.SetStateAction<ProcessStatus | null>>;
 }> = ({ selectedFolder, recordingStatus, setRecordingStatus, setStatus }) => {
+  // TODO Task 16: expose uploadedR2Keys to the render-job submission UI.
+  // Collect r2Keys for each uploaded take blob. Initialized fresh each time
+  // the user clicks "Copy to public folder" so keys from prior sessions don't
+  // bleed in.
+  const uploadedR2Keys = useRef<string[]>([]);
+
   const keepVideoOnServer = useCallback(async () => {
+    uploadedR2Keys.current = [];
     if (recordingStatus.type !== "recording-finished") {
       throw new Error("Recording not finished");
     }
@@ -75,7 +82,9 @@ export const UseThisTake: React.FC<{
             mimeType: blob.mimeType,
           });
         })
-        .then(() => {
+        .then(({ r2Key }) => {
+          // TODO Task 16: pass uploadedR2Keys.current to POST /api/render/jobs
+          uploadedR2Keys.current.push(r2Key);
           setStatus(null);
         })
         .catch((err) => {

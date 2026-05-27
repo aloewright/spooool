@@ -134,3 +134,82 @@ export async function planScenes(args: {
 
 // Re-export VoiceProfile for downstream tools / tests.
 export type { VoiceProfile };
+
+export interface R2BindingEnv {
+  VIDEOS: R2Bucket;
+}
+
+const MAX_TTS_CHARS = 2000;
+
+function audioRouteUrl(env: AIGatewayEnv): string {
+  return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_GATEWAY_ID}/compat/audio/speech`;
+}
+
+function isContentPolicyResponse(body: string): boolean {
+  return /content[_ ]policy|safety/i.test(body);
+}
+
+export async function synthesizeTts(args: {
+  script: string;
+  voice: { profile: VoiceProfile; pacingWpm: number };
+  jobId: string;
+  env: AIGatewayEnv & R2BindingEnv;
+}): Promise<{ r2Key: string; durationMs: number }> {
+  if (args.script.length > MAX_TTS_CHARS) throw new Error('script too long for TTS');
+
+  const payload = {
+    model: 'dynamic/audio_gen',
+    voice: args.voice.profile,
+    input: args.script,
+    response_format: 'mp3',
+  };
+
+  let res: Response | null = null;
+  let lastErr: string = '';
+  for (let attempt = 0; attempt <= 1; attempt++) {
+    res = await fetch(audioRouteUrl(args.env), {
+      method: 'POST',
+      headers: gatewayHeaders(args.env),
+      body: JSON.stringify(payload),
+    });
+    if (res.ok && res.headers.get('content-type')?.includes('audio')) break;
+    const text = await res.clone().text().catch(() => '');
+    lastErr = text;
+    if (res.status >= 400 && res.status < 500) {
+      if (isContentPolicyResponse(text)) {
+        console.error('[create-tools] tts content-policy refusal', text.slice(0, 500));
+        throw new Error('Generation failed, please try rephrasing your prompt.');
+      }
+      break; // other 4xx — don't retry
+    }
+    if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+  }
+
+  if (!res || !res.ok || !res.headers.get('content-type')?.includes('audio')) {
+    throw new Error(`TTS synthesis failed: ${lastErr.slice(0, 200)}`);
+  }
+
+  const audioBytes = await res.arrayBuffer();
+  const r2Key = `recorder/tts/${args.jobId}.mp3`;
+
+  // Upload with 3x exponential backoff.
+  let putErr: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await args.env.VIDEOS.put(r2Key, audioBytes, { httpMetadata: { contentType: 'audio/mpeg' } });
+      putErr = null;
+      break;
+    } catch (err) {
+      putErr = err;
+      await new Promise((r) => setTimeout(r, 250 * 2 ** attempt));
+    }
+  }
+  if (putErr) throw new Error(`TTS upload failed: ${putErr instanceof Error ? putErr.message : String(putErr)}`);
+
+  // Estimate duration from script length + pacing (we don't decode the mp3 here;
+  // the renderer will use the actual audio file length).
+  const words = args.script.trim().split(/\s+/).length;
+  const durationMs = Math.round((words / args.voice.pacingWpm) * 60_000);
+
+  return { r2Key, durationMs };
+}

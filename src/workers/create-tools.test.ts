@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { draftScript, planScenes, type AIGatewayEnv } from './create-tools';
+import { draftScript, planScenes, synthesizeTts, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
 import { heroJourney } from './create/templates/hero-journey';
 
 const originalFetch = globalThis.fetch;
@@ -77,5 +77,54 @@ describe('planScenes', () => {
     mockGateway(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ scenes: many }) } }] }), { status: 200 }));
     const result = await planScenes({ script: 'x', template: heroJourney, env: envFor() });
     expect(result.scenes).toHaveLength(20);
+  });
+});
+
+describe('synthesizeTts', () => {
+  function r2Env(): R2BindingEnv {
+    const puts: Array<{ key: string; bytes: number; contentType?: string }> = [];
+    const VIDEOS = {
+      put: async (key: string, body: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }) => {
+        const bytes = body instanceof ArrayBuffer ? body.byteLength : -1;
+        puts.push({ key, bytes, contentType: opts?.httpMetadata?.contentType });
+      },
+    } as unknown as R2Bucket;
+    (VIDEOS as unknown as { _puts: typeof puts })._puts = puts;
+    return { VIDEOS };
+  }
+
+  it('calls dynamic/audio_gen, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {
+    const audioBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00]); // tiny fake mp3 header bytes
+    mockGateway(async (url) => {
+      expect(url).toContain('/audio/speech');
+      return new Response(audioBytes, { status: 200, headers: { 'content-type': 'audio/mpeg' } });
+    });
+    const env = { ...envFor(), ...r2Env() };
+    const result = await synthesizeTts({
+      script: 'Hello world.',
+      voice: { profile: 'warm', pacingWpm: 150 },
+      jobId: 'j_abc',
+      env,
+    });
+    expect(result.r2Key).toBe('recorder/tts/j_abc.mp3');
+    expect(result.durationMs).toBeGreaterThan(0);
+    const puts = (env.VIDEOS as unknown as { _puts: Array<{ key: string; contentType?: string }> })._puts;
+    expect(puts[0]).toMatchObject({ key: 'recorder/tts/j_abc.mp3', contentType: 'audio/mpeg' });
+  });
+
+  it('rejects scripts longer than 2000 chars before calling the gateway', async () => {
+    const env = { ...envFor(), ...r2Env() };
+    mockGateway(async () => new Response('should not be called', { status: 200 }));
+    await expect(
+      synthesizeTts({ script: 'x'.repeat(2001), voice: { profile: 'warm', pacingWpm: 150 }, jobId: 'j_x', env }),
+    ).rejects.toThrow(/script too long/i);
+  });
+
+  it('masks content-policy refusals with a generic message', async () => {
+    mockGateway(async () => new Response(JSON.stringify({ error: { code: 'content_policy_violation', message: 'forbidden' } }), { status: 400 }));
+    const env = { ...envFor(), ...r2Env() };
+    await expect(
+      synthesizeTts({ script: 'hi', voice: { profile: 'warm', pacingWpm: 150 }, jobId: 'j_y', env }),
+    ).rejects.toThrow(/Generation failed, please try rephrasing/);
   });
 });

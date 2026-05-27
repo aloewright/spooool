@@ -62,7 +62,9 @@ renderRoutes.post('/api/render/jobs', async (c) => {
     await c.env.DB.prepare(
       `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
     ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run();
-    return c.json({ error: 'Render service unavailable' }, 503);
+    return c.json({ error: 'Render service unavailable' }, 503, {
+      'Retry-After': '60',
+    });
   }
 
   return c.json({ jobId });

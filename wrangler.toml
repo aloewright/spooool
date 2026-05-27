@@ -111,6 +111,12 @@ sleep_after = "60s"
 default_port = 8080
 instance_type = "standard-3"
 
+# Durable Object binding for the render container. CF Containers require a
+# matching DO namespace registration so the worker can dispatch instances.
+[[durable_objects.bindings]]
+name = "RENDER_CONTAINER"
+class_name = "RenderContainer"
+
 [[migrations]]
 tag = "do_v1"
 new_classes = ["ChannelSubscriberDO"]
@@ -118,6 +124,10 @@ new_classes = ["ChannelSubscriberDO"]
 [[migrations]]
 tag = "do_v2"
 new_classes = ["RateLimiterDO"]
+
+[[migrations]]
+tag = "do_v3"
+new_classes = ["RenderContainer"]
 
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.

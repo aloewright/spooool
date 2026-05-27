@@ -37,10 +37,12 @@ export const UseThisTake: React.FC<{
       throw new Error("Recording not finished");
     }
 
-    if (selectedFolder === null) {
-      alert("Please select a folder first.");
-      return Promise.resolve();
-    }
+    // In spooool, selectedFolder is not user-selected — generate a default
+    // sessionId so the upload path is never blocked by a null folder. The
+    // upstream "Please select a folder first" guard is bypassed here because
+    // the folder-picker UI is not shown when `window.remotionServerEnabled`
+    // is forced true by Record.tsx.
+    const sessionId = selectedFolder ?? `sess_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
 
     let aborted = false;
 
@@ -78,7 +80,7 @@ export const UseThisTake: React.FC<{
             blob: convertedBlob,
             endDate: recordingStatus.endDate,
             prefix: blob.prefix,
-            selectedFolder,
+            selectedFolder: sessionId,
             expectedFrames: recordingStatus.expectedFrames,
             mimeType: blob.mimeType,
           });
@@ -126,7 +128,7 @@ export const UseThisTake: React.FC<{
         });
         return transcribeVideoOnServer({
           endDate: recordingStatus.endDate,
-          selectedFolder,
+          selectedFolder: sessionId,
           onProgress: (stat) => {
             setStatus(stat);
           },
@@ -236,7 +238,7 @@ export const UseThisTake: React.FC<{
               className={"rounded-r-none"}
               onClick={keepVideoOnServer}
             >
-              {`Copy to public/${selectedFolder}`}
+              {`Upload to Spooool`}
             </Button>
           ) : (
             <Button

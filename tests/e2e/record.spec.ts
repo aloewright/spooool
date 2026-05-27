@@ -117,6 +117,12 @@ test.describe('Recorder flow', () => {
     ]);
 
     // ── 3. Navigate to the recorder ──────────────────────────────────────
+    // TODO: Add an email verification step before navigating to /record.
+    // Currently this test fails at the "Start recording" selector wait because
+    // /record renders the "Verify your email" gate for newly-signed-up accounts.
+    // Options: (a) seed a verified user via a test fixture, (b) add a worker
+    // endpoint that auto-verifies in test mode, (c) manually verify via the
+    // email link in a real run.
     await page.goto('/record');
 
     // Wait for the recorder UI to mount. The primary indicator is the

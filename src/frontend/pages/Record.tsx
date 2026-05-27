@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { useSession } from '../lib/auth-client';
 import { RecorderRoot } from '../recorder';
 
@@ -50,6 +51,14 @@ export function Record(): JSX.Element {
       </main>
     );
   }
+
+  useEffect(() => {
+    // spooool always uses the server upload path — the recorder's local-dev
+    // folder picker is hidden behind `window.remotionServerEnabled`, but in
+    // the integrated app we want the server path enabled and the folder
+    // picker bypassed.
+    (window as unknown as { remotionServerEnabled?: boolean }).remotionServerEnabled = true;
+  }, []);
 
   return <RecorderRoot />;
 }

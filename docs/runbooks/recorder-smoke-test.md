@@ -98,7 +98,7 @@ npx wrangler r2 object list spooool-videos --prefix recorder/raw/
   ```
   Expect `completed` rows. `queued` and `rendering` are transient — jobs stuck
   in either state for more than 15 minutes are swept to `failed` by the
-  `sweepStuckJobs` cron (runs every minute via wrangler.toml).
+  `runStuckJobSweep` cron (runs every minute via wrangler.toml).
 
   Run via:
   ```sh
@@ -131,6 +131,6 @@ npx wrangler r2 object list spooool-videos --prefix recorder/raw/
 
 - Playwright E2E: `tests/e2e/record.spec.ts`
 - Render server queue logic: `container/render/src/server.ts` — `queueMax: 3`
-- Stuck-job sweeper: `src/workers/render.ts` — `sweepStuckJobs`
+- Stuck-job sweeper: `src/workers/render.ts` — `runStuckJobSweep`
 - R2 raw-take path: `src/workers/videos.ts` — `recorder/raw/${user.id}/${sessionId}/${takeId}.webm`
 - D1 backup runbook: `docs/runbooks/d1-backup-restore.md`

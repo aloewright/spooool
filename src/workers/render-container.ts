@@ -29,7 +29,19 @@ interface RenderContainerEnv {
 
 export class RenderContainer extends Container<RenderContainerEnv> {
   defaultPort = 8080;
-  sleepAfter = '60s';
+  // Container processes the render in the background via fire-and-forget
+  // `drain()`, so there's no incoming HTTP traffic to reset CF Containers'
+  // idle timer. Keep the container alive for up to 10 minutes after the
+  // last /render request so the in-progress render can finish + post its
+  // /complete callback.
+  sleepAfter = '10m';
+  // The container needs outbound internet so it can:
+  //   - pull recorder takes from R2 via the S3 API
+  //   - upload finished MP4s back to R2
+  //   - POST /progress / /complete / /fail callbacks to the worker
+  // Without this, every outbound fetch from inside the container fails and
+  // renders silently stall in the `queued` state.
+  enableInternet = true;
 
   constructor(ctx: DurableObjectState<RenderContainerEnv>, env: RenderContainerEnv) {
     super(ctx, env);

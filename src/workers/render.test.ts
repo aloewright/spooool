@@ -375,6 +375,39 @@ describe('POST /api/render/jobs', () => {
   });
 });
 
+describe('submitRenderJob (direct call)', () => {
+  it('inserts a render_jobs row, dispatches the container, returns jobId', async () => {
+    const { submitRenderJob } = await import('./render');
+    const env = envFor();
+    const result = await submitRenderJob({
+      userId: 'u_direct',
+      takeKeys: ['recorder/raw/u_direct/s/take_001.webm'],
+      compositionProps: { title: 'direct call' },
+      env,
+    });
+    expect(result.jobId).toMatch(/^j_/);
+    const rows = [...((env.DB as unknown as { rows: Map<string, { user_id: string }> }).rows.values())];
+    expect(rows).toHaveLength(1);
+    expect(rows[0].user_id).toBe('u_direct');
+    const calls = (env.RENDER_CONTAINER as unknown as { _calls: Array<{ id: string }> })._calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0].id).toBe('u_direct');
+  });
+
+  it('throws when container dispatch fails, leaving the job marked failed', async () => {
+    const { submitRenderJob } = await import('./render');
+    const env = envFor();
+    (env.RENDER_CONTAINER as unknown as { get: () => { fetch: () => Promise<Response> } }).get = () => ({
+      fetch: async () => new Response('{"error":"x"}', { status: 500 }),
+    });
+    await expect(
+      submitRenderJob({ userId: 'u_x', takeKeys: ['k'], compositionProps: {}, env }),
+    ).rejects.toThrow(/Container responded 500/);
+    const rows = [...((env.DB as unknown as { rows: Map<string, { status: string }> }).rows.values())];
+    expect(rows[0].status).toBe('failed');
+  });
+});
+
 describe('runStuckJobSweep', () => {
   it('marks jobs older than 15 minutes in rendering as failed', async () => {
     const { runStuckJobSweep } = await import('./render');

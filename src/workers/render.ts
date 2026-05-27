@@ -30,44 +30,60 @@ export const renderRoutes = new Hono<{
   Variables: RenderVariables;
 }>();
 
+export interface SubmitRenderJobInput {
+  userId: string;
+  takeKeys: string[];
+  compositionProps: Record<string, unknown>;
+  env: RenderEnv;
+}
+
+export async function submitRenderJob(input: SubmitRenderJobInput): Promise<{ jobId: string }> {
+  const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  await input.env.DB.prepare(
+    `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+  ).bind(jobId, input.userId, 'queued', JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, now).run();
+
+  const ct = input.env.RENDER_CONTAINER.get(input.env.RENDER_CONTAINER.idFromName(input.userId));
+  try {
+    const res = await ct.fetch('https://render-container/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId, takeKeys: input.takeKeys, compositionProps: input.compositionProps }),
+    });
+    if (!res.ok) {
+      const responseBody = await res.text().catch(() => '<unreadable>');
+      console.error(`[render] container dispatch ${res.status} jobId=${jobId} body=${responseBody.slice(0, 500)}`);
+      throw new Error(`Container responded ${res.status}: ${responseBody.slice(0, 200)}`);
+    }
+  } catch (err) {
+    await input.env.DB.prepare(
+      `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run();
+    throw err;
+  }
+  return { jobId };
+}
+
 renderRoutes.post('/api/render/jobs', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
   const raw = await c.req.json().catch(() => null);
   const parsed = createBodySchema.safeParse(raw);
   if (!parsed.success) {
     return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
   }
-  const { takeKeys, compositionProps } = parsed.data;
-
-  const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-  const now = Date.now();
-  await c.env.DB.prepare(
-    `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(jobId, user.id, 'queued', JSON.stringify({ takeKeys, compositionProps }), now, now).run();
-
-  // Fire-and-forget container dispatch.
-  const ct = c.env.RENDER_CONTAINER.get(c.env.RENDER_CONTAINER.idFromName(user.id));
   try {
-    const res = await ct.fetch('https://render-container/render', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jobId, takeKeys, compositionProps }),
+    const { jobId } = await submitRenderJob({
+      userId: user.id,
+      takeKeys: parsed.data.takeKeys,
+      compositionProps: parsed.data.compositionProps as Record<string, unknown>,
+      env: c.env,
     });
-    if (!res.ok) {
-      throw new Error(`Container responded ${res.status}`);
-    }
-  } catch (err) {
-    await c.env.DB.prepare(
-      `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
-    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run();
-    return c.json({ error: 'Render service unavailable' }, 503, {
-      'Retry-After': '60',
-    });
+    return c.json({ jobId });
+  } catch {
+    return c.json({ error: 'Render service unavailable' }, 503, { 'Retry-After': '60' });
   }
-
-  return c.json({ jobId });
 });
 
 function timingSafeStringEqual(a: string, b: string): boolean {

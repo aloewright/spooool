@@ -165,3 +165,25 @@ describe('WS /api/create/sessions/:id/stream', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('runAbandonedSessionsSweep', () => {
+  it('marks questioning sessions older than 24h as abandoned', async () => {
+    const { runAbandonedSessionsSweep } = await import('./create');
+    const updated: Array<unknown[]> = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...args: unknown[]) {
+            if (/UPDATE create_sessions/i.test(sql)) updated.push(args);
+            return this;
+          },
+          async run() { return { success: true }; },
+        };
+      },
+    } as unknown as D1Database;
+    await runAbandonedSessionsSweep(db, 1_700_000_000_000);
+    expect(updated).toHaveLength(1);
+    expect(updated[0][0]).toBe(1_700_000_000_000);
+    expect(updated[0][1]).toBe(1_700_000_000_000 - 24 * 60 * 60 * 1000);
+  });
+});

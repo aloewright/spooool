@@ -141,3 +141,10 @@ createRoutes.get('/api/create/jobs/:id', async (c) => {
     error: row.error_message,
   });
 });
+
+export async function runAbandonedSessionsSweep(db: D1Database, nowMs = Date.now()): Promise<void> {
+  const cutoff = nowMs - 24 * 60 * 60 * 1000;
+  await db.prepare(
+    `UPDATE create_sessions SET status='abandoned', updated_at=? WHERE status='questioning' AND updated_at < ?`,
+  ).bind(nowMs, cutoff).run();
+}

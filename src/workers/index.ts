@@ -35,7 +35,7 @@ import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
-import { createRoutes, type CreateEnv } from './create';
+import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
@@ -188,8 +188,9 @@ const workerHandlers = {
       (async () => {
         try {
           if (controller.cron === '*/5 * * * *') {
-            // Frequent sweep: render-job timeout cleanup
+            // Frequent sweep: render-job timeout cleanup + abandoned create_sessions
             await runStuckJobSweep(env.DB);
+            await runAbandonedSessionsSweep(env.DB);
             return;
           }
           if (controller.cron !== '0 2 * * *') {

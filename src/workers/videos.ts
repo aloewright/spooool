@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
@@ -304,6 +304,136 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   });
 });
 
+type VideoRoutesContext = Context<{
+  Bindings: VideoRoutesEnv;
+  Variables: VideoRoutesVariables;
+}>;
+
+async function handleRecorderUpload(
+  c: VideoRoutesContext,
+  formData: FormData,
+): Promise<Response> {
+  const env = c.env;
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (user.emailVerified === false) {
+    return c.json({ error: 'Verify your email before recording.', code: 'email_unverified' }, 403);
+  }
+
+  const sessionId = formData.get('sessionId') as string | null;
+  const takeId = formData.get('takeId') as string | null;
+  const rawFile = formData.get('file');
+
+  if (!sessionId || !takeId) {
+    return c.json({ error: 'sessionId and takeId required for recorder uploads' }, 400);
+  }
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(sessionId) || !/^[A-Za-z0-9_-]{1,64}$/.test(takeId)) {
+    return c.json({ error: 'invalid sessionId or takeId' }, 400);
+  }
+
+  const earlyUploadId = formData.get('uploadId') as string | null;
+  if (earlyUploadId && !/^[A-Za-z0-9_-]{1,64}$/.test(earlyUploadId)) {
+    return c.json({ error: 'invalid uploadId' }, 400);
+  }
+  if (!(rawFile instanceof File)) {
+    return c.json({ error: 'File is required' }, 400);
+  }
+
+  const chunkParsed = parseChunkMetadataFromFormData(formData);
+  if (!chunkParsed.success) {
+    return c.json({ error: 'Invalid chunk metadata', details: chunkParsed.error.flatten() }, 400);
+  }
+  const { uploadId, chunkIndex, chunkCount } = chunkParsed.data;
+
+  const chunkError = validateChunkShape({ chunkSize: rawFile.size, chunkIndex, chunkCount });
+  if (chunkError) return c.json({ error: chunkError.message, code: chunkError.code }, 400);
+
+  const r2Key = `recorder/raw/${user.id}/${sessionId}/${takeId}.webm`;
+
+  // Single-chunk upload: write directly to R2.
+  if (chunkCount === 1) {
+    await env.VIDEOS.put(r2Key, rawFile.stream(), {
+      httpMetadata: { contentType: 'video/webm' },
+    });
+    return c.json({ ok: true, r2Key });
+  }
+
+  // Multi-chunk: KV-backed R2 multipart keyed under :rec: to avoid collisions
+  // with the video-upload namespace.
+  const resolvedUploadId = uploadId ?? crypto.randomUUID();
+  const baseKvKey = `upload:rec:${user.id}:${resolvedUploadId}`;
+  const mpidKey = `${baseKvKey}:mpid`;
+  const metaKey = `${baseKvKey}:meta`;
+  const partsKey = `${baseKvKey}:parts`;
+
+  if (chunkIndex === 0) {
+    const multipart = await env.VIDEOS.createMultipartUpload(r2Key, {
+      httpMetadata: { contentType: 'video/webm' },
+    });
+    const firstPart = await multipart.uploadPart(1, rawFile.stream());
+    await env.SESSIONS.put(mpidKey, multipart.uploadId, { expirationTtl: 86400 });
+    await env.SESSIONS.put(
+      metaKey,
+      JSON.stringify({ r2Key, chunkCount }),
+      { expirationTtl: 86400 },
+    );
+    await env.SESSIONS.put(
+      partsKey,
+      JSON.stringify({ '1': { etag: firstPart.etag, size: rawFile.size } } as Record<string, { etag: string; size: number }>),
+      { expirationTtl: 86400 },
+    );
+    return c.json({ status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId }, 202);
+  }
+
+  const [multipartUploadId, uploadMetaJson, partsJson] = await Promise.all([
+    env.SESSIONS.get(mpidKey),
+    env.SESSIONS.get(metaKey),
+    env.SESSIONS.get(partsKey),
+  ]);
+
+  if (!multipartUploadId || !uploadMetaJson) {
+    // KV session expired (24h TTL) but multipart may still exist in R2.
+    // Best-effort abort so we don't leak parts. The key was deterministic so
+    // even without metaKey we know the R2 key from the request inputs.
+    if (multipartUploadId) {
+      const recoveryKey = `recorder/raw/${user.id}/${sessionId}/${takeId}.webm`;
+      await c.env.VIDEOS.resumeMultipartUpload(recoveryKey, multipartUploadId).abort().catch(() => {});
+    }
+    return c.json({ error: 'Missing upload session. Start with chunkIndex=0.' }, 400);
+  }
+
+  const uploadMeta = JSON.parse(uploadMetaJson) as { r2Key: string; chunkCount: number };
+  const uploadedPartsMap: Record<string, { etag: string; size: number }> = partsJson
+    ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
+    : {};
+
+  const multipart = env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId);
+  const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
+  uploadedPartsMap[String(chunkIndex + 1)] = { etag: uploadedPart.etag, size: rawFile.size };
+  await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), { expirationTtl: 86400 });
+
+  if (chunkIndex < chunkCount - 1) {
+    return c.json({ status: 'chunk_received', chunkIndex, chunkCount }, 202);
+  }
+
+  const completedParts = Object.entries(uploadedPartsMap)
+    .map(([partNumber, part]) => ({ partNumber: Number(partNumber), etag: part.etag }))
+    .sort((a, b) => a.partNumber - b.partNumber);
+
+  if (completedParts.length !== chunkCount) {
+    return c.json({ error: 'Missing one or more chunks before completion' }, 400);
+  }
+
+  await multipart.complete(completedParts);
+  await Promise.all([
+    env.SESSIONS.delete(mpidKey),
+    env.SESSIONS.delete(metaKey),
+    env.SESSIONS.delete(partsKey),
+  ]);
+
+  return c.json({ ok: true, r2Key: uploadMeta.r2Key, uploadId: resolvedUploadId });
+}
+
 videoRoutes.post('/api/videos/upload', async (c) => {
   const env = c.env;
   const user = c.get('user');
@@ -321,6 +451,10 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   }
 
   const formData = await c.req.formData();
+  const target = (formData.get('target') as string | null) ?? 'video';
+  if (target === 'recorder') {
+    return handleRecorderUpload(c, formData);
+  }
   const rawTitle = formData.get('title');
   const rawDescription = formData.get('description');
   const rawFile = formData.get('file');

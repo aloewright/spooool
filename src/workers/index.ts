@@ -34,6 +34,7 @@ import { handleStreamWebhook } from './stream-webhook';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
+import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
@@ -45,7 +46,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -151,6 +152,7 @@ app.route('/', costsRoutes);
 app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
+app.route('/', renderRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
@@ -161,6 +163,7 @@ app.route('/', tagRoutes);
 app.route('/', ogMetaRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
+export { RenderContainer } from './render-container';
 
 const workerHandlers = {
   fetch: app.fetch,
@@ -178,11 +181,21 @@ const workerHandlers = {
     }
   },
   async scheduled(controller: ScheduledController, env: EnvBindings, ctx: ExecutionContext): Promise<void> {
-    // ALO-132: hard-delete users whose 30-day grace window has elapsed.
-    // The cron is configured in wrangler.toml under [triggers] crons.
     ctx.waitUntil(
       (async () => {
         try {
+          if (controller.cron === '*/5 * * * *') {
+            // Frequent sweep: render-job timeout cleanup
+            await runStuckJobSweep(env.DB);
+            return;
+          }
+          if (controller.cron !== '0 2 * * *') {
+            console.warn('[scheduled] unrecognized cron', { cron: controller.cron });
+            return;
+          }
+          // Daily 02:00 UTC heavy sweeps
+          // ALO-132: hard-delete users whose 30-day grace window has elapsed.
+          // The cron is configured in wrangler.toml under [triggers] crons.
           const stats = await runDeletionSweep(env);
           if (stats.length > 0) {
             console.log('[deletion-sweep]', { cron: controller.cron, deleted: stats });

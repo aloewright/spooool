@@ -67,3 +67,30 @@ describe('ComposerAgent DO', () => {
     await expect(agent.prime({ userId: 'u_1', templateId: 'nonexistent' })).rejects.toThrow(/template/);
   });
 });
+
+describe('ComposerAgent HTTP layer', () => {
+  it('POST /prime calls prime() and returns the first question', async () => {
+    const agent = new ComposerAgent(fakeCtx(), envFor());
+    const res = await agent.fetch(new Request('https://x/prime', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'u_1', templateId: 'hero-journey' }),
+    }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { firstQuestion: { id: string } };
+    expect(body.firstQuestion.id).toBe('protagonist');
+  });
+
+  it('GET /snapshot returns persisted state', async () => {
+    const agent = new ComposerAgent(fakeCtx(), envFor());
+    await agent.fetch(new Request('https://x/prime', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userId: 'u_1', templateId: 'hero-journey' }),
+    }));
+    const res = await agent.fetch(new Request('https://x/snapshot', { method: 'GET' }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { status: string; answers: Record<string, string> };
+    expect(body.status).toBe('questioning');
+  });
+});

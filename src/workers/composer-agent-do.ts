@@ -134,4 +134,35 @@ export class ComposerAgent {
       throw err;
     }
   }
+
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    try {
+      if (request.method === 'POST' && url.pathname === '/prime') {
+        const body = await request.json() as { userId?: string; templateId?: string };
+        if (!body.userId || !body.templateId) return Response.json({ error: 'userId and templateId required' }, { status: 400 });
+        const r = await this.prime({ userId: body.userId, templateId: body.templateId });
+        return Response.json(r, { status: 200 });
+      }
+      if (request.method === 'POST' && url.pathname === '/answer') {
+        const body = await request.json() as { text?: string };
+        if (typeof body.text !== 'string') return Response.json({ error: 'text required' }, { status: 400 });
+        const r = await this.answer(body.text);
+        return Response.json(r, { status: 200 });
+      }
+      if (request.method === 'GET' && url.pathname === '/snapshot') {
+        const r = await this.snapshot();
+        return Response.json(r, { status: 200 });
+      }
+      if (request.method === 'POST' && url.pathname === '/generate') {
+        const stages: string[] = [];
+        const r = await this.generate((stage) => { stages.push(stage); });
+        return Response.json({ ...r, stages }, { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: msg }, { status: 500 });
+    }
+  }
 }

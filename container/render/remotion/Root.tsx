@@ -5,6 +5,7 @@ import { Main } from "./Main";
 import { calcMetadata } from "./calculate-metadata/calc-metadata";
 import { SpoooolVideo, FRAMES_PER_TAKE } from "./SpoooolVideo";
 import type { SpoooolVideoProps } from "./SpoooolVideo";
+import { SpoooolExplainer, calculateExplainerDuration } from "./SpoooolExplainer";
 
 const SPOOOOL_DEFAULT_PROPS: SpoooolVideoProps = {
   takes: [] as string[],
@@ -28,6 +29,23 @@ export const RemotionRoot = () => {
         defaultProps={SPOOOOL_DEFAULT_PROPS}
         calculateMetadata={({ props }) => ({
           durationInFrames: Math.max(1, props.takes.length) * FRAMES_PER_TAKE,
+        })}
+      />
+      {/* spooool-explainer — prompt-to-video composition driven by ComposerAgent */}
+      <Composition
+        id="spooool-explainer"
+        component={SpoooolExplainer}
+        width={1920}
+        height={1080}
+        fps={30}
+        durationInFrames={1}
+        defaultProps={{
+          scenes: [],
+          audio: { r2Path: "" },
+          brand: { color: "#0a84ff" },
+        }}
+        calculateMetadata={({ props }) => ({
+          durationInFrames: calculateExplainerDuration(props.scenes ?? []),
         })}
       />
       {/* Upstream recorder compositions — kept intact for reference / future use */}

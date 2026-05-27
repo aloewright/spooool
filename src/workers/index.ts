@@ -35,6 +35,7 @@ import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
+import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
@@ -46,7 +47,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -153,6 +154,7 @@ app.route('/', lifecycleRoutes);
 app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
+app.route('/', createRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
@@ -164,6 +166,7 @@ app.route('/', ogMetaRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
 export { RenderContainer } from './render-container';
+export { ComposerAgent } from './composer-agent-do';
 
 const workerHandlers = {
   fetch: app.fetch,
@@ -185,8 +188,9 @@ const workerHandlers = {
       (async () => {
         try {
           if (controller.cron === '*/5 * * * *') {
-            // Frequent sweep: render-job timeout cleanup
+            // Frequent sweep: render-job timeout cleanup + abandoned create_sessions
             await runStuckJobSweep(env.DB);
+            await runAbandonedSessionsSweep(env.DB);
             return;
           }
           if (controller.cron !== '0 2 * * *') {

@@ -116,4 +116,33 @@ describe('renderJob', () => {
     expect(r1.bundle).toHaveBeenCalledTimes(1);
     expect(r2.bundle).toHaveBeenCalledTimes(1);
   });
+
+  it('downloads TTS audio when compositionProps.audio.r2Key is set, places it at public/{jobId}/audio.mp3', async () => {
+    const downloaded: Array<{ key: string; dest: string }> = [];
+    const renderer: RemotionRenderer = {
+      bundle: vi.fn(async () => '/bundle'),
+      selectComposition: vi.fn(async () => ({ id: 'spooool-explainer', durationInFrames: 60, fps: 30, width: 1920, height: 1080 })),
+      renderMedia: vi.fn(async () => {}),
+    };
+    await renderJob(
+      {
+        jobId: 'j_p2v',
+        takeKeys: [],
+        compositionProps: {
+          compositionId: 'spooool-explainer',
+          scenes: [{ type: 'title', durationFrames: 60, text: 'hi' }],
+          audio: { r2Key: 'recorder/tts/j_p2v.mp3' },
+        },
+        onProgress: () => {},
+      },
+      {
+        renderer,
+        downloadTake: vi.fn(async (key: string, dest: string) => { downloaded.push({ key, dest }); }),
+        tmpDir: '/tmp',
+        publicDir: '/bundle/public',
+        remotionEntry: '/remotion/index.ts',
+      },
+    );
+    expect(downloaded.some((d) => d.key === 'recorder/tts/j_p2v.mp3' && d.dest.endsWith('/j_p2v/audio.mp3'))).toBe(true);
+  });
 });

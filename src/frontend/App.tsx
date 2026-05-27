@@ -44,6 +44,7 @@ const Onboarding = lazy(() =>
 const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
+const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -706,6 +707,14 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Record />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/create"
+            element={
+              <RequireAuth>
+                <Create />
               </RequireAuth>
             }
           />

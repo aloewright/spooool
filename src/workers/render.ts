@@ -30,44 +30,83 @@ export const renderRoutes = new Hono<{
   Variables: RenderVariables;
 }>();
 
+export interface SubmitRenderJobInput {
+  userId: string;
+  takeKeys: string[];
+  compositionProps: Record<string, unknown>;
+  env: RenderEnv;
+  /**
+   * If the caller already inserted the render_jobs row (e.g., the
+   * auto-mode route pre-inserts with status='queued' so it can return
+   * the jobId synchronously and run the toolchain via waitUntil), pass
+   * the existing jobId here and the INSERT will be skipped.
+   *
+   * This also lets callers thread ONE jobId end-to-end so the TTS R2 key
+   * (`recorder/tts/{jobId}.mp3`) matches the final render job id.
+   */
+  existingJobId?: string;
+}
+
+export async function submitRenderJob(input: SubmitRenderJobInput): Promise<{ jobId: string }> {
+  const jobId = input.existingJobId ?? `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  if (!input.existingJobId) {
+    await input.env.DB.prepare(
+      `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(jobId, input.userId, 'queued', JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, now).run();
+  } else {
+    // Caller already inserted the row, but composition_spec was unknown at
+    // that point. Patch it in now so the recorded job mirrors what was
+    // actually dispatched to the container.
+    await input.env.DB.prepare(
+      `UPDATE render_jobs SET composition_spec=?, updated_at=? WHERE id=?`,
+    ).bind(JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, jobId).run();
+  }
+
+  const ct = input.env.RENDER_CONTAINER.get(input.env.RENDER_CONTAINER.idFromName(input.userId));
+  try {
+    const res = await ct.fetch('https://render-container/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId, takeKeys: input.takeKeys, compositionProps: input.compositionProps }),
+    });
+    if (!res.ok) {
+      const responseBody = await res.text().catch(() => '<unreadable>');
+      console.error(`[render] container dispatch ${res.status} jobId=${jobId} body=${responseBody.slice(0, 500)}`);
+      throw new Error(`Container responded ${res.status}: ${responseBody.slice(0, 200)}`);
+    }
+  } catch (err) {
+    // Best-effort row-fail; never let a secondary D1 error mask the original
+    // container error since callers (HTTP handler, future tools/agents) act
+    // on the thrown error. runStuckJobSweep catches abandoned rows.
+    await input.env.DB.prepare(
+      `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run()
+      .catch((dbErr) => console.error(`[render] failed to mark job ${jobId} as failed:`, dbErr));
+    throw err;
+  }
+  return { jobId };
+}
+
 renderRoutes.post('/api/render/jobs', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-
   const raw = await c.req.json().catch(() => null);
   const parsed = createBodySchema.safeParse(raw);
   if (!parsed.success) {
     return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
   }
-  const { takeKeys, compositionProps } = parsed.data;
-
-  const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-  const now = Date.now();
-  await c.env.DB.prepare(
-    `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(jobId, user.id, 'queued', JSON.stringify({ takeKeys, compositionProps }), now, now).run();
-
-  // Fire-and-forget container dispatch.
-  const ct = c.env.RENDER_CONTAINER.get(c.env.RENDER_CONTAINER.idFromName(user.id));
   try {
-    const res = await ct.fetch('https://render-container/render', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jobId, takeKeys, compositionProps }),
+    const { jobId } = await submitRenderJob({
+      userId: user.id,
+      takeKeys: parsed.data.takeKeys,
+      compositionProps: parsed.data.compositionProps as Record<string, unknown>,
+      env: c.env,
     });
-    if (!res.ok) {
-      throw new Error(`Container responded ${res.status}`);
-    }
-  } catch (err) {
-    await c.env.DB.prepare(
-      `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
-    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run();
-    return c.json({ error: 'Render service unavailable' }, 503, {
-      'Retry-After': '60',
-    });
+    return c.json({ jobId });
+  } catch {
+    return c.json({ error: 'Render service unavailable' }, 503, { 'Retry-After': '60' });
   }
-
-  return c.json({ jobId });
 });
 
 function timingSafeStringEqual(a: string, b: string): boolean {

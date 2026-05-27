@@ -110,7 +110,7 @@ class_name = "RateLimiterDO"
 # Dockerfile / container source change before deploying.
 [[containers]]
 class_name = "RenderContainer"
-image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.0"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.4"
 max_instances = 50
 instance_type = "standard-3"
 
@@ -119,6 +119,11 @@ instance_type = "standard-3"
 [[durable_objects.bindings]]
 name = "RENDER_CONTAINER"
 class_name = "RenderContainer"
+
+# ComposerAgent DO — per-session state for guided prompt-to-video flow.
+[[durable_objects.bindings]]
+name = "COMPOSER_AGENT"
+class_name = "ComposerAgent"
 
 [[migrations]]
 tag = "do_v1"
@@ -131,6 +136,10 @@ new_classes = ["RateLimiterDO"]
 [[migrations]]
 tag = "do_v3"
 new_sqlite_classes = ["RenderContainer"]
+
+[[migrations]]
+tag = "do_v4"
+new_sqlite_classes = ["ComposerAgent"]
 
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
@@ -166,6 +175,9 @@ EMAIL_FROM_NAME = "Spooool"
 # POLAR_WEBHOOK_SECRET    (HMAC secret to verify Polar webhook signatures)
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
 # RENDER_CALLBACK_SECRET    (recorder render — random 32+ byte hex, shared with the container service)
+# CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL)
+# CF_GATEWAY_ID           (e.g. "x"; the gateway slug used in CLAUDE.md)
+# CF_AIG_TOKEN            (Bearer token from CF dashboard → AI → AI Gateway)
 #
 # Transactional email is sent via the Cloudflare `send_email` binding above
 # (no API key needed). One-time setup: `npx wrangler email sending enable

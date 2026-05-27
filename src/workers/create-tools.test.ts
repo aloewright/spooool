@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { draftScript, planScenes, synthesizeTts, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
 import { heroJourney } from './create/templates/hero-journey';
+import type { RenderEnv } from './render';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
@@ -126,5 +127,46 @@ describe('synthesizeTts', () => {
     await expect(
       synthesizeTts({ script: 'hi', voice: { profile: 'warm', pacingWpm: 150 }, jobId: 'j_y', env }),
     ).rejects.toThrow(/Generation failed, please try rephrasing/);
+  });
+});
+
+describe('finalizeRender', () => {
+  it('calls submitRenderJob with compositionId=spooool-explainer and the scenes + audio key', async () => {
+    const seen: Array<{ userId: string; takeKeys: string[]; compositionProps: Record<string, unknown> }> = [];
+    const renderEnv = {
+      DB: {
+        prepare: () => ({ bind: () => ({ run: async () => ({ success: true }) }) }),
+      } as unknown as D1Database,
+      RENDER_CONTAINER: {
+        idFromName: (name: string) => ({ name } as unknown as DurableObjectId),
+        get: () => ({ fetch: async () => new Response('{}', { status: 200 }) }),
+      } as unknown as DurableObjectNamespace,
+      RENDER_CALLBACK_SECRET: 's',
+      VIDEO_ENCODING: { send: async () => {} } as unknown as Queue<{ videoId: string; r2Key: string }>,
+    } as RenderEnv;
+
+    // Spy by wrapping submitRenderJob via env-injected helper.
+    const submitSpy = vi.fn(async (input: { userId: string; takeKeys: string[]; compositionProps: Record<string, unknown> }) => {
+      seen.push(input);
+      return { jobId: 'j_finalize' };
+    });
+
+    const result = await finalizeRender({
+      userId: 'u_1',
+      scenes: [{ type: 'title', durationFrames: 60, text: 'hi' }],
+      ttsR2Key: 'recorder/tts/j_test.mp3',
+      env: renderEnv,
+      submitRenderJob: submitSpy,
+    });
+
+    expect(result.jobId).toBe('j_finalize');
+    expect(submitSpy).toHaveBeenCalledTimes(1);
+    expect(seen[0].userId).toBe('u_1');
+    expect(seen[0].takeKeys).toEqual([]);
+    expect(seen[0].compositionProps).toMatchObject({
+      compositionId: 'spooool-explainer',
+      scenes: [{ type: 'title', durationFrames: 60, text: 'hi' }],
+      audio: { r2Key: 'recorder/tts/j_test.mp3' },
+    });
   });
 });

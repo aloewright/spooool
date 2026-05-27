@@ -5,6 +5,7 @@
 // network / R2 calls so unit tests can mock fetch.
 
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
+import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
 
 export interface AIGatewayEnv {
   CF_ACCOUNT_ID: string;
@@ -212,4 +213,28 @@ export async function synthesizeTts(args: {
   const durationMs = Math.round((words / args.voice.pacingWpm) * 60_000);
 
   return { r2Key, durationMs };
+}
+
+export interface FinalizeRenderInput {
+  userId: string;
+  scenes: SceneSpec[];
+  ttsR2Key: string;
+  env: RenderEnv;
+  /** Injected for tests; defaults to the real `submitRenderJob`. */
+  submitRenderJob?: (input: SubmitRenderJobInput) => Promise<{ jobId: string }>;
+}
+
+export async function finalizeRender(input: FinalizeRenderInput): Promise<{ jobId: string }> {
+  const submit = input.submitRenderJob ?? defaultSubmitRenderJob;
+  return submit({
+    userId: input.userId,
+    takeKeys: [], // no recorder takes for prompt-to-video
+    compositionProps: {
+      compositionId: 'spooool-explainer',
+      scenes: input.scenes,
+      audio: { r2Key: input.ttsR2Key },
+      brand: { color: '#0a84ff' },
+    },
+    env: input.env,
+  });
 }

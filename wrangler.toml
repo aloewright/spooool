@@ -103,9 +103,14 @@ class_name = "RateLimiterDO"
 
 # Recorder render pipeline (sub-project #1). Per-account container that
 # runs Remotion + Chromium + ffmpeg to composite recorded takes.
+#
+# Image is pre-built and pushed to CF's managed registry via
+#   `npx wrangler containers build container/render --tag spooool-render:<ver> --push`
+# because Workers Builds CI does not have Docker. Bump the version on every
+# Dockerfile / container source change before deploying.
 [[containers]]
 class_name = "RenderContainer"
-image = "./container/render/Dockerfile"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.0"
 max_instances = 50
 instance_type = "standard-3"
 

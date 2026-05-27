@@ -63,11 +63,13 @@ jobs:
       - name: Sync worker secrets from Doppler
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
-        run: node scripts/sync-doppler-secrets.mjs sync-worker-secrets --env=production
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          node scripts/sync-doppler-secrets.mjs sync-worker-secrets
 
       - name: Deploy worker (production)
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
         run: |
           eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
-          npx wrangler deploy --env production
+          npx wrangler deploy

@@ -98,6 +98,29 @@ createRoutes.post('/api/create/sessions', async (c) => {
   return c.json({ sessionId, firstQuestion: primeBody.firstQuestion });
 });
 
+createRoutes.get('/api/create/sessions/:id/stream', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (c.req.header('upgrade') !== 'websocket') return c.json({ error: 'Expected WebSocket upgrade' }, 426);
+  const sessionId = c.req.param('id');
+  // Owner check via DB
+  const row = await c.env.DB.prepare(`SELECT user_id FROM create_sessions WHERE id = ?`).bind(sessionId).first<{ user_id: string }>();
+  if (!row || row.user_id !== user.id) return c.json({ error: 'Not found' }, 404);
+  const stub = c.env.COMPOSER_AGENT.get(c.env.COMPOSER_AGENT.idFromName(sessionId));
+  return stub.fetch(new Request(`https://composer-agent/stream`, c.req.raw));
+});
+
+createRoutes.get('/api/create/sessions/:id', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  const id = c.req.param('id');
+  const row = await c.env.DB.prepare(`SELECT user_id FROM create_sessions WHERE id = ?`).bind(id).first<{ user_id: string }>();
+  if (!row || row.user_id !== user.id) return c.json({ error: 'Not found' }, 404);
+  const stub = c.env.COMPOSER_AGENT.get(c.env.COMPOSER_AGENT.idFromName(id));
+  const res = await stub.fetch('https://composer-agent/snapshot', { method: 'GET' });
+  return new Response(res.body, { status: res.status, headers: res.headers });
+});
+
 createRoutes.get('/api/create/jobs/:id', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);

@@ -23,6 +23,12 @@ function stubDB() {
           }
           return { success: true };
         },
+        async first<T>(): Promise<T | null> {
+          if (/SELECT user_id FROM create_sessions WHERE id = \?/i.test(sql)) {
+            return { user_id: 'u_1' } as T;
+          }
+          return null;
+        },
       };
     },
     rows,
@@ -31,20 +37,23 @@ function stubDB() {
 }
 
 function stubComposer() {
-  const calls: Array<{ method: string; args: unknown[] }> = [];
   const ns = {
     idFromName(name: string) { return { name } as unknown as DurableObjectId; },
     get() {
       return {
-        async fetch(url: string, init?: RequestInit) {
-          calls.push({ method: 'fetch', args: [url, init?.body] });
+        async fetch(url: string | Request, init?: RequestInit) {
+          const u = typeof url === 'string' ? url : url.url;
+          if (u.endsWith('/stream')) {
+            // Node's undici Response forbids status 101 — fake it with a
+            // plain object that Hono passes through unchanged.
+            return { status: 101, body: null, headers: new Headers() } as unknown as Response;
+          }
           return new Response(JSON.stringify({ firstQuestion: { id: 'protagonist', text: 'Who is the protagonist?' } }), { status: 200 });
         },
       };
     },
-  } as unknown as DurableObjectNamespace;
-  (ns as unknown as { _calls: typeof calls })._calls = calls;
-  return ns;
+  };
+  return ns as unknown as DurableObjectNamespace;
 }
 
 function envFor(extra: Partial<CreateEnv> = {}): CreateEnv {
@@ -132,5 +141,27 @@ describe('POST /api/create/sessions', () => {
     const body = await res.json() as { sessionId: string; firstQuestion: { id: string } };
     expect(body.sessionId).toMatch(/^s_/);
     expect(body.firstQuestion.id).toBe('protagonist');
+  });
+});
+
+describe('WS /api/create/sessions/:id/stream', () => {
+  it('upgrades the connection and forwards to the DO', async () => {
+    const { app, env } = buildApp({ id: 'u_1' });
+    const res = await app.request(
+      '/api/create/sessions/s_abc/stream',
+      { method: 'GET', headers: { upgrade: 'websocket' } },
+      env,
+    );
+    expect(res.status).toBe(101);
+  });
+
+  it('401 without session', async () => {
+    const { app, env } = buildApp(null);
+    const res = await app.request(
+      '/api/create/sessions/s_abc/stream',
+      { method: 'GET', headers: { upgrade: 'websocket' } },
+      env,
+    );
+    expect(res.status).toBe(401);
   });
 });

@@ -159,6 +159,33 @@ export class ComposerAgent {
         const r = await this.generate((stage) => { stages.push(stage); });
         return Response.json({ ...r, stages }, { status: 200 });
       }
+      if (request.method === 'GET' && url.pathname === '/stream') {
+        if (request.headers.get('upgrade') !== 'websocket') {
+          return new Response('Expected WebSocket', { status: 426 });
+        }
+        const pair = new WebSocketPair();
+        const [client, server] = Object.values(pair);
+        server.accept();
+        server.addEventListener('message', async (evt) => {
+          try {
+            const msg = JSON.parse(typeof evt.data === 'string' ? evt.data : new TextDecoder().decode(evt.data as ArrayBuffer)) as { type: 'answer' | 'generate'; text?: string };
+            if (msg.type === 'answer') {
+              const r = await this.answer(msg.text ?? '');
+              server.send(JSON.stringify(r));
+            } else if (msg.type === 'generate') {
+              const r = await this.generate((stage) => {
+                server.send(JSON.stringify({ type: 'status', stage }));
+              });
+              server.send(JSON.stringify({ type: 'render_started', jobId: r.jobId }));
+            } else {
+              server.send(JSON.stringify({ type: 'error', error: 'unknown message type' }));
+            }
+          } catch (err) {
+            server.send(JSON.stringify({ type: 'error', error: err instanceof Error ? err.message : String(err) }));
+          }
+        });
+        return new Response(null, { status: 101, webSocket: client });
+      }
       return new Response('Not found', { status: 404 });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

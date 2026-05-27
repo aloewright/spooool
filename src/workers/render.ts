@@ -57,9 +57,13 @@ export async function submitRenderJob(input: SubmitRenderJobInput): Promise<{ jo
       throw new Error(`Container responded ${res.status}: ${responseBody.slice(0, 200)}`);
     }
   } catch (err) {
+    // Best-effort row-fail; never let a secondary D1 error mask the original
+    // container error since callers (HTTP handler, future tools/agents) act
+    // on the thrown error. runStuckJobSweep catches abandoned rows.
     await input.env.DB.prepare(
       `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
-    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run();
+    ).bind(`Container dispatch failed: ${err instanceof Error ? err.message : String(err)}`, Date.now(), jobId).run()
+      .catch((dbErr) => console.error(`[render] failed to mark job ${jobId} as failed:`, dbErr));
     throw err;
   }
   return { jobId };

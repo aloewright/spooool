@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
-import { renderRoutes, type RenderEnv } from './render';
+import { renderRoutes, submitRenderJob, type RenderEnv } from './render';
 
 type SessionUser = { id: string } | null;
 
@@ -377,7 +377,6 @@ describe('POST /api/render/jobs', () => {
 
 describe('submitRenderJob (direct call)', () => {
   it('inserts a render_jobs row, dispatches the container, returns jobId', async () => {
-    const { submitRenderJob } = await import('./render');
     const env = envFor();
     const result = await submitRenderJob({
       userId: 'u_direct',
@@ -395,7 +394,6 @@ describe('submitRenderJob (direct call)', () => {
   });
 
   it('throws when container dispatch fails, leaving the job marked failed', async () => {
-    const { submitRenderJob } = await import('./render');
     const env = envFor();
     (env.RENDER_CONTAINER as unknown as { get: () => { fetch: () => Promise<Response> } }).get = () => ({
       fetch: async () => new Response('{"error":"x"}', { status: 500 }),

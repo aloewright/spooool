@@ -11,11 +11,11 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { getTemplate, listTemplateMetadata } from './create/templates';
 import { runOneShotCMA as defaultRunOneShotCMA } from './create-cma';
-import type { AIGatewayEnv, R2BindingEnv } from './create-tools';
+import type { AIBindingEnv, AIGatewayEnv, R2BindingEnv } from './create-tools';
 import type { RenderEnv } from './render';
 import { CREATE_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 
-export interface CreateEnv extends AIGatewayEnv, R2BindingEnv, RenderEnv {
+export interface CreateEnv extends AIGatewayEnv, R2BindingEnv, AIBindingEnv, RenderEnv {
   DB: D1Database;
   COMPOSER_AGENT: DurableObjectNamespace;
   /** Optional — fail-open in local dev / tests when the binding isn't wired. */

@@ -12,7 +12,10 @@ workers_dev = true
 enabled = true
 # Sample successful traffic so high-QPS routes don't dominate quota.
 # Errors / non-2xx responses always log regardless of sample rate.
-head_sampling_rate = 0.2
+# Temporarily 1.0 while we debug the prompt-to-video toolchain — the
+# create-cma stage logs were getting sampled out, making the worker look
+# silent on every poll. Dial back to ~0.2 once /create is stable.
+head_sampling_rate = 1.0
 
 # Static Frontend Assets (built by Vite → dist/)
 [assets]
@@ -89,6 +92,15 @@ binding = "CF_VERSION_METADATA"
 # SPF / DKIM / DMARC records propagated before the first send.
 [[send_email]]
 name = "EMAIL"
+
+# Workers AI binding for synthesizeTts (sub-#4). We call
+# `env.AI.run("@cf/deepgram/aura-2-en", ..., { gateway: { id: 'spooool' } })`
+# so the TTS audio goes through the user's `spooool` AI Gateway for
+# observability + caching, while bypassing the dynamic-route fallback
+# chain (which requires per-provider request shapes — see
+# notes in src/workers/create-tools.ts).
+[ai]
+binding = "AI"
 
 # Durable Object — channel subscriber fan-out (ALO-156)
 [[durable_objects.bindings]]

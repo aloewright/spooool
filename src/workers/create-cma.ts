@@ -7,11 +7,11 @@
 // branch / re-plan, swap this for a true CMA invocation that calls the
 // same tool functions.
 
-import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
 import { getTemplate } from './create/templates';
 import type { RenderEnv } from './render';
 
-export type CMAEnv = AIGatewayEnv & R2BindingEnv & RenderEnv;
+export type CMAEnv = AIGatewayEnv & R2BindingEnv & AIBindingEnv & RenderEnv;
 
 export interface CMARunDeps {
   draftScript: typeof draftScript;
@@ -67,9 +67,20 @@ export async function runOneShotCMA(args: {
   const { scenes } = await d.planScenes({ script, template: t, env: args.env });
   console.log('[create-cma] plan_scenes ok', { jobId: args.jobId, duration_ms: Date.now() - tPlan, scene_count: scenes.length });
 
+  // TTS failure is non-fatal — render the video silently rather than
+  // strand the user with no output. Content-policy refusals from the TTS
+  // provider DO bubble (they're user-facing).
   const tTts = Date.now();
-  const { r2Key } = await d.synthesizeTts({ script, voice: t.voice, jobId: args.jobId, env: args.env });
-  console.log('[create-cma] synthesize_tts ok', { jobId: args.jobId, duration_ms: Date.now() - tTts, r2Key });
+  let r2Key: string | undefined;
+  try {
+    const result = await d.synthesizeTts({ script, voice: t.voice, jobId: args.jobId, env: args.env });
+    r2Key = result.r2Key;
+    console.log('[create-cma] synthesize_tts ok', { jobId: args.jobId, duration_ms: Date.now() - tTts, r2Key });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/Generation failed, please try rephrasing/.test(msg)) throw err;
+    console.warn('[create-cma] synthesize_tts failed — rendering silent video', { jobId: args.jobId, duration_ms: Date.now() - tTts, msg: msg.slice(0, 200) });
+  }
 
   const tFin = Date.now();
   const { jobId } = await d.finalizeRender({

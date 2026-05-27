@@ -140,60 +140,92 @@ export interface R2BindingEnv {
   VIDEOS: R2Bucket;
 }
 
-const MAX_TTS_CHARS = 2000;
-
-function audioRouteUrl(env: AIGatewayEnv): string {
-  return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_GATEWAY_ID}/compat/audio/speech`;
+/**
+ * Workers AI binding. Required by `synthesizeTts` because:
+ *
+ *   1. AI Gateway's `/compat/audio/speech` endpoint returns error 2019
+ *      ("Compatibility endpoint: audio/speech is not supported").
+ *   2. The `dynamic/tts` route's compat layer doesn't translate chat-shape
+ *      input to provider TTS APIs — when called via `/compat/chat/completions`
+ *      with `messages: [...]`, the gateway forwards the body verbatim to
+ *      the underlying provider (Vertex Gemini primary / Workers AI Deepgram
+ *      fallback), which then complains about missing `text` field / etc.
+ *   3. Per CLAUDE.md, the working pattern from inside a Worker is
+ *      `env.AI.run("@cf/...", input, { gateway: { id: '...' } })` — that
+ *      hits the model directly via the Workers AI binding while routing
+ *      through the named gateway for observability + caching.
+ *
+ * We point at the `spooool` gateway so all TTS calls show up in that
+ * dashboard alongside the dynamic-route invocations.
+ */
+export interface AIBindingEnv {
+  AI: {
+    run: (
+      model: string,
+      input: Record<string, unknown>,
+      opts?: { gateway?: { id: string; skipCache?: boolean } },
+    ) => Promise<ArrayBuffer | Uint8Array | Response>;
+  };
 }
 
-function isContentPolicyResponse(body: string): boolean {
-  return /content[_ ]policy|safety/i.test(body);
+const MAX_TTS_CHARS = 2000;
+const TTS_MODEL = '@cf/deepgram/aura-2-en';
+const TTS_GATEWAY_ID = 'spooool';
+
+/**
+ * Voice profile → Deepgram Aura speaker. Aura ships ~40 named voices; we
+ * pick three representative ones for our three profiles. Update when we
+ * add more profiles.
+ */
+function auraSpeaker(profile: VoiceProfile): string {
+  if (profile === 'warm') return 'asteria-en';
+  if (profile === 'energetic') return 'orion-en';
+  return 'arcas-en';
+}
+
+function isContentPolicyMsg(msg: string): boolean {
+  return /content[_ ]policy|safety/i.test(msg);
 }
 
 export async function synthesizeTts(args: {
   script: string;
   voice: { profile: VoiceProfile; pacingWpm: number };
   jobId: string;
-  env: AIGatewayEnv & R2BindingEnv;
+  env: R2BindingEnv & AIBindingEnv;
 }): Promise<{ r2Key: string; durationMs: number }> {
   if (args.script.length > MAX_TTS_CHARS) throw new Error('script too long for TTS');
 
-  const payload = {
-    model: 'dynamic/audio_gen',
-    voice: args.voice.profile,
-    input: args.script,
-    response_format: 'mp3',
-  };
-
-  let res: Response | null = null;
-  let lastErr: string = '';
-  for (let attempt = 0; attempt <= 1; attempt++) {
-    res = await fetch(audioRouteUrl(args.env), {
-      method: 'POST',
-      headers: gatewayHeaders(args.env),
-      body: JSON.stringify(payload),
-    });
-    if (res.ok && res.headers.get('content-type')?.includes('audio')) break;
-    const text = await res.clone().text().catch(() => '');
-    lastErr = text;
-    if (res.status >= 400 && res.status < 500) {
-      if (isContentPolicyResponse(text)) {
-        console.error('[create-tools] tts content-policy refusal', text.slice(0, 500));
-        throw new Error('Generation failed, please try rephrasing your prompt.');
-      }
-      break; // other 4xx — don't retry
+  let raw: ArrayBuffer | Uint8Array | Response;
+  try {
+    raw = await args.env.AI.run(
+      TTS_MODEL,
+      { text: args.script, speaker: auraSpeaker(args.voice.profile), encoding: 'mp3' },
+      { gateway: { id: TTS_GATEWAY_ID } },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (isContentPolicyMsg(msg)) {
+      console.error('[create-tools] tts content-policy refusal', msg.slice(0, 500));
+      throw new Error('Generation failed, please try rephrasing your prompt.');
     }
-    if (attempt < 1) await new Promise((r) => setTimeout(r, 500));
+    throw new Error(`TTS synthesis failed: ${msg.slice(0, 200)}`);
   }
 
-  if (!res || !res.ok || !res.headers.get('content-type')?.includes('audio')) {
-    throw new Error(`TTS synthesis failed: ${lastErr.slice(0, 200)}`);
+  // Aura returns audio as a Uint8Array; future SDK revs may wrap in a
+  // Response — handle both.
+  let audioBytes: ArrayBuffer;
+  if (raw instanceof Response) {
+    audioBytes = await raw.arrayBuffer();
+  } else if (raw instanceof Uint8Array) {
+    audioBytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
+  } else {
+    audioBytes = raw;
+  }
+  if (!audioBytes || audioBytes.byteLength === 0) {
+    throw new Error('TTS synthesis returned empty audio');
   }
 
-  const audioBytes = await res.arrayBuffer();
   const r2Key = `recorder/tts/${args.jobId}.mp3`;
-
-  // Upload with 3x exponential backoff.
   let putErr: unknown = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -207,8 +239,8 @@ export async function synthesizeTts(args: {
   }
   if (putErr) throw new Error(`TTS upload failed: ${putErr instanceof Error ? putErr.message : String(putErr)}`);
 
-  // Estimate duration from script length + pacing (we don't decode the mp3 here;
-  // the renderer will use the actual audio file length).
+  // Estimate duration from words + pacing; the renderer reads the actual
+  // mp3 length, this is only a hint for status UI.
   const words = args.script.trim().split(/\s+/).length;
   const durationMs = Math.round((words / args.voice.pacingWpm) * 60_000);
 
@@ -218,7 +250,13 @@ export async function synthesizeTts(args: {
 export interface FinalizeRenderInput {
   userId: string;
   scenes: SceneSpec[];
-  ttsR2Key: string;
+  /**
+   * R2 key of the synthesized voice-over mp3. Optional — when undefined
+   * the explainer renders silently (TTS failure shouldn't block the
+   * video, the user still gets the visuals). The composition + container
+   * both guard against missing audio.
+   */
+  ttsR2Key?: string;
   env: RenderEnv;
   /**
    * Pre-supplied jobId — passed through to `submitRenderJob` as
@@ -234,15 +272,16 @@ export interface FinalizeRenderInput {
 
 export async function finalizeRender(input: FinalizeRenderInput): Promise<{ jobId: string }> {
   const submit = input.submitRenderJob ?? defaultSubmitRenderJob;
+  const compositionProps: Record<string, unknown> = {
+    compositionId: 'spooool-explainer',
+    scenes: input.scenes,
+    brand: { color: '#0a84ff' },
+  };
+  if (input.ttsR2Key) compositionProps.audio = { r2Key: input.ttsR2Key };
   return submit({
     userId: input.userId,
     takeKeys: [], // no recorder takes for prompt-to-video
-    compositionProps: {
-      compositionId: 'spooool-explainer',
-      scenes: input.scenes,
-      audio: { r2Key: input.ttsR2Key },
-      brand: { color: '#0a84ff' },
-    },
+    compositionProps,
     env: input.env,
     existingJobId: input.existingJobId,
   });

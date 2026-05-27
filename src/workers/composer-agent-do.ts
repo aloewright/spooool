@@ -9,10 +9,10 @@
 
 import { getTemplate, type Question } from './create/templates';
 import type { StoryTemplate } from './create/templates/types';
-import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
 import type { RenderEnv } from './render';
 
-export interface ComposerAgentEnv extends AIGatewayEnv, R2BindingEnv, RenderEnv {}
+export interface ComposerAgentEnv extends AIGatewayEnv, R2BindingEnv, AIBindingEnv, RenderEnv {}
 
 export type AgentStatus = 'questioning' | 'rendering' | 'completed' | 'failed' | 'abandoned';
 
@@ -121,7 +121,17 @@ export class ComposerAgent {
       onStatus('planning');
       const { scenes } = await planScenes({ script, template: t, env: this.env });
       onStatus('tts');
-      const { r2Key } = await synthesizeTts({ script, voice: t.voice, jobId, env: this.env });
+      // TTS failure is non-fatal — render silently rather than fail the
+      // whole job. Content-policy refusals bubble (they're user-facing).
+      let r2Key: string | undefined;
+      try {
+        const result = await synthesizeTts({ script, voice: t.voice, jobId, env: this.env });
+        r2Key = result.r2Key;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (/Generation failed, please try rephrasing/.test(msg)) throw err;
+        console.warn('[composer-agent] tts failed — rendering silent video', { jobId, msg: msg.slice(0, 200) });
+      }
       onStatus('rendering');
       const { jobId: returnedJobId } = await finalizeRender({
         userId: s.userId,

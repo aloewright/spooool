@@ -10,7 +10,12 @@ export interface ExplainerScene {
 
 export interface ExplainerProps {
   scenes: ExplainerScene[];
-  audio: { r2Path: string };
+  /**
+   * Audio overlay. Optional — when undefined or `r2Path` is empty, the
+   * composition renders silent (TTS failure shouldn't block the video,
+   * the user still gets the visuals).
+   */
+  audio?: { r2Path?: string };
   brand?: { color?: string };
 }
 
@@ -38,9 +43,10 @@ const subtitleText: React.CSSProperties = { fontSize: 40, fontWeight: 400, margi
 export const SpoooolExplainer: React.FC<ExplainerProps> = ({ scenes, audio, brand }) => {
   const background = brand?.color ?? '#0a84ff';
   let startFrame = 0;
+  const audioPath = audio?.r2Path;
   return (
     <AbsoluteFill>
-      <Audio src={staticFile(audio.r2Path)} />
+      {audioPath ? <Audio src={staticFile(audioPath)} /> : null}
       {scenes.map((scene, i) => {
         const seq = (
           <Sequence key={i} from={startFrame} durationInFrames={Math.max(1, scene.durationFrames)}>

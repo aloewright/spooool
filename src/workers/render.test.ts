@@ -13,6 +13,7 @@ function buildApp(user: SessionUser) {
 
 function stubDB() {
   const rows = new Map<string, Record<string, unknown>>();
+  const videos = new Map<string, Record<string, unknown>>();
   const db = {
     prepare(sql: string) {
       let binds: unknown[] = [];
@@ -25,29 +26,50 @@ function stubDB() {
               composition_spec: binds[3], output_r2_key: null, video_id: null,
               error_message: null, created_at: binds[4], updated_at: binds[4],
             });
+          } else if (/^INSERT INTO videos/i.test(sql)) {
+            videos.set(binds[0] as string, { id: binds[0], user_id: binds[1], r2_key: binds[4] });
           } else if (/^UPDATE render_jobs/i.test(sql)) {
             // simple match: last bind is the id
             const id = binds[binds.length - 1] as string;
             const row = rows.get(id);
             if (row) {
-              if (/status='failed'/i.test(sql)) row.status = 'failed';
-              if (/error_message=\?/i.test(sql)) row.error_message = binds[0];
+              if (/status='failed'/i.test(sql)) {
+                row.status = 'failed';
+                if (/error_message=\?/i.test(sql)) row.error_message = binds[0];
+              } else if (/status='completed'/i.test(sql)) {
+                row.status = 'completed';
+                row.progress = 100;
+                row.output_r2_key = binds[0];
+                row.video_id = binds[1];
+              } else if (/status='rendering'/i.test(sql)) {
+                row.status = 'rendering';
+                row.progress = binds[0];
+              }
             }
           }
           return { success: true };
         },
         async first<T>() {
-          if (/^SELECT .* FROM render_jobs WHERE id = \? AND user_id = \?/i.test(sql)) {
+          if (/SELECT id, status, progress.*WHERE id = \? AND user_id = \?/i.test(sql)) {
             const row = rows.get(binds[0] as string);
             if (row && row.user_id === binds[1]) return row as T;
             return null;
+          }
+          if (/SELECT id, user_id, composition_spec(?:, status, video_id)? FROM render_jobs WHERE id = \?/i.test(sql)) {
+            return (rows.get(binds[0] as string) ?? null) as T;
           }
           return null;
         },
       };
     },
+    async batch(statements: Array<{ run: () => Promise<unknown> }>): Promise<unknown[]> {
+      const out = [];
+      for (const s of statements) out.push(await s.run());
+      return out;
+    },
     rows,
-  } as unknown as D1Database & { rows: Map<string, Record<string, unknown>> };
+    videos,
+  } as unknown as D1Database & { rows: Map<string, Record<string, unknown>>; videos: Map<string, Record<string, unknown>> };
   return db;
 }
 
@@ -80,6 +102,192 @@ function envFor(extra: Partial<RenderEnv> = {}): RenderEnv {
     ...extra,
   } as RenderEnv;
 }
+
+describe('container callbacks', () => {
+  function stubQueue() {
+    const send = vi.fn(async () => {});
+    return { send } as unknown as Queue<{ videoId: string; r2Key: string }> & { send: ReturnType<typeof vi.fn> };
+  }
+
+  async function createJob(env: RenderEnv): Promise<string> {
+    await buildApp({ id: 'u_1' }).request(
+      '/api/render/jobs',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ takeKeys: ['k'], compositionProps: { title: 'My recording' } }),
+      },
+      env,
+    );
+    const rows = [...((env.DB as unknown as { rows: Map<string, { id: string }> }).rows.values())];
+    return rows[0].id;
+  }
+
+  it('rejects callbacks without the shared secret', async () => {
+    const env = envFor();
+    const res = await buildApp(null).request(
+      '/api/render/jobs/j_x/complete',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ outputKey: 'k' }),
+      },
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /complete marks the job completed, creates videos row, enqueues encoding', async () => {
+    const queue = stubQueue();
+    const env = envFor({ VIDEO_ENCODING: queue });
+    const jobId = await createJob(env);
+    const res = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ outputKey: `recorder/renders/${jobId}.mp4` }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json() as { videoId: string };
+    expect(body.videoId).toMatch(/^v_/);
+    // Queue received one send
+    expect((queue as unknown as { send: ReturnType<typeof vi.fn> }).send).toHaveBeenCalledTimes(1);
+    expect((queue as unknown as { send: ReturnType<typeof vi.fn> }).send).toHaveBeenCalledWith({
+      videoId: body.videoId,
+      r2Key: `recorder/renders/${jobId}.mp4`,
+    });
+  });
+
+  it('POST /progress updates progress percentage and flips status to rendering', async () => {
+    const env = envFor();
+    const jobId = await createJob(env);
+    const res = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/progress`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ progress: 42 }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    // Verify the row was updated
+    const rows = [...((env.DB as unknown as { rows: Map<string, { status: string; progress: number }> }).rows.values())];
+    expect(rows[0].status).toBe('rendering');
+    expect(rows[0].progress).toBe(42);
+  });
+
+  it('POST /fail marks the job failed with the supplied error', async () => {
+    const env = envFor();
+    const jobId = await createJob(env);
+    const res = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/fail`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ error: 'remotion crashed' }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const rows = [...((env.DB as unknown as { rows: Map<string, { status: string; error_message: string | null }> }).rows.values())];
+    expect(rows[0].status).toBe('failed');
+    expect(rows[0].error_message).toBe('remotion crashed');
+  });
+
+  it('POST /complete returns 404 when the job does not exist', async () => {
+    const env = envFor();
+    const res = await buildApp(null).request(
+      '/api/render/jobs/j_nonexistent/complete',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ outputKey: 'k' }),
+      },
+      env,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('/complete is idempotent — second POST returns the same videoId without duplicate INSERT', async () => {
+    const queue = stubQueue();
+    const env = envFor({ VIDEO_ENCODING: queue });
+    const jobId = await createJob(env);
+    const first = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ outputKey: `recorder/renders/${jobId}.mp4` }),
+      },
+      env,
+    );
+    expect(first.status).toBe(200);
+    const firstBody = await first.json() as { videoId: string };
+
+    const second = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ outputKey: `recorder/renders/${jobId}.mp4` }),
+      },
+      env,
+    );
+    expect(second.status).toBe(200);
+    const secondBody = await second.json() as { videoId: string };
+    expect(secondBody.videoId).toBe(firstBody.videoId);
+    // Only one video row, only one queue send
+    const videos = (env.DB as unknown as { videos: Map<string, unknown> }).videos;
+    expect(videos.size).toBe(1);
+    expect((queue as unknown as { send: ReturnType<typeof vi.fn> }).send).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /complete returns 400 when outputKey is missing', async () => {
+    const env = envFor();
+    const jobId = await createJob(env);
+    const res = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({}),
+      },
+      env,
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /progress clamps progress to 0..100', async () => {
+    const env = envFor();
+    const jobId = await createJob(env);
+    await buildApp(null).request(
+      `/api/render/jobs/${jobId}/progress`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ progress: 150 }),
+      },
+      env,
+    );
+    let rows = [...((env.DB as unknown as { rows: Map<string, { progress: number }> }).rows.values())];
+    expect(rows[0].progress).toBe(100);
+    await buildApp(null).request(
+      `/api/render/jobs/${jobId}/progress`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ progress: -5 }),
+      },
+      env,
+    );
+    rows = [...((env.DB as unknown as { rows: Map<string, { progress: number }> }).rows.values())];
+    expect(rows[0].progress).toBe(0);
+  });
+});
 
 describe('POST /api/render/jobs', () => {
   it('401s when there is no session', async () => {

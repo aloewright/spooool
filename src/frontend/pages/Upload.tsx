@@ -1,7 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useSession } from '../lib/auth-client';
-
-const CHUNK_SIZE = 10 * 1024 * 1024;
+import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   'mp4',
@@ -31,64 +30,21 @@ async function uploadInChunks(
   description: string,
   onProgress: (value: number) => void,
 ): Promise<Response> {
-  const chunkCount = Math.ceil(file.size / CHUNK_SIZE);
-  let lastResponse: Response | null = null;
-  let uploadId: string | null = null;
-
-  for (let index = 0; index < chunkCount; index += 1) {
-    const start = index * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
-    // Pass file.type so the resulting Blob keeps the parent's MIME — without it
-    // the chunk's type is '' and the multipart part is sent as
-    // application/octet-stream, which the upload validator then rejects.
-    const chunk = file.slice(start, end, file.type);
-    const formData = new FormData();
-    formData.set('title', title);
-    formData.set('description', description);
-    formData.set('file', chunk, file.name);
-    formData.set('chunkIndex', String(index));
-    formData.set('chunkCount', String(chunkCount));
-    if (uploadId) {
-      formData.set('uploadId', uploadId);
-    }
-
-    lastResponse = await fetch('/api/videos/upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!lastResponse.ok) {
-      const body = await lastResponse.text();
-      let detail = body;
-      try {
-        const parsed = JSON.parse(body) as { error?: string; code?: string };
-        detail = parsed.error ?? body;
-        if (parsed.code) detail = `${detail} (${parsed.code})`;
-      } catch {
-        // Non-JSON response — keep raw text.
-      }
-      throw new Error(`Upload failed (${lastResponse.status}): ${detail.slice(0, 300)}`);
-    }
-
-    const responseData = (await lastResponse.json()) as { uploadId?: string };
-    if (responseData.uploadId) {
-      uploadId = responseData.uploadId;
-    }
-
-    onProgress(Math.round(((index + 1) / chunkCount) * 100));
-  }
-
-  if (!lastResponse) {
-    throw new Error('No upload response');
-  }
-  return lastResponse;
+  const result = await runChunkedUpload({
+    file,
+    endpoint: '/api/videos/upload',
+    target: 'video',
+    fields: { title, description },
+    onProgress: (fraction) => onProgress(Math.round(fraction * 100)),
+  });
+  return result.lastResponse;
 }
 
 // Maps the chunk-upload error message back to a low-cardinality bucket so
 // analytics never receives raw server text. uploadInChunks throws messages
-// of the form "Upload failed (<status>): <detail>" — we key on the status.
+// of the form "chunk N failed: <status> <body>" — we key on the status.
 export function classifyUploadError(message: string): string {
-  const match = /Upload failed \((\d{3})\)/.exec(message);
+  const match = /chunk \d+ failed: (\d{3})/.exec(message);
   if (!match) return 'network_error';
   const status = Number(match[1]);
   if (status === 413) return 'http_413';

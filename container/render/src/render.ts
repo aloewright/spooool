@@ -76,10 +76,25 @@ export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Pro
   // Remotion can resolve them via staticFile('jobId/take.webm').
   const takePaths = input.takeKeys.map((key) => `${input.jobId}/${path.basename(key)}`);
 
+  // Generalize beyond the recorder pipeline: a prompt-to-video job has no
+  // recorded takes but does have a TTS audio asset in R2 + a different
+  // compositionId. Download the audio into the same public/{jobId}/ dir
+  // and stamp an r2Path onto the props so the composition can staticFile()
+  // it. compositionId falls back to 'spooool-video' for legacy recorder jobs.
+  const props = (input.compositionProps ?? {}) as Record<string, unknown>;
+  const audioMeta = props.audio as { r2Key?: string } | undefined;
+  if (audioMeta?.r2Key) {
+    const audioDest = path.join(deps.publicDir, input.jobId, 'audio.mp3');
+    await deps.downloadTake(audioMeta.r2Key, audioDest);
+    props.audio = { r2Key: audioMeta.r2Key, r2Path: `${input.jobId}/audio.mp3` };
+  }
+
+  const compositionId = typeof props.compositionId === 'string' ? props.compositionId : 'spooool-video';
+
   const composition = await deps.renderer.selectComposition({
     serveUrl,
-    id: 'spooool-video',
-    inputProps: { takes: takePaths, ...input.compositionProps },
+    id: compositionId,
+    inputProps: { takes: takePaths, ...props },
   });
 
   const outputPath = path.join(deps.tmpDir, input.jobId, `${input.jobId}.mp4`);
@@ -88,7 +103,7 @@ export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Pro
     serveUrl,
     codec: 'h264',
     outputLocation: outputPath,
-    inputProps: { takes: takePaths, ...input.compositionProps },
+    inputProps: { takes: takePaths, ...props },
     onProgress: (p) => input.onProgress(Math.round(p.progress * 100)),
   });
 

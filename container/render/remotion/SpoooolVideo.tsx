@@ -23,7 +23,7 @@ export type SpoooolVideoProps = {
   layouts?: Record<string, unknown>;
 };
 
-const FRAMES_PER_TAKE = 300; // 10 s @ 30 fps — placeholder until Task 12 wires real durations
+export const FRAMES_PER_TAKE = 300; // 10 s @ 30 fps — placeholder until Task 12 wires real durations
 
 export const SpoooolVideo: React.FC<SpoooolVideoProps> = ({
   takes,

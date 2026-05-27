@@ -72,10 +72,14 @@ export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Pro
     }),
   );
 
+  // Build relative public paths that match the on-disk download locations so
+  // Remotion can resolve them via staticFile('jobId/take.webm').
+  const takePaths = input.takeKeys.map((key) => `${input.jobId}/${path.basename(key)}`);
+
   const composition = await deps.renderer.selectComposition({
     serveUrl,
     id: 'spooool-video',
-    inputProps: { takes: input.takeKeys, ...input.compositionProps },
+    inputProps: { takes: takePaths, ...input.compositionProps },
   });
 
   const outputPath = path.join(deps.tmpDir, input.jobId, `${input.jobId}.mp4`);
@@ -84,7 +88,7 @@ export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Pro
     serveUrl,
     codec: 'h264',
     outputLocation: outputPath,
-    inputProps: { takes: input.takeKeys, ...input.compositionProps },
+    inputProps: { takes: takePaths, ...input.compositionProps },
     onProgress: (p) => input.onProgress(Math.round(p.progress * 100)),
   });
 

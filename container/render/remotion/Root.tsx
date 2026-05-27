@@ -3,7 +3,7 @@ import { videoConf } from "../config/scenes";
 import { GoToRecorder } from "./GoToRecorder";
 import { Main } from "./Main";
 import { calcMetadata } from "./calculate-metadata/calc-metadata";
-import { SpoooolVideo } from "./SpoooolVideo";
+import { SpoooolVideo, FRAMES_PER_TAKE } from "./SpoooolVideo";
 import type { SpoooolVideoProps } from "./SpoooolVideo";
 
 const SPOOOOL_DEFAULT_PROPS: SpoooolVideoProps = {
@@ -24,8 +24,11 @@ export const RemotionRoot = () => {
         width={1920}
         height={1080}
         fps={30}
-        durationInFrames={Math.max(1, SPOOOOL_DEFAULT_PROPS.takes.length) * 300}
+        durationInFrames={1}
         defaultProps={SPOOOOL_DEFAULT_PROPS}
+        calculateMetadata={({ props }) => ({
+          durationInFrames: Math.max(1, props.takes.length) * FRAMES_PER_TAKE,
+        })}
       />
       {/* Upstream recorder compositions — kept intact for reference / future use */}
       <Composition

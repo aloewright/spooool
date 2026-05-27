@@ -44,6 +44,14 @@ describe('renderJob', () => {
     expect(renderer.selectComposition).toHaveBeenCalledWith(expect.objectContaining({
       serveUrl: '/bundle',
       id: 'spooool-video',
+      inputProps: expect.objectContaining({
+        takes: ['j_1/take_001.webm', 'j_1/take_002.webm'],
+      }),
+    }));
+    expect(renderer.renderMedia).toHaveBeenCalledWith(expect.objectContaining({
+      inputProps: expect.objectContaining({
+        takes: ['j_1/take_001.webm', 'j_1/take_002.webm'],
+      }),
     }));
     expect(renderer.renderMedia).toHaveBeenCalledTimes(1);
     expect(downloaded).toEqual([

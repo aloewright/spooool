@@ -1,9 +1,18 @@
-// src/frontend/create/GuidedMode.tsx
-import { useEffect, useRef, useState } from 'react';
-import { connectSessionStream, createSession, fetchJobStatus } from './lib/create-client';
-import type { Question } from './lib/template';
+// GuidedMode — interactive Q&A flow.
+// Opens a session, walks 7 hero-journey questions over WebSocket, then
+// kicks off the same toolchain Auto mode uses. Stage indicator + spinner +
+// alert blocks replace the bare-text states this used to render.
 
-interface GuidedModeProps { templateId: string }
+import { useEffect, useRef, useState } from 'react';
+import { ApiError, connectSessionStream, createSession, fetchJobStatus } from './lib/create-client';
+import type { Question } from './lib/template';
+import { Spinner } from './Spinner';
+
+interface GuidedModeProps {
+  templateId: string;
+  /** Bubbled to parent so the debug panel can display it. */
+  onError?: (err: Error) => void;
+}
 
 type WSMessage =
   | { type: 'question'; question: Question }
@@ -12,14 +21,21 @@ type WSMessage =
   | { type: 'render_started'; jobId: string }
   | { type: 'error'; error: string };
 
-export function GuidedMode({ templateId }: GuidedModeProps): JSX.Element {
+const STAGE_LABELS: Record<string, string> = {
+  drafting: 'Drafting narration script',
+  planning: 'Planning scenes',
+  tts: 'Synthesizing voiceover',
+  rendering: 'Rendering composition',
+};
+
+export function GuidedMode({ templateId, onError }: GuidedModeProps): JSX.Element {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [question, setQuestion] = useState<Question | null>(null);
   const [answer, setAnswer] = useState('');
   const [questionsComplete, setQuestionsComplete] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -38,15 +54,25 @@ export function GuidedMode({ templateId }: GuidedModeProps): JSX.Element {
           else if (msg.type === 'questions_complete') { setQuestionsComplete(true); setQuestion(null); }
           else if (msg.type === 'status') setStage(msg.stage);
           else if (msg.type === 'render_started') setJobId(msg.jobId);
-          else if (msg.type === 'error') setError(msg.error);
+          else if (msg.type === 'error') {
+            const err = new Error(msg.error);
+            setError(err);
+            onError?.(err);
+          }
         };
-        ws.onerror = () => setError('Connection error');
+        ws.onerror = () => {
+          const err = new Error('WebSocket connection error');
+          setError(err);
+          onError?.(err);
+        };
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        const e = err instanceof Error ? err : new Error(String(err));
+        setError(e);
+        onError?.(e);
       }
     })();
     return () => { cancelled = true; wsRef.current?.close(); };
-  }, [templateId]);
+  }, [templateId, onError]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -57,13 +83,20 @@ export function GuidedMode({ templateId }: GuidedModeProps): JSX.Element {
         const s = await fetchJobStatus(jobId!);
         if (cancelled) return;
         if (s.status === 'completed' && s.videoId) { window.location.href = `/watch/${s.videoId}`; return; }
-        if (s.status === 'failed') { setError(s.error ?? 'Render failed'); return; }
-      } catch { /* transient */ }
+        if (s.status === 'failed') {
+          const err = new Error(s.error ?? 'Render failed');
+          setError(err);
+          onError?.(err);
+          return;
+        }
+      } catch (err) {
+        if (err instanceof Error) onError?.(err);
+      }
       timer = setTimeout(poll, 2000);
     }
     void poll();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [jobId]);
+  }, [jobId, onError]);
 
   function sendAnswer(): void {
     if (!answer.trim() || !wsRef.current) return;
@@ -71,12 +104,52 @@ export function GuidedMode({ templateId }: GuidedModeProps): JSX.Element {
   }
   function generate(): void {
     if (!wsRef.current) return;
+    setStage('drafting');
     wsRef.current.send(JSON.stringify({ type: 'generate' }));
   }
 
-  if (error) return <p role="alert" style={{ color: 'crimson', padding: 16 }}>{error}</p>;
-  if (!sessionId) return <p style={{ padding: 16 }}>Starting session…</p>;
-  if (jobId) return <p style={{ padding: 16 }}>Rendering ({stage ?? 'queued'})…</p>;
+  if (error) {
+    return (
+      <div className="alert alert--error" role="alert">
+        <strong>Session failed.</strong>
+        <p style={{ marginTop: 4 }}>{error.message}</p>
+        {error instanceof ApiError && error.status === 429 ? (
+          <p style={{ marginTop: 4, fontSize: 'var(--text-sm)' }}>
+            Rate limit: 5 generations per hour per account.
+          </p>
+        ) : null}
+        <button className="btn" onClick={() => window.location.reload()} style={{ marginTop: 8 }}>Try again</button>
+      </div>
+    );
+  }
+  if (!sessionId) {
+    return (
+      <div className="card stack" style={{ padding: 16 }}>
+        <Spinner label="Starting session…" />
+      </div>
+    );
+  }
+  if (jobId) {
+    return (
+      <div className="stack" style={{ padding: 16 }}>
+        <Spinner label={STAGE_LABELS[stage ?? 'rendering'] ?? `Stage: ${stage}`} />
+        <div className="progress-track" aria-hidden="true">
+          <div className="progress-track__fill progress-track__fill--indeterminate" />
+        </div>
+        <p style={{ fontSize: 'var(--text-xs)', color: 'var(--muted-foreground)' }}>
+          Job <code>{jobId}</code>. This typically takes 1–2 minutes.
+        </p>
+      </div>
+    );
+  }
+  if (stage) {
+    // We've sent {type:'generate'} but no render_started yet — show stage indicator.
+    return (
+      <div className="stack" style={{ padding: 16 }}>
+        <Spinner label={STAGE_LABELS[stage] ?? `Stage: ${stage}`} />
+      </div>
+    );
+  }
   if (questionsComplete) {
     return (
       <div className="card stack">
@@ -85,7 +158,13 @@ export function GuidedMode({ templateId }: GuidedModeProps): JSX.Element {
       </div>
     );
   }
-  if (!question) return <p style={{ padding: 16 }}>Loading…</p>;
+  if (!question) {
+    return (
+      <div className="card stack" style={{ padding: 16 }}>
+        <Spinner label="Loading next question…" />
+      </div>
+    );
+  }
   return (
     <div className="card stack">
       <label className="field">

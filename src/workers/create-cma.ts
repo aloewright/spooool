@@ -53,9 +53,25 @@ export async function runOneShotCMA(args: {
   // already steers it toward the template's beat structure.
   const answers: Record<string, string> = { prompt: args.prompt };
 
+  // Stage-by-stage timing logs so `wrangler tail` shows what the
+  // background toolchain is doing for a given jobId. Each stage logs
+  // start + duration_ms + a short signal (script_chars, scene_count, etc.).
+  const t0 = Date.now();
+  console.log('[create-cma] start', { jobId: args.jobId, templateId: args.templateId, prompt_chars: args.prompt.length });
+
+  const tDraft = Date.now();
   const { script } = await d.draftScript({ template: t, answers, env: args.env });
+  console.log('[create-cma] draft_script ok', { jobId: args.jobId, duration_ms: Date.now() - tDraft, script_chars: script.length });
+
+  const tPlan = Date.now();
   const { scenes } = await d.planScenes({ script, template: t, env: args.env });
+  console.log('[create-cma] plan_scenes ok', { jobId: args.jobId, duration_ms: Date.now() - tPlan, scene_count: scenes.length });
+
+  const tTts = Date.now();
   const { r2Key } = await d.synthesizeTts({ script, voice: t.voice, jobId: args.jobId, env: args.env });
+  console.log('[create-cma] synthesize_tts ok', { jobId: args.jobId, duration_ms: Date.now() - tTts, r2Key });
+
+  const tFin = Date.now();
   const { jobId } = await d.finalizeRender({
     userId: args.userId,
     scenes,
@@ -63,5 +79,7 @@ export async function runOneShotCMA(args: {
     env: args.env,
     existingJobId: args.jobId,
   });
+  console.log('[create-cma] finalize_render ok', { jobId: args.jobId, duration_ms: Date.now() - tFin });
+  console.log('[create-cma] toolchain complete', { jobId: args.jobId, total_ms: Date.now() - t0 });
   return { jobId };
 }

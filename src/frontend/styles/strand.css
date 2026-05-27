@@ -769,3 +769,121 @@ input[type="file"].input {
 
 .fade-up { animation: fade-up 0.25s var(--ease-spring) both; }
 .fade-in { animation: fade-in 0.2s var(--ease-smooth) both; }
+
+/* ── Spinner (prompt-to-video loading states) ──────────────── */
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  --spinner-size: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.spinner--inline {
+  vertical-align: middle;
+}
+
+.spinner__ring {
+  display: inline-block;
+  width: var(--spinner-size);
+  height: var(--spinner-size);
+  border-radius: 50%;
+  border: 2px solid color-mix(in oklch, var(--foreground) 18%, transparent);
+  border-top-color: var(--primary);
+  animation: spinner-rotate 0.7s linear infinite;
+}
+
+.spinner__label {
+  font-size: var(--text-sm);
+  color: var(--muted-foreground);
+}
+
+/* Progress bar used by AutoMode / GuidedMode while a render is in flight. */
+.progress-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  overflow: hidden;
+}
+
+.progress-track__fill {
+  height: 100%;
+  background: var(--primary);
+  transition: width 200ms ease-out;
+  border-radius: 999px;
+}
+
+.progress-track__fill--indeterminate {
+  width: 30%;
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(220%); }
+  100% { transform: translateX(220%); }
+}
+
+/* Alerts surfaced by /create — replaces the inline crimson hack. */
+.alert {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  border: 1px solid;
+  font-size: var(--text-sm);
+}
+
+.alert--error {
+  background: color-mix(in oklch, #b91c1c 8%, var(--card));
+  border-color: color-mix(in oklch, #b91c1c 35%, transparent);
+  color: #7f1d1d;
+}
+
+.alert--info {
+  background: color-mix(in oklch, var(--primary) 8%, var(--card));
+  border-color: color-mix(in oklch, var(--primary) 30%, transparent);
+}
+
+.alert ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+}
+
+/* Cost / debug panels used by /create. Subtle treatment so they don't
+   compete with the primary form. */
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.info-table th,
+.info-table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
+.info-table th {
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.info-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-log {
+  background: color-mix(in oklch, var(--foreground) 4%, var(--card));
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}

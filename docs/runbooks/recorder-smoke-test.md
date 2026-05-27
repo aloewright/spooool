@@ -124,8 +124,55 @@ npx wrangler r2 object list spooool-videos --prefix recorder/raw/
 | Render swept to `failed` immediately | Container crashed mid-render (OOM, Chromium boot failure) | Check CF Containers logs; consider upgrading `instance_type` in `wrangler.toml` (currently `standard-3`) |
 | Every render returns 429 | `RenderQueue` at capacity (3 slots); a prior render may have leaked an active slot | Wait for `sleep_after: 60s` to expire and the container to restart, or trigger a restart from the CF dashboard |
 | Audio out of sync | Frame drops during recording; mediabunny re-mux dropped audio packets | Re-record. If reproducible, check `find-good-supported-codec.ts` output in the browser console (look for codec negotiation warnings) |
-| Verify email never arrives | Cloudflare Email Sending domain not enabled, or SPF/DKIM misconfigured | See email provider notes in memory; current provider is Loops |
+| Verify email never arrives | Cloudflare Email Sending domain not enabled, or SPF/DKIM misconfigured | See email provider notes in memory; current provider is Cloudflare Email Service |
 | `/record` loads then immediately redirects to sign-in | Session cookie not set cross-subdomain | Check `auth.pdx.software` route is attached to the spooool worker in CF dashboard |
+
+## Prompt-to-video smoke
+
+Run after each deploy to validate the `/create` flow.
+
+### Pre-flight (one-time + per-deploy)
+
+- [ ] Worker secrets present: `CF_ACCOUNT_ID`, `CF_GATEWAY_ID`, `CF_AIG_TOKEN` (`npx wrangler secret list`).
+- [ ] AI Gateway `dynamic/text_gen` and `dynamic/audio_gen` routes are configured and currently routing successfully (check the AI Gateway dashboard).
+- [ ] R2 lifecycle rule `recorder-tts-7d` exists with prefix `recorder/tts/`:
+  ```bash
+  npx wrangler r2 bucket lifecycle add spooool-videos recorder-tts-7d recorder/tts/ --expire-days 7 --force
+  ```
+- [ ] `ComposerAgent` DO migration applied (`wrangler deploy` output mentions `do_v4`).
+
+### Auto mode happy path
+
+- [ ] Sign in as a verified user.
+- [ ] Open `/create`. Pick "The Hero's Journey".
+- [ ] Click **Auto**. Type prompt: `"A junior developer learns Cloudflare Workers and ships their first app"`.
+- [ ] Click **Generate video**.
+- [ ] Progress bar appears, climbs to 100% within ~2 minutes.
+- [ ] Browser navigates to `/watch/{videoId}`.
+- [ ] Video plays end-to-end with TTS voiceover audible and in sync with on-screen text.
+
+### Guided mode happy path
+
+- [ ] Sign in as a verified user, open `/create`, switch to **Guided**.
+- [ ] Walk through all 7 hero-journey questions, answering plausibly.
+- [ ] Click **Generate video** on the completion screen.
+- [ ] Status updates stream: drafting → planning → tts → rendering.
+- [ ] Browser navigates to `/watch/{videoId}` on completion.
+
+### Failure surfaces
+
+- [ ] Submit auto mode with banned content (e.g., violent prompt) → friendly error message ("Generation failed, please try rephrasing your prompt.").
+- [ ] Submit empty prompt → 400 with form-level error.
+- [ ] Submit 6 prompts within an hour → 429 (rate-limited via `CREATE_BUCKET`).
+- [ ] Refresh the browser mid-guided-session → wizard resumes from the same question.
+
+### Common issues
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Auto mode hangs at "Queued…" forever | `dynamic/text_gen` route misconfigured, container can't reach R2 to upload TTS, or container env vars missing | Check `wrangler tail`; check container `instances` state |
+| TTS audio missing in rendered video | `recorder/tts/{jobId}.mp3` not in R2 (TTS upload failed) | Re-trigger; check container logs for `Missing TTS audio` failure |
+| WebSocket fails to connect (Guided mode) | Origin not in trustedOrigins; SPA served from a different host than the worker | Verify `auth.pdx.software` route is still attached |
 
 ## See also
 

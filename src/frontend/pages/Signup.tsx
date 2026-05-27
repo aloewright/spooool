@@ -28,9 +28,10 @@ export function Signup(): JSX.Element {
       setError(signUpError.message ?? 'Sign up failed');
       return;
     }
-    // ALO-143: best-effort lifecycle sync to Loops. Fire-and-forget — a
-    // missing API key, a network blip, or a Loops 5xx must never block the
-    // post-signup navigation. The endpoint itself is idempotent.
+    // Best-effort welcome-email trigger. Fire-and-forget — a missing
+    // EMAIL binding, an unverified domain, or a transient send failure
+    // must never block the post-signup navigation. The endpoint is a
+    // no-op when isNewSignup is false.
     void fetch('/api/lifecycle/sync', {
       method: 'POST',
       credentials: 'same-origin',

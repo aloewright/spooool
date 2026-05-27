@@ -4,9 +4,8 @@
 // storage, video count, user count) and produces a back-of-the-envelope
 // monthly cost estimate. The /api/admin/costs endpoint exposes the snapshot
 // for the admin dashboard; runCostMonitorSweep is called from the daily
-// cron in src/workers/index.ts and fires a `cost_alert` Loops event for
-// each configured admin when any threshold trips — the actual email body
-// lives in the Loops automation that listens for that event.
+// cron in src/workers/index.ts and sends a cost-alert email to each
+// configured admin via Cloudflare Email Service when any threshold trips.
 //
 // Idempotency: the daily KV marker `costs:alert:YYYY-MM-DD` is set after a
 // successful send so a re-fired cron in the same UTC day stays silent.
@@ -14,11 +13,11 @@
 // rebooted, which is mostly noise.
 
 import { Hono } from 'hono';
-import { sendEvent, type LoopsEnv } from './loops';
+import { sendCostAlertEmail, type EmailEnv } from './email';
 import { parseAdminEmails } from './moderation';
 import { isAdmin } from './roles';
 
-export interface CostsEnv extends LoopsEnv {
+export interface CostsEnv extends EmailEnv {
   DB: D1Database;
   CACHE: KVNamespace;
   ADMIN_EMAILS?: string;
@@ -160,10 +159,8 @@ export function todayKey(now: Date = new Date()): string {
   return `costs:alert:${now.toISOString().slice(0, 10)}`;
 }
 
-// Flat eventProperties payload for the Loops `cost_alert` automation. Kept
-// as primitives (no nested objects) so it round-trips cleanly through Loops'
-// custom-property system and so the template can `{{double-brace}}` each
-// field directly.
+// Flat property bag rendered into the cost-alert email body. Kept as
+// primitives so the email template can format each field directly.
 export function buildCostAlertProps(
   snapshot: CostSnapshot,
   alerts: CostAlert[],
@@ -214,18 +211,14 @@ export async function runCostMonitorSweep(env: CostsEnv): Promise<SweepResult> {
     return { alerts, sent: false, reason: 'no_admin_emails' };
   }
 
-  const eventProperties = buildCostAlertProps(snapshot, alerts);
+  const props = buildCostAlertProps(snapshot, alerts);
   for (const to of recipients) {
-    await sendEvent(env, {
-      email: to,
-      eventName: 'cost_alert',
-      eventProperties,
-    });
+    await sendCostAlertEmail(env, { to, props });
   }
-  // Set the dedup marker only after the sends fire; if Loops returned an
-  // error result we still consider the day "delivered" — retrying would
-  // just re-page admins every cron tick. Operators can manually clear the
-  // KV key to force a re-send during incident triage.
+  // Set the dedup marker only after the sends fire; even if the email
+  // binding returned an error result we still consider the day "delivered"
+  // — retrying would just re-page admins every cron tick. Operators can
+  // manually clear the KV key to force a re-send during incident triage.
   await env.CACHE.put(key, '1', { expirationTtl: 48 * 60 * 60 });
   return { alerts, sent: true, reason: 'sent' };
 }

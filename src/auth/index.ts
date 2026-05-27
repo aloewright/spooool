@@ -1,25 +1,29 @@
 import { betterAuth } from 'better-auth';
-import { sendEvent, type LoopsEnv, type LoopsResult } from '../workers/loops';
+import {
+  sendPasswordResetConfirmationEmail,
+  sendPasswordResetEmail,
+  sendVerificationEmail,
+  type EmailEnv,
+  type EmailResult,
+} from '../workers/email';
 
-export type AuthEnv = LoopsEnv & {
+export type AuthEnv = EmailEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
 };
 
-// Without this, Loops rejections (bad key, missing automation, etc.) are
-// swallowed silently — the auth callback resolves and better-auth replies
-// `status: true` while no email ever ships. Logging surfaces those cases
-// in `wrangler tail` so the operator can see the actual API response.
-function logLoopsResult(result: LoopsResult, eventName: string, to: string): void {
+// Without this, send failures (unverified domain, binding misconfigured)
+// are swallowed silently — the auth callback resolves and better-auth
+// replies `status: true` while no email ever ships. Logging surfaces those
+// cases in `wrangler tail` so the operator can see the actual response.
+function logEmailResult(result: EmailResult, kind: string, to: string): void {
   if (result.ok) return;
   if (result.skipped) {
-    console.warn(`[auth] loops event ${eventName} -> ${to} skipped: ${result.reason}`);
+    console.warn(`[auth] email ${kind} -> ${to} skipped: ${result.reason}`);
     return;
   }
-  console.error(
-    `[auth] loops event ${eventName} -> ${to} failed: status=${result.status} message=${result.message}`,
-  );
+  console.error(`[auth] email ${kind} -> ${to} failed: ${result.message}`);
 }
 
 export function createAuth(env: AuthEnv) {
@@ -34,37 +38,33 @@ export function createAuth(env: AuthEnv) {
       minPasswordLength: 8,
       // ALO-129: forgot-password handler. Better-auth issues a single-use
       // token and constructs `url` (which the client `forgetPassword` call
-      // tells it to redirect to). We hand the link off to Loops as a
-      // `password_reset` event; the lifecycle automation in the Loops
-      // dashboard renders and sends the email. If LOOPS_API_KEY is unset
-      // the result is silently skipped — better-auth doesn't care, and we
-      // don't want a flaky upstream to swallow the user's reset.
+      // tells it to redirect to). We send the link directly via Cloudflare
+      // Email Service. If the EMAIL binding is missing the result is a
+      // silent skip — better-auth doesn't care, and we don't want a flaky
+      // upstream to swallow the user's reset.
       sendResetPassword: async ({ user, url }) => {
-        const result = await sendEvent(env, {
-          email: user.email,
-          eventName: 'password_reset',
-          eventProperties: { resetUrl: url, userId: user.id },
-        });
-        logLoopsResult(result, 'password_reset', user.email);
+        const result = await sendPasswordResetEmail(env, { to: user.email, url });
+        logEmailResult(result, 'password_reset', user.email);
+      },
+      // Confirmation email after a successful reset — best-effort, runs in
+      // the background-task handler when available so it doesn't block the
+      // reset response.
+      onPasswordReset: async ({ user }) => {
+        const result = await sendPasswordResetConfirmationEmail(env, { to: user.email });
+        logEmailResult(result, 'password_reset_confirmation', user.email);
       },
     },
     // ALO-128: email verification. better-auth issues a single-use token,
-    // builds the verify URL, and delegates delivery to us. We forward to
-    // Loops as an `email_verification` event; the lifecycle automation in
-    // Loops renders + sends the actual email. `sendOnSignUp` triggers the
-    // first email automatically when a new account is created. Sensitive
-    // actions (uploads) are gated separately at the API boundary by
-    // checking `user.emailVerified`.
+    // builds the verify URL, and delegates delivery to us. `sendOnSignUp`
+    // triggers the first email automatically when a new account is created.
+    // Sensitive actions (uploads) are gated separately at the API boundary
+    // by checking `user.emailVerified`.
     emailVerification: {
       sendOnSignUp: true,
       autoSignInAfterVerification: true,
       sendVerificationEmail: async ({ user, url }) => {
-        const result = await sendEvent(env, {
-          email: user.email,
-          eventName: 'email_verification',
-          eventProperties: { verifyUrl: url, userId: user.id },
-        });
-        logLoopsResult(result, 'email_verification', user.email);
+        const result = await sendVerificationEmail(env, { to: user.email, url });
+        logEmailResult(result, 'email_verification', user.email);
       },
     },
     session: {

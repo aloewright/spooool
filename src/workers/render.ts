@@ -14,7 +14,7 @@ export interface RenderEnv {
   DB: D1Database;
   RENDER_CONTAINER: DurableObjectNamespace;
   RENDER_CALLBACK_SECRET: string;
-  VIDEO_ENCODING?: Queue<{ videoId: string; r2Key: string }>;
+  VIDEO_ENCODING: Queue<{ videoId: string; r2Key: string }>;
 }
 
 interface SessionUser { id: string }
@@ -79,6 +79,13 @@ function timingSafeStringEqual(a: string, b: string): boolean {
 }
 
 function requireCallbackSecret(c: { req: { header: (name: string) => string | undefined }; env: RenderEnv }): Response | null {
+  if (!c.env.RENDER_CALLBACK_SECRET) {
+    console.error('[render] RENDER_CALLBACK_SECRET is not set');
+    return new Response(JSON.stringify({ error: 'Server misconfigured' }), {
+      status: 500,
+      headers: { 'content-type': 'application/json' },
+    });
+  }
   const provided = c.req.header('x-render-secret');
   if (!provided || !timingSafeStringEqual(provided, c.env.RENDER_CALLBACK_SECRET)) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -184,3 +191,16 @@ renderRoutes.post('/api/render/jobs/:id/progress', async (c) => {
   ).bind(progress, Date.now(), id).run();
   return c.json({ ok: true });
 });
+
+/**
+ * Mark any render_jobs that have been in `rendering` for more than 15 minutes
+ * as failed. Called from the `scheduled` handler every 5 minutes (see
+ * wrangler.toml). Operationally cheap because the idx_render_jobs_stuck
+ * index covers (status, updated_at).
+ */
+export async function runStuckJobSweep(db: D1Database, nowMs = Date.now()): Promise<void> {
+  const cutoff = nowMs - 15 * 60 * 1000;
+  await db.prepare(
+    `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE status='rendering' AND updated_at < ?`,
+  ).bind('Render timeout', nowMs, cutoff).run();
+}

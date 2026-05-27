@@ -99,6 +99,7 @@ function envFor(extra: Partial<RenderEnv> = {}): RenderEnv {
     DB: stubDB(),
     RENDER_CONTAINER: stubContainer(),
     RENDER_CALLBACK_SECRET: 'secret_test',
+    VIDEO_ENCODING: { send: async () => {} } as unknown as Queue<{ videoId: string; r2Key: string }>,
     ...extra,
   } as RenderEnv;
 }
@@ -371,6 +372,31 @@ describe('POST /api/render/jobs', () => {
     expect(res.status).toBe(503);
     const rows = [...((env.DB as unknown as { rows: Map<string, { status: string }> }).rows.values())];
     expect(rows[0].status).toBe('failed');
+  });
+});
+
+describe('runStuckJobSweep', () => {
+  it('marks jobs older than 15 minutes in rendering as failed', async () => {
+    const { runStuckJobSweep } = await import('./render');
+    const updated: Array<unknown[]> = [];
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind(...args: unknown[]) {
+            if (/UPDATE render_jobs/i.test(sql) && /status='failed'/i.test(sql) && /WHERE status='rendering'/i.test(sql)) {
+              updated.push(args);
+            }
+            return this;
+          },
+          async run() { return { success: true }; },
+        };
+      },
+    } as unknown as D1Database;
+    await runStuckJobSweep(db, 1_700_000_000_000);
+    expect(updated).toHaveLength(1);
+    expect(updated[0][0]).toBe('Render timeout');
+    expect(updated[0][1]).toBe(1_700_000_000_000);
+    expect(updated[0][2]).toBe(1_700_000_000_000 - 15 * 60 * 1000);
   });
 });
 

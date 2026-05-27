@@ -101,6 +101,16 @@ class_name = "ChannelSubscriberDO"
 name = "RATE_LIMITER"
 class_name = "RateLimiterDO"
 
+# Recorder render pipeline (sub-project #1). Per-account container that
+# runs Remotion + Chromium + ffmpeg to composite recorded takes.
+[[containers]]
+class_name = "RenderContainer"
+image = "./container/render/Dockerfile"
+max_instances = 50
+sleep_after = "60s"
+default_port = 8080
+instance_type = "standard-3"
+
 [[migrations]]
 tag = "do_v1"
 new_classes = ["ChannelSubscriberDO"]
@@ -110,9 +120,11 @@ tag = "do_v2"
 new_classes = ["RateLimiterDO"]
 
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
-# window has elapsed (ALO-132). See src/workers/account.ts -> runDeletionSweep.
+# window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
+# The */5 cron runs the render-job timeout sweep — marks any render_job
+# stuck in `rendering` for >15min as `failed`. See src/workers/render.ts.
 [triggers]
-crons = ["0 2 * * *"]
+crons = ["0 2 * * *", "*/5 * * * *"]
 
 [vars]
 # Comma-separated origin allow-list for CSRF protection on /api/*. Same-origin
@@ -140,6 +152,7 @@ EMAIL_FROM_NAME = "Spooool"
 # POLAR_ACCESS_TOKEN      (Polar API token — sandbox or production)
 # POLAR_WEBHOOK_SECRET    (HMAC secret to verify Polar webhook signatures)
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
+# RENDER_CALLBACK_SECRET    (recorder render — random 32+ byte hex, shared with the container service)
 #
 # Transactional email is sent via the Cloudflare `send_email` binding above
 # (no API key needed). One-time setup: `npx wrangler email sending enable

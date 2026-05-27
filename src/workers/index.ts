@@ -163,6 +163,7 @@ app.route('/', tagRoutes);
 app.route('/', ogMetaRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
+export { RenderContainer } from './render-container';
 
 const workerHandlers = {
   fetch: app.fetch,

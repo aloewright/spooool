@@ -107,8 +107,6 @@ class_name = "RateLimiterDO"
 class_name = "RenderContainer"
 image = "./container/render/Dockerfile"
 max_instances = 50
-sleep_after = "60s"
-default_port = 8080
 instance_type = "standard-3"
 
 # Durable Object binding for the render container. CF Containers require a
@@ -127,7 +125,7 @@ new_classes = ["RateLimiterDO"]
 
 [[migrations]]
 tag = "do_v3"
-new_classes = ["RenderContainer"]
+new_sqlite_classes = ["RenderContainer"]
 
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.

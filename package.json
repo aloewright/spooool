@@ -29,6 +29,7 @@
     "worker:logs": "wrangler tail --format json | jq ."
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.3.5",
     "@cloudflare/kumo": "^1.16.0",
     "@cloudflare/workers-types": "^4.20240221.1",
     "@hotwired/turbo": "^8.0.23",

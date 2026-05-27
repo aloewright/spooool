@@ -1,27 +1,27 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 // Capture the options passed to better-auth so we can assert that the
-// password-reset and verification callbacks are wired and forward to Loops.
+// password-reset / verification / post-reset-confirmation callbacks are
+// wired and forward to the Cloudflare email module.
+type CallbackArgs = {
+  user: { id: string; email: string };
+  url: string;
+  token: string;
+};
+
 type CapturedOptions = {
   appName?: string;
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
     autoSignIn?: boolean;
-    sendResetPassword?: (args: {
-      user: { id: string; email: string };
-      url: string;
-      token: string;
-    }) => Promise<void>;
+    sendResetPassword?: (args: CallbackArgs) => Promise<void>;
+    onPasswordReset?: (args: { user: { id: string; email: string } }) => Promise<void>;
   };
   emailVerification?: {
     sendOnSignUp?: boolean;
     autoSignInAfterVerification?: boolean;
-    sendVerificationEmail?: (args: {
-      user: { id: string; email: string };
-      url: string;
-      token: string;
-    }) => Promise<void>;
+    sendVerificationEmail?: (args: CallbackArgs) => Promise<void>;
   };
 };
 
@@ -35,18 +35,34 @@ vi.mock('better-auth', () => ({
   betterAuth: (options: CapturedOptions) => betterAuthSpy(options),
 }));
 
-const sendEventSpy = vi.fn<(env: unknown, args: unknown) => Promise<unknown>>(
-  async () => ({ ok: true, status: 200 }),
+const sendPasswordResetEmailSpy = vi.fn(
+  async (_env: unknown, _args: unknown) => ({ ok: true as const, messageId: 'm1' }),
 );
-vi.mock('../workers/loops', () => ({
-  sendEvent: (env: unknown, args: unknown) => sendEventSpy(env, args),
+const sendVerificationEmailSpy = vi.fn(
+  async (_env: unknown, _args: unknown) => ({ ok: true as const, messageId: 'm2' }),
+);
+const sendPasswordResetConfirmationEmailSpy = vi.fn(
+  async (_env: unknown, _args: unknown) => ({ ok: true as const, messageId: 'm3' }),
+);
+
+vi.mock('../workers/email', () => ({
+  sendPasswordResetEmail: (env: unknown, args: unknown) =>
+    sendPasswordResetEmailSpy(env as never, args as never),
+  sendVerificationEmail: (env: unknown, args: unknown) =>
+    sendVerificationEmailSpy(env as never, args as never),
+  sendPasswordResetConfirmationEmail: (env: unknown, args: unknown) =>
+    sendPasswordResetConfirmationEmailSpy(env as never, args as never),
 }));
 
 import { createAuth } from './index';
 
+const fakeBinding = { send: vi.fn() } as unknown as { send: () => Promise<{ messageId?: string }> };
+
 describe('createAuth', () => {
   beforeEach(() => {
-    sendEventSpy.mockClear();
+    sendPasswordResetEmailSpy.mockClear();
+    sendVerificationEmailSpy.mockClear();
+    sendPasswordResetConfirmationEmailSpy.mockClear();
     betterAuthSpy.mockClear();
     captured.options = undefined;
   });
@@ -66,13 +82,11 @@ describe('createAuth', () => {
     expect(captured.options?.emailAndPassword?.minPasswordLength).toBe(8);
     expect(captured.options?.emailAndPassword?.autoSignIn).toBe(true);
     expect(typeof captured.options?.emailAndPassword?.sendResetPassword).toBe('function');
+    expect(typeof captured.options?.emailAndPassword?.onPasswordReset).toBe('function');
   });
 
-  it('sendResetPassword forwards to Loops with the reset url', async () => {
-    createAuth({
-      DB: {} as D1Database,
-      LOOPS_API_KEY: 'k',
-    });
+  it('sendResetPassword forwards to the email module with the reset url', async () => {
+    createAuth({ DB: {} as D1Database, EMAIL: fakeBinding });
     const cb = captured.options?.emailAndPassword?.sendResetPassword;
     if (!cb) throw new Error('sendResetPassword callback missing');
     await cb({
@@ -80,22 +94,18 @@ describe('createAuth', () => {
       url: 'https://x/reset?token=tok',
       token: 'tok',
     });
-    expect(sendEventSpy).toHaveBeenCalledTimes(1);
-    expect(sendEventSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ LOOPS_API_KEY: 'k' }),
-      {
-        email: 'a@b.com',
-        eventName: 'password_reset',
-        eventProperties: { resetUrl: 'https://x/reset?token=tok', userId: 'u1' },
-      },
+    expect(sendPasswordResetEmailSpy).toHaveBeenCalledTimes(1);
+    expect(sendPasswordResetEmailSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ EMAIL: fakeBinding }),
+      { to: 'a@b.com', url: 'https://x/reset?token=tok' },
     );
   });
 
-  it('sendResetPassword still resolves when LOOPS_API_KEY is missing', async () => {
-    sendEventSpy.mockResolvedValueOnce({
+  it('sendResetPassword still resolves when EMAIL binding is missing', async () => {
+    sendPasswordResetEmailSpy.mockResolvedValueOnce({
       ok: false,
       skipped: true,
-      reason: 'no key',
+      reason: 'EMAIL binding not configured',
     } as never);
     createAuth({ DB: {} as D1Database });
     const cb = captured.options?.emailAndPassword?.sendResetPassword;
@@ -109,6 +119,18 @@ describe('createAuth', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('onPasswordReset sends the post-reset confirmation email', async () => {
+    createAuth({ DB: {} as D1Database, EMAIL: fakeBinding });
+    const cb = captured.options?.emailAndPassword?.onPasswordReset;
+    if (!cb) throw new Error('onPasswordReset callback missing');
+    await cb({ user: { id: 'u1', email: 'a@b.com' } });
+    expect(sendPasswordResetConfirmationEmailSpy).toHaveBeenCalledTimes(1);
+    expect(sendPasswordResetConfirmationEmailSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ EMAIL: fakeBinding }),
+      { to: 'a@b.com' },
+    );
+  });
+
   it('configures email verification with sendOnSignUp + auto sign-in', () => {
     createAuth({ DB: {} as D1Database });
     expect(captured.options?.emailVerification?.sendOnSignUp).toBe(true);
@@ -116,8 +138,8 @@ describe('createAuth', () => {
     expect(typeof captured.options?.emailVerification?.sendVerificationEmail).toBe('function');
   });
 
-  it('sendVerificationEmail forwards to Loops with the verify url', async () => {
-    createAuth({ DB: {} as D1Database, LOOPS_API_KEY: 'k' });
+  it('sendVerificationEmail forwards to the email module with the verify url', async () => {
+    createAuth({ DB: {} as D1Database, EMAIL: fakeBinding });
     const cb = captured.options?.emailVerification?.sendVerificationEmail;
     if (!cb) throw new Error('sendVerificationEmail callback missing');
     await cb({
@@ -125,14 +147,10 @@ describe('createAuth', () => {
       url: 'https://x/verify?token=tok',
       token: 'tok',
     });
-    expect(sendEventSpy).toHaveBeenCalledTimes(1);
-    expect(sendEventSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ LOOPS_API_KEY: 'k' }),
-      {
-        email: 'a@b.com',
-        eventName: 'email_verification',
-        eventProperties: { verifyUrl: 'https://x/verify?token=tok', userId: 'u1' },
-      },
+    expect(sendVerificationEmailSpy).toHaveBeenCalledTimes(1);
+    expect(sendVerificationEmailSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ EMAIL: fakeBinding }),
+      { to: 'a@b.com', url: 'https://x/verify?token=tok' },
     );
   });
 });

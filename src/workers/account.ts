@@ -174,9 +174,6 @@ export interface CascadeEnv {
   DB: D1Database;
   VIDEOS: R2Bucket;
   CACHE: KVNamespace;
-  /** Optional — when present we mark the deleted user's contact as
-      unsubscribed in Loops so they don't keep receiving lifecycle email. */
-  LOOPS_API_KEY?: string;
 }
 
 export interface CascadeStats {
@@ -192,12 +189,6 @@ export interface CascadeStats {
 // they can't roll back; if D1 fails we'd rather have orphaned R2 keys than a
 // partial DB delete.
 export async function cascadeDeleteUser(env: CascadeEnv, userId: string): Promise<CascadeStats> {
-  // Capture the email before the user row goes away so we can mark Loops
-  // as unsubscribed after the cascade completes (ALO-143).
-  const userRow = await env.DB.prepare('SELECT email FROM user WHERE id = ?')
-    .bind(userId)
-    .first<{ email: string | null }>();
-
   const videos = await env.DB.prepare(
     'SELECT id, r2_key FROM videos WHERE user_id = ?',
   )
@@ -227,19 +218,6 @@ export async function cascadeDeleteUser(env: CascadeEnv, userId: string): Promis
     env.DB.prepare(`DELETE FROM user WHERE id = ?`).bind(userId),
   ];
   await env.DB.batch(stmts);
-
-  // Best-effort Loops unsubscribe — never throws into the deletion sweep.
-  if (userRow?.email && env.LOOPS_API_KEY) {
-    const { unsubscribeContact } = await import('./loops');
-    await unsubscribeContact({ LOOPS_API_KEY: env.LOOPS_API_KEY }, userRow.email).catch(
-      (err) => {
-        console.warn('loops unsubscribe failed', {
-          userId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
-  }
 
   return {
     userId,

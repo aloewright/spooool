@@ -101,7 +101,7 @@ describe('todayKey', () => {
 });
 
 describe('buildCostAlertProps', () => {
-  it('flattens snapshot + alerts into Loops eventProperties', () => {
+  it('flattens snapshot + alerts into a primitive property bag', () => {
     const props = buildCostAlertProps(SAMPLE_SNAPSHOT, [
       { reason: 'storage_threshold', threshold_bytes: 50 * 1024 * 1024 * 1024, observed_bytes: SAMPLE_SNAPSHOT.storage.used_bytes },
     ]);
@@ -178,24 +178,30 @@ describe('runCostMonitorSweep', () => {
     expect(result.reason).toBe('no_alerts');
   });
 
+  type SendMessage = {
+    to: string | string[];
+    from: { email: string; name?: string };
+    subject: string;
+    html?: string;
+    text?: string;
+  };
+  function fakeEmailBinding() {
+    const send = vi.fn(async (_msg: SendMessage) => ({ messageId: 'm-1' }));
+    return { send };
+  }
+
   it('skips when already sent today (KV marker present)', async () => {
+    const binding = fakeEmailBinding();
     const env: CostsEnv = {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: fakeKv({ [todayKey()]: '1' }),
       ADMIN_EMAILS: 'ops@spooool.com',
-      LOOPS_API_KEY: 'lp_test',
+      EMAIL: binding,
     } as unknown as CostsEnv;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{}', { status: 200 }),
-    );
-    try {
-      const result = await runCostMonitorSweep(env);
-      expect(result.sent).toBe(false);
-      expect(result.reason).toBe('already_sent_today');
-      expect(fetchSpy).not.toHaveBeenCalled();
-    } finally {
-      fetchSpy.mockRestore();
-    }
+    const result = await runCostMonitorSweep(env);
+    expect(result.sent).toBe(false);
+    expect(result.reason).toBe('already_sent_today');
+    expect(binding.send).not.toHaveBeenCalled();
   });
 
   it('skips when no admin emails are configured', async () => {
@@ -203,45 +209,31 @@ describe('runCostMonitorSweep', () => {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: fakeKv(),
       ADMIN_EMAILS: '',
-      LOOPS_API_KEY: 'lp_test',
+      EMAIL: fakeEmailBinding(),
     } as unknown as CostsEnv;
     const result = await runCostMonitorSweep(env);
     expect(result.sent).toBe(false);
     expect(result.reason).toBe('no_admin_emails');
   });
 
-  it('fires a Loops cost_alert event per admin and writes the dedup marker', async () => {
+  it('sends a cost-alert email per admin and writes the dedup marker', async () => {
     const cache = fakeKv();
+    const binding = fakeEmailBinding();
     const env: CostsEnv = {
       DB: dbForSnapshot(200 * 1024 * 1024 * 1024),
       CACHE: cache,
       ADMIN_EMAILS: 'a@x.com, b@x.com',
-      LOOPS_API_KEY: 'lp_test',
+      EMAIL: binding,
     } as unknown as CostsEnv;
-    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        calls.push({
-          url: input.toString(),
-          body: JSON.parse((init?.body as string) ?? '{}'),
-        });
-        return new Response('{}', { status: 200 });
-      },
-    );
-    try {
-      const result = await runCostMonitorSweep(env);
-      expect(result.sent).toBe(true);
-      expect(result.reason).toBe('sent');
-      expect(calls).toHaveLength(2);
-      expect(calls[0].url).toBe('https://app.loops.so/api/v1/events/send');
-      expect(calls[0].body).toMatchObject({
-        email: 'a@x.com',
-        eventName: 'cost_alert',
-      });
-      expect(calls[1].body).toMatchObject({ email: 'b@x.com', eventName: 'cost_alert' });
-      expect(await cache.get(todayKey())).toBe('1');
-    } finally {
-      fetchSpy.mockRestore();
-    }
+    const result = await runCostMonitorSweep(env);
+    expect(result.sent).toBe(true);
+    expect(result.reason).toBe('sent');
+    expect(binding.send).toHaveBeenCalledTimes(2);
+    const calls = binding.send.mock.calls.map((c) => c[0]);
+    expect(calls[0].to).toBe('a@x.com');
+    expect(calls[1].to).toBe('b@x.com');
+    expect(calls[0].subject).toMatch(/Cost alert/);
+    expect(calls[0].text).toContain('storage_threshold');
+    expect(await cache.get(todayKey())).toBe('1');
   });
 });

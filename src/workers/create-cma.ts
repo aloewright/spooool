@@ -32,6 +32,16 @@ export async function runOneShotCMA(args: {
   templateId: string;
   prompt: string;
   env: CMAEnv;
+  /**
+   * Pre-generated jobId. The route handler pre-inserts the render_jobs
+   * row with status='queued' so it can return the jobId synchronously
+   * and run this toolchain via ctx.waitUntil(). We thread the SAME id
+   * through synthesizeTts AND finalizeRender so the TTS R2 key
+   * (`recorder/tts/{jobId}.mp3`) matches the final job row, and so the
+   * row updated when the render container completes is the same row the
+   * frontend has been polling since the moment auto-mode was kicked off.
+   */
+  jobId: string;
   deps?: CMARunDeps;
 }): Promise<{ jobId: string }> {
   const t = getTemplate(args.templateId);
@@ -45,13 +55,13 @@ export async function runOneShotCMA(args: {
 
   const { script } = await d.draftScript({ template: t, answers, env: args.env });
   const { scenes } = await d.planScenes({ script, template: t, env: args.env });
-  const provisionalJobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-  const { r2Key } = await d.synthesizeTts({ script, voice: t.voice, jobId: provisionalJobId, env: args.env });
+  const { r2Key } = await d.synthesizeTts({ script, voice: t.voice, jobId: args.jobId, env: args.env });
   const { jobId } = await d.finalizeRender({
     userId: args.userId,
     scenes,
     ttsR2Key: r2Key,
     env: args.env,
+    existingJobId: args.jobId,
   });
   return { jobId };
 }

@@ -13,15 +13,18 @@ import { getTemplate, listTemplateMetadata } from './create/templates';
 import { runOneShotCMA as defaultRunOneShotCMA } from './create-cma';
 import type { AIGatewayEnv, R2BindingEnv } from './create-tools';
 import type { RenderEnv } from './render';
+import { CREATE_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 
 export interface CreateEnv extends AIGatewayEnv, R2BindingEnv, RenderEnv {
   DB: D1Database;
   COMPOSER_AGENT: DurableObjectNamespace;
+  /** Optional — fail-open in local dev / tests when the binding isn't wired. */
+  RATE_LIMITER?: DurableObjectNamespace;
   /** Test seam — production uses the imported defaultRunOneShotCMA. */
   runOneShotCMA?: typeof defaultRunOneShotCMA;
 }
 
-interface SessionUser { id: string }
+interface SessionUser { id: string; emailVerified: boolean }
 type CreateVariables = { user: SessionUser | null };
 
 const autoBodySchema = z.object({
@@ -50,29 +53,89 @@ createRoutes.get('/api/create/templates/:id', async (c) => {
 createRoutes.post('/api/create/auto', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  // Email verification guard. The frontend gates this at the page level
+  // (Create.tsx), but a direct API call would otherwise bypass and burn
+  // AI Gateway credits before the account is even verified.
+  if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
+  // Per-user rate limit: 5 generations/hour. Same bucket as the guided
+  // sessions endpoint so a malicious client can't trivially route around
+  // it by alternating auto / sessions.
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: CREATE_BUCKET, identity: user.id });
+  if (!rl.allowed) {
+    return c.json({ error: 'Too many video generations. Try again shortly.' }, 429, rateLimitHeaders(rl));
+  }
   const raw = await c.req.json().catch(() => null);
   const parsed = autoBodySchema.safeParse(raw);
   if (!parsed.success) return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
+
   const run = c.env.runOneShotCMA ?? defaultRunOneShotCMA;
+
+  // The toolchain (draft → plan → tts → render dispatch) can run 60-90s
+  // — well past the worker 30s wall clock. Pre-insert the render_jobs
+  // row with status='queued', return the jobId immediately, then fire
+  // the toolchain via waitUntil so it survives the response cycle.
+  const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
   try {
-    const { jobId } = await run({
-      userId: user.id,
-      templateId: parsed.data.templateId,
-      prompt: parsed.data.prompt,
-      env: c.env,
-    });
-    return c.json({ jobId });
+    await c.env.DB.prepare(
+      `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(jobId, user.id, 'queued', JSON.stringify({ pending: true }), now, now).run();
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (/Generation failed, please try rephrasing/.test(msg)) return c.json({ error: msg }, 400);
-    console.error('[create] auto failed', { msg });
+    console.error('[create] auto pre-insert failed', { err: err instanceof Error ? err.message : String(err) });
     return c.json({ error: 'Generation failed' }, 500);
   }
+
+  // Fire-and-forget the toolchain. Errors are funnelled into the
+  // render_jobs row so the client polling /api/create/jobs/:id sees a
+  // failure state instead of an apparently-stuck "queued" row.
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        await run({
+          userId: user.id,
+          templateId: parsed.data.templateId,
+          prompt: parsed.data.prompt,
+          env: c.env,
+          jobId,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Content-policy refusals become the user-facing error verbatim;
+        // everything else is collapsed into the generic message so we
+        // don't leak provider details.
+        const userMsg = /Generation failed, please try rephrasing/.test(msg)
+          ? msg
+          : 'Generation failed';
+        console.error('[create] auto toolchain failed', { jobId, msg });
+        try {
+          await c.env.DB.prepare(
+            `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+          ).bind(userMsg, Date.now(), jobId).run();
+        } catch (dbErr) {
+          console.error('[create] failed to mark auto job as failed', {
+            jobId,
+            dbErr: dbErr instanceof Error ? dbErr.message : String(dbErr),
+          });
+        }
+      }
+    })(),
+  );
+
+  return c.json({ jobId });
 });
 
 createRoutes.post('/api/create/sessions', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
+  // Same per-user 5/hour bucket as /api/create/auto. The CMA toolchain
+  // doesn't fire until the user hits Generate over the WS, but spinning
+  // up sessions+DOs is itself non-trivial — and gating both endpoints
+  // with the same bucket keeps the abuse model simple.
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: CREATE_BUCKET, identity: user.id });
+  if (!rl.allowed) {
+    return c.json({ error: 'Too many video generations. Try again shortly.' }, 429, rateLimitHeaders(rl));
+  }
   const raw = await c.req.json().catch(() => null);
   const parsed = sessionBodySchema.safeParse(raw);
   if (!parsed.success) return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);

@@ -108,29 +108,35 @@ export class ComposerAgent {
     if (!s) throw new Error('Agent not primed');
     if (s.status !== 'questioning') throw new Error(`Cannot generate in status=${s.status}`);
     const t = this.template();
-    await this.saveState({ ...s, status: 'rendering' });
+    // Generate ONE jobId up front and thread it through TTS + finalize so the
+    // R2 key (`recorder/tts/{jobId}.mp3`) matches the eventual render_jobs row.
+    // submitRenderJob still owns the INSERT here (no existingJobId passed) —
+    // unlike the auto-mode route, the WS handler isn't bound by the 30s
+    // worker timeout, so we don't need the pre-insert + waitUntil dance.
+    const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+    await this.saveState({ ...s, status: 'rendering', jobId });
     try {
       onStatus('drafting');
       const { script } = await draftScript({ template: t, answers: s.answers, env: this.env });
       onStatus('planning');
       const { scenes } = await planScenes({ script, template: t, env: this.env });
       onStatus('tts');
-      // Generate a provisional jobId so the TTS upload key is stable across
-      // restarts; finalize_render uses the same id.
-      const provisionalJobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-      const { r2Key } = await synthesizeTts({ script, voice: t.voice, jobId: provisionalJobId, env: this.env });
+      const { r2Key } = await synthesizeTts({ script, voice: t.voice, jobId, env: this.env });
       onStatus('rendering');
-      const { jobId } = await finalizeRender({
+      const { jobId: returnedJobId } = await finalizeRender({
         userId: s.userId,
         scenes,
         ttsR2Key: r2Key,
         env: this.env,
+        existingJobId: jobId,
       });
-      await this.saveState({ ...s, status: 'rendering', jobId });
-      return { jobId };
+      // returnedJobId === jobId because we passed existingJobId; keep the
+      // assignment so a future refactor that drops existingJobId still works.
+      await this.saveState({ ...s, status: 'rendering', jobId: returnedJobId });
+      return { jobId: returnedJobId };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      await this.saveState({ ...s, status: 'failed', errorMessage: msg });
+      await this.saveState({ ...s, status: 'failed', errorMessage: msg, jobId });
       throw err;
     }
   }

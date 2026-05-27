@@ -40,6 +40,15 @@ export const SEARCH_BUCKET: RateLimitBucket = {
   refillPerSecond: 1,
 };
 
+// 5 video generations per hour per user — guards AI Gateway credit burn on the
+// prompt-to-video endpoints (auto-mode + guided sessions). Per-user, not per-IP,
+// so multiple users behind a NAT aren't penalized for each other's traffic.
+export const CREATE_BUCKET: RateLimitBucket = {
+  name: 'create',
+  capacity: 5,
+  refillPerSecond: 5 / 3600,
+};
+
 interface RateLimiterBinding {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;

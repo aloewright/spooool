@@ -220,6 +220,14 @@ export interface FinalizeRenderInput {
   scenes: SceneSpec[];
   ttsR2Key: string;
   env: RenderEnv;
+  /**
+   * Pre-supplied jobId — passed through to `submitRenderJob` as
+   * `existingJobId`. Callers use this to thread ONE id end-to-end so the
+   * TTS R2 key (`recorder/tts/{jobId}.mp3`) matches the final render job
+   * row. When provided, the caller is also expected to have pre-inserted
+   * the render_jobs row (see `submitRenderJob` for the contract).
+   */
+  existingJobId?: string;
   /** Injected for tests; defaults to the real `submitRenderJob`. */
   submitRenderJob?: (input: SubmitRenderJobInput) => Promise<{ jobId: string }>;
 }
@@ -236,5 +244,6 @@ export async function finalizeRender(input: FinalizeRenderInput): Promise<{ jobI
       brand: { color: '#0a84ff' },
     },
     env: input.env,
+    existingJobId: input.existingJobId,
   });
 }

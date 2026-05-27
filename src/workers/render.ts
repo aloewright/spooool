@@ -35,14 +35,33 @@ export interface SubmitRenderJobInput {
   takeKeys: string[];
   compositionProps: Record<string, unknown>;
   env: RenderEnv;
+  /**
+   * If the caller already inserted the render_jobs row (e.g., the
+   * auto-mode route pre-inserts with status='queued' so it can return
+   * the jobId synchronously and run the toolchain via waitUntil), pass
+   * the existing jobId here and the INSERT will be skipped.
+   *
+   * This also lets callers thread ONE jobId end-to-end so the TTS R2 key
+   * (`recorder/tts/{jobId}.mp3`) matches the final render job id.
+   */
+  existingJobId?: string;
 }
 
 export async function submitRenderJob(input: SubmitRenderJobInput): Promise<{ jobId: string }> {
-  const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const jobId = input.existingJobId ?? `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const now = Date.now();
-  await input.env.DB.prepare(
-    `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-  ).bind(jobId, input.userId, 'queued', JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, now).run();
+  if (!input.existingJobId) {
+    await input.env.DB.prepare(
+      `INSERT INTO render_jobs (id, user_id, status, composition_spec, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(jobId, input.userId, 'queued', JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, now).run();
+  } else {
+    // Caller already inserted the row, but composition_spec was unknown at
+    // that point. Patch it in now so the recorded job mirrors what was
+    // actually dispatched to the container.
+    await input.env.DB.prepare(
+      `UPDATE render_jobs SET composition_spec=?, updated_at=? WHERE id=?`,
+    ).bind(JSON.stringify({ takeKeys: input.takeKeys, compositionProps: input.compositionProps }), now, jobId).run();
+  }
 
   const ct = input.env.RENDER_CONTAINER.get(input.env.RENDER_CONTAINER.idFromName(input.userId));
   try {

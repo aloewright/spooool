@@ -1,4 +1,4 @@
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import { WEBCAM_PREFIX } from "../config/cameras";
 import { RecordingStatus } from "../RecordButton";
 import { cancelTranscribeOnServer } from "../helpers/cancel-transcribe";
@@ -8,6 +8,8 @@ import { getExtension } from "../helpers/find-good-supported-codec";
 import { Prefix } from "../helpers/prefixes";
 import { transcribeVideoOnServer } from "../helpers/transcribe-video";
 import { uploadFileToServer } from "../helpers/upload-file";
+import { RenderProgress } from "../RenderProgress";
+import { createRenderJob } from "../lib/render-jobs";
 import { ProcessStatus } from "./ProcessingStatus";
 import { Button } from "./ui/button";
 import {
@@ -24,14 +26,13 @@ export const UseThisTake: React.FC<{
   setRecordingStatus: React.Dispatch<React.SetStateAction<RecordingStatus>>;
   setStatus: React.Dispatch<React.SetStateAction<ProcessStatus | null>>;
 }> = ({ selectedFolder, recordingStatus, setRecordingStatus, setStatus }) => {
-  // TODO Task 16: expose uploadedR2Keys to the render-job submission UI.
-  // Collect r2Keys for each uploaded take blob. Initialized fresh each time
-  // the user clicks "Copy to public folder" so keys from prior sessions don't
-  // bleed in.
   const uploadedR2Keys = useRef<string[]>([]);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [uploadsComplete, setUploadsComplete] = useState(false);
 
   const keepVideoOnServer = useCallback(async () => {
     uploadedR2Keys.current = [];
+    setUploadsComplete(false);
     if (recordingStatus.type !== "recording-finished") {
       throw new Error("Recording not finished");
     }
@@ -83,7 +84,6 @@ export const UseThisTake: React.FC<{
           });
         })
         .then(({ r2Key }) => {
-          // TODO Task 16: pass uploadedR2Keys.current to POST /api/render/jobs
           uploadedR2Keys.current.push(r2Key);
           setStatus(null);
         })
@@ -142,10 +142,28 @@ export const UseThisTake: React.FC<{
       })
       .then(() => {
         setStatus(null);
+        setUploadsComplete(true);
       });
 
     setRecordingStatus({ type: "idle" });
   }, [recordingStatus, selectedFolder, setRecordingStatus, setStatus]);
+
+  const handleCreateVideo = useCallback(async () => {
+    try {
+      const result = await createRenderJob({
+        takeKeys: uploadedR2Keys.current,
+        compositionProps: {
+          title: 'Spooool recording',
+          brand: { color: '#0a84ff' },
+          sceneOrder: ['main'],
+          layouts: {},
+        },
+      });
+      setJobId(result.jobId);
+    } catch (err) {
+      alert(`Failed to start render: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, []);
 
   const keepVideosWithoutConverting = useCallback(async () => {
     if (recordingStatus.type !== "recording-finished") {
@@ -204,63 +222,74 @@ export const UseThisTake: React.FC<{
     [recordingStatus],
   );
 
+  if (jobId) {
+    return <RenderProgress jobId={jobId} />;
+  }
+
   return (
     <>
-      <div className="flex items-center">
-        {window.remotionServerEnabled ? (
-          <Button
-            variant="default"
-            className={"rounded-r-none"}
-            onClick={keepVideoOnServer}
-          >
-            {`Copy to public/${selectedFolder}`}
-          </Button>
-        ) : (
-          <Button
-            variant="default"
-            className={"rounded-r-none"}
-            onClick={keepVideoOnClient}
-          >
-            {`Download files`}
-          </Button>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+      <div className="flex items-center gap-2">
+        <div className="flex items-center">
+          {window.remotionServerEnabled ? (
             <Button
               variant="default"
-              className={"rounded-l-none border-l-2 px-2"}
+              className={"rounded-r-none"}
+              onClick={keepVideoOnServer}
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 448 512"
-                style={{ width: 12 }}
-              >
-                <path d="M201.4 374.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 306.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z" />
-              </svg>
+              {`Copy to public/${selectedFolder}`}
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent>
-            {window.remotionServerEnabled ? (
-              <DropdownMenuItem onClick={keepVideoOnClient}>
-                Download as file
-              </DropdownMenuItem>
-            ) : null}
-            <DropdownMenuItem onClick={keepVideosWithoutConverting}>
-              Download without conversion
-            </DropdownMenuItem>
-            {recordingStatus.type === "recording-finished" &&
-              recordingStatus.blobs.map((blob) => (
-                <DropdownMenuItem
-                  key={blob.prefix}
-                  onClick={() => {
-                    previewWebcam(blob.prefix as Prefix);
-                  }}
+          ) : (
+            <Button
+              variant="default"
+              className={"rounded-r-none"}
+              onClick={keepVideoOnClient}
+            >
+              {`Download files`}
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="default"
+                className={"rounded-l-none border-l-2 px-2"}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  viewBox="0 0 448 512"
+                  style={{ width: 12 }}
                 >
-                  Preview {blob.prefix}
+                  <path d="M201.4 374.6c12.5 12.5 32.8 12.5 45.3 0l160-160c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0L224 306.7 86.6 169.4c-12.5-12.5-32.8-12.5-45.3 0s-12.5 32.8 0 45.3l160 160z" />
+                </svg>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {window.remotionServerEnabled ? (
+                <DropdownMenuItem onClick={keepVideoOnClient}>
+                  Download as file
                 </DropdownMenuItem>
-              ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              ) : null}
+              <DropdownMenuItem onClick={keepVideosWithoutConverting}>
+                Download without conversion
+              </DropdownMenuItem>
+              {recordingStatus.type === "recording-finished" &&
+                recordingStatus.blobs.map((blob) => (
+                  <DropdownMenuItem
+                    key={blob.prefix}
+                    onClick={() => {
+                      previewWebcam(blob.prefix as Prefix);
+                    }}
+                  >
+                    Preview {blob.prefix}
+                  </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        {uploadsComplete ? (
+          <Button variant="default" onClick={() => void handleCreateVideo()}>
+            Create video
+          </Button>
+        ) : null}
       </div>
     </>
   );

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BlinkingCircle } from "./BlinkingCircle";
+import { CompositionPreview, useTakeUrls } from "./CompositionPreview";
 import { Logo } from "./Logo";
 import type { RecordingStatus } from "./RecordButton";
 import { RecordButton } from "./RecordButton";
@@ -31,6 +32,49 @@ const recordWrapper: React.CSSProperties = {
   justifyContent: "center",
   alignItems: "center",
   gap: 10,
+};
+
+/** True when the URL contains ?preview=1. Checked once at mount time. */
+const previewEnabled =
+  new URLSearchParams(window.location.search).get("preview") === "1";
+
+/**
+ * Inner component that holds the blob-URL creation logic.
+ * Kept separate so the useTakeUrls hook only runs when preview is enabled
+ * and a finished recording is present.
+ */
+const CompositionPreviewSection: React.FC<{
+  blobs: Array<{ data: () => Promise<Blob> }>;
+  expectedFrames: number;
+}> = ({ blobs, expectedFrames }) => {
+  const blobGetters = useMemo(
+    () => blobs.map((b) => b.data),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [blobs.length],
+  );
+  const takeUrls = useTakeUrls(blobGetters);
+
+  if (takeUrls === null) {
+    return (
+      <div
+        style={{
+          padding: "8px 16px",
+          opacity: 0.6,
+          color: "white",
+          fontFamily: "sans-serif",
+          fontSize: 13,
+        }}
+      >
+        Loading preview…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: "8px 16px" }}>
+      <CompositionPreview takeUrls={takeUrls} expectedFrames={expectedFrames} />
+    </div>
+  );
 };
 
 export const TopBar: React.FC<{
@@ -76,55 +120,65 @@ export const TopBar: React.FC<{
   }, [selectedFolder]);
 
   return (
-    <div style={topBarContainer}>
-      <Logo></Logo>
-      <div style={recordWrapper}>
-        <RecordButton
-          recordingStatus={recordingStatus}
-          processingStatus={processingStatus}
-          setRecordingStatus={setRecordingStatus}
-          showAllViews={showAllViews}
-        />
-        {recordingStatus.type === "recording" ? (
+    <>
+      <div style={topBarContainer}>
+        <Logo></Logo>
+        <div style={recordWrapper}>
+          <RecordButton
+            recordingStatus={recordingStatus}
+            processingStatus={processingStatus}
+            setRecordingStatus={setRecordingStatus}
+            showAllViews={showAllViews}
+          />
+          {recordingStatus.type === "recording" ? (
+            <>
+              <BlinkingCircle />
+              <Timer startDate={recordingStatus.ongoing.startDate} />
+            </>
+          ) : null}
+          {recordingStatus.type === "recording-finished" ? (
+            <UseThisTake
+              selectedFolder={selectedFolder}
+              recordingStatus={recordingStatus}
+              setRecordingStatus={setRecordingStatus}
+              setStatus={setProcessingStatus}
+            />
+          ) : null}
+          {processingStatus && (
+            <ProcessingStatus status={processingStatus}></ProcessingStatus>
+          )}
+        </div>
+
+        <div style={{ flex: 1 }} />
+        {folders ? (
           <>
-            <BlinkingCircle />
-            <Timer startDate={recordingStatus.ongoing.startDate} />
+            <SelectedFolder
+              folders={folders}
+              selectedFolder={selectedFolder}
+              setSelectedFolder={setSelectedFolder}
+            />
+            <NewFolderDialog
+              refreshFoldersList={refreshFoldersList}
+              setSelectedFolder={setSelectedFolder}
+            />
           </>
         ) : null}
-        {recordingStatus.type === "recording-finished" ? (
-          <UseThisTake
-            selectedFolder={selectedFolder}
-            recordingStatus={recordingStatus}
-            setRecordingStatus={setRecordingStatus}
-            setStatus={setProcessingStatus}
-          />
+        {window.remotionServerEnabled ? (
+          <Button asChild variant="outline">
+            <a href={`http://localhost:3000/${selectedFolder}`} target="_blank">
+              Go to Studio
+            </a>
+          </Button>
         ) : null}
-        {processingStatus && (
-          <ProcessingStatus status={processingStatus}></ProcessingStatus>
-        )}
       </div>
 
-      <div style={{ flex: 1 }} />
-      {folders ? (
-        <>
-          <SelectedFolder
-            folders={folders}
-            selectedFolder={selectedFolder}
-            setSelectedFolder={setSelectedFolder}
-          />
-          <NewFolderDialog
-            refreshFoldersList={refreshFoldersList}
-            setSelectedFolder={setSelectedFolder}
-          />
-        </>
+      {/* Composition preview — only shown when ?preview=1 is in the URL */}
+      {previewEnabled && recordingStatus.type === "recording-finished" ? (
+        <CompositionPreviewSection
+          blobs={recordingStatus.blobs}
+          expectedFrames={recordingStatus.expectedFrames}
+        />
       ) : null}
-      {window.remotionServerEnabled ? (
-        <Button asChild variant="outline">
-          <a href={`http://localhost:3000/${selectedFolder}`} target="_blank">
-            Go to Studio
-          </a>
-        </Button>
-      ) : null}
-    </div>
+    </>
   );
 };

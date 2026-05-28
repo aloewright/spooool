@@ -24,31 +24,31 @@ export interface StageCost {
 export const STAGE_COSTS: StageCost[] = [
   {
     stage: 'draft_script',
-    route: 'dynamic/text_gen',
-    resolvedModel: 'Claude-class LLM (gateway-routed)',
-    costUsd: 0.008,
+    route: 'dynamic/text (spooool)',
+    resolvedModel: '@cf/zai-org/glm-4.7-flash → fallback @cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    costUsd: 0.004,
     description: 'Drafts narration from your prompt + template system prompt.',
   },
   {
     stage: 'plan_scenes',
-    route: 'dynamic/text_gen',
-    resolvedModel: 'Claude-class LLM (gateway-routed)',
-    costUsd: 0.011,
+    route: 'dynamic/text (spooool)',
+    resolvedModel: '@cf/zai-org/glm-4.7-flash → fallback @cf/meta/llama-3.3-70b-instruct-fp8-fast',
+    costUsd: 0.005,
     description: 'Breaks the script into title/beat/outro scenes with frame durations.',
   },
   {
     stage: 'synthesize_tts',
-    route: 'dynamic/audio_gen',
-    resolvedModel: 'OpenAI TTS / ElevenLabs (gateway-routed)',
-    costUsd: 0.018,
-    description: 'Generates a narrated mp3 from the script and writes it to R2.',
+    route: 'env.AI.run via spooool gateway',
+    resolvedModel: '@cf/deepgram/aura-2-en (Workers AI binding)',
+    costUsd: 0.012,
+    description: 'Generates a narrated mp3 from the script and writes it to R2. Failure is non-fatal — render proceeds silently.',
   },
   {
     stage: 'render',
     route: 'CF Container (Remotion + Chromium + ffmpeg)',
     resolvedModel: 'spooool-render:1.0.4 / standard-3',
     costUsd: 0.013,
-    description: 'Renders the explainer composition into an MP4. ~2 minutes wall clock.',
+    description: 'Renders the explainer composition into an MP4. ~1–2 minutes wall clock.',
   },
 ];
 

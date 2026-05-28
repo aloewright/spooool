@@ -36,7 +36,7 @@ function gatewayHeaders(env: AIGatewayEnv): Record<string, string> {
 }
 
 async function chatComplete(
-  args: { route: 'dynamic/text_gen' | 'dynamic/research_gen'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIGatewayEnv },
+  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIGatewayEnv },
   retries: number,
 ): Promise<string> {
   let lastErr: unknown = null;
@@ -77,7 +77,7 @@ export async function draftScript(args: {
   ];
   let content: string;
   try {
-    content = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 2);
+    content = await chatComplete({ route: 'dynamic/text', messages, env: args.env }, 2);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Script generation failed: ${msg}`);
@@ -117,7 +117,7 @@ export async function planScenes(args: {
   };
 
   const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 0);
+    const raw = await chatComplete({ route: 'dynamic/text', messages, env: args.env }, 0);
     return parseOrThrow(raw);
   };
 

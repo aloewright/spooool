@@ -22,7 +22,7 @@ function envFor(): AIGatewayEnv {
 }
 
 describe('draftScript', () => {
-  it('calls dynamic/text_gen with the template system prompt and returns the script', async () => {
+  it('calls dynamic/text with the template system prompt and returns the script', async () => {
     let seenBody: { model: string; messages: Array<{ role: string; content: string }> } | null = null;
     mockGateway(async (url, init) => {
       seenBody = JSON.parse(init.body as string);
@@ -34,7 +34,7 @@ describe('draftScript', () => {
       env: envFor(),
     });
     expect(result.script).toMatch(/Once upon a time/);
-    expect(seenBody!.model).toBe('dynamic/text_gen');
+    expect(seenBody!.model).toBe('dynamic/text');
     expect(seenBody!.messages[0].content).toContain("hero's journey");
   });
 

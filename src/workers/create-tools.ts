@@ -30,38 +30,35 @@ export interface SceneSpec {
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
 const TEXT_GATEWAY_SLUG = 'x';
+// The fallback model on gateway x's dynamic/text_gen route. Using this
+// directly via env.AI.run({ gateway: { id: 'x' } }) per the CLAUDE.md
+// "Working pattern from a Worker today" — it's the only invocation
+// shape confirmed working end-to-end from inside a Worker. The
+// alternatives all fail:
+//   - env.AI.run("dynamic/text_gen", ...) → 404 (binding treats arg as
+//     literal Workers AI model id; doesn't resolve dynamic routes)
+//   - env.AI.gateway('x').run({ provider:'compat', endpoint:'chat/
+//     completions', query:{model:'dynamic/text_gen',...} }) → returns
+//     empty {} (compat proxy doesn't translate to underlying provider)
+//   - ai-gateway-provider + Vercel AI SDK generateText() → 400 anyOf
+//     at '/' not met (Universal endpoint validates body against each
+//     route node's schema directly with no compat translation)
+//   - fetch() to /compat/chat/completions from worker → 2019 per
+//     CLAUDE.md (Compatibility... rejected pre-route)
+const TEXT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 interface ChatCompletionResponse {
+  // OpenAI-compat shape (when @cf/* models route through compat)
   choices?: Array<{ message?: { content?: string } }>;
+  // Workers AI native shape (text-generation models)
+  response?: string;
 }
 
-/**
- * Invoke a dynamic-route chat completion via the Workers AI binding's
- * gateway proxy:
- *
- *   env.AI.gateway('x').run({
- *     provider: 'compat',
- *     endpoint: 'chat/completions',
- *     query: { model: 'dynamic/text_gen', messages: [...] },
- *   })
- *
- * Previously tried `ai-gateway-provider` + Vercel AI SDK. That package
- * posts to the gateway's Universal endpoint with an array body which
- * the gateway rejects ("anyOf at '/' not met") for dynamic routes
- * containing Vertex Gemini + Workers AI fallbacks — the request shape
- * is matched against each provider's schema directly with no compat
- * translation. The binding's compat proxy goes through
- * `/compat/chat/completions` and is the only invocation shape
- * confirmed working end-to-end from inside a Worker on gateway x.
- */
 async function chatComplete(
   args: {
+    /** Reserved for future model swap; currently unused — we go straight
+     *  to the gemma-4-26b model below. */
     route: 'dynamic/text_gen';
-    /**
-     * Full chat history including any system message. OpenAI's compat
-     * endpoint accepts `role: 'system'` directly — we don't need a
-     * separate `system` field like the Vercel AI SDK requires.
-     */
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
     env: AIBindingEnv;
   },
@@ -70,19 +67,11 @@ async function chatComplete(
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const raw = await args.env.AI.gateway(TEXT_GATEWAY_SLUG).run({
-        provider: 'compat',
-        endpoint: 'chat/completions',
-        // Pass `headers: {}` explicitly — the binding's internal code
-        // does Object.keys/entries on this and throws "Cannot convert
-        // undefined or null to object" when omitted, even though the
-        // type marks it optional.
-        headers: {},
-        query: { model: args.route, messages: args.messages },
-      });
-      // The binding may return a parsed JSON, a Response, a ReadableStream,
-      // or a raw string. Walk through possibilities and surface what we
-      // got when nothing matches so we can fix parsing on the next pass.
+      const raw = await args.env.AI.run(
+        TEXT_MODEL,
+        { messages: args.messages, max_tokens: 800 },
+        { gateway: { id: TEXT_GATEWAY_SLUG } },
+      );
       let body: ChatCompletionResponse | undefined;
       if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
         body = await (raw as Response).json() as ChatCompletionResponse;
@@ -91,11 +80,12 @@ async function chatComplete(
       } else {
         body = raw as ChatCompletionResponse;
       }
-      const content = body?.choices?.[0]?.message?.content;
+      // Workers AI returns `{ response: "..." }` for chat-completions on
+      // @cf/google/gemma-*; OpenAI-compat would return choices[0].message.content.
+      const content = body?.response ?? body?.choices?.[0]?.message?.content;
       if (typeof content === 'string' && content.length > 0) return content;
-      // Diagnostic: dump what we got so the next attempt can decode it.
       const shape = raw == null ? String(raw) : typeof raw === 'object'
-        ? `object keys=${Object.keys(raw as Record<string, unknown>).join(',')}`
+        ? `object keys=${Object.keys(raw as unknown as Record<string, unknown>).join(',')}`
         : `${typeof raw}=${String(raw).slice(0, 200)}`;
       const preview = (() => {
         try { return JSON.stringify(raw)?.slice(0, 500); } catch { return '<unstringifiable>'; }
@@ -105,7 +95,6 @@ async function chatComplete(
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
       const msg = lastErr instanceof Error ? lastErr.message : '';
-      // Non-retryable: 4xx / route-shape errors look like client mistakes.
       if (/\b4\d\d\b/.test(msg) || /invalid|bad request|not found/i.test(msg)) break;
     }
     if (attempt < retries) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));

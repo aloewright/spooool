@@ -3,46 +3,40 @@ import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingE
 import { heroJourney } from './create/templates/hero-journey';
 import type { RenderEnv } from './render';
 
-interface GatewayCall {
-  slug: string;
-  body: {
-    provider: string;
-    endpoint: string;
-    query: { model: string; messages: Array<{ role: string; content: string }> };
-  };
+interface RunCall {
+  model: string;
+  input: Record<string, unknown>;
+  opts?: { gateway?: { id: string } };
 }
 
 /**
- * Stub `env.AI.gateway(slug).run({...})`. Tests pass a `responder`
- * that returns either the raw chat completion JSON (the binding gives
- * back parsed JSON in production), a `Response`, or throws.
+ * Stub `env.AI.run(model, input, opts)`. Tests pass a `responder` that
+ * returns the model output (Workers AI returns `{ response: string }`
+ * for chat-completions on @cf/google/gemma-* models), a `Response`,
+ * or throws.
  */
-function aiTextEnv(responder: (call: GatewayCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: GatewayCall[] } {
-  const calls: GatewayCall[] = [];
+function aiTextEnv(responder: (call: RunCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: RunCall[] } {
+  const calls: RunCall[] = [];
   const env = {
     AI: {
-      gateway(slug: string) {
-        return {
-          async run(body: GatewayCall['body']) {
-            const call: GatewayCall = { slug, body };
-            calls.push(call);
-            return responder(call);
-          },
-        };
+      async run(model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) {
+        const call: RunCall = { model, input, opts };
+        calls.push(call);
+        return responder(call);
       },
-      async run() { throw new Error('AI.run() not stubbed for this test'); },
+      gateway() { throw new Error('text gen should not invoke env.AI.gateway()'); },
     },
     _calls: calls,
-  } as unknown as AIBindingEnv & { _calls: GatewayCall[] };
+  } as unknown as AIBindingEnv & { _calls: RunCall[] };
   return env;
 }
 
 function chatResponse(content: string) {
-  return { choices: [{ message: { content } }] };
+  return { response: content };
 }
 
 describe('draftScript', () => {
-  it('calls dynamic/text_gen on gateway x and returns the script', async () => {
+  it('calls @cf/google/gemma-4-26b-a4b-it via env.AI.run with gateway x and returns the script', async () => {
     const env = aiTextEnv(() => chatResponse('Once upon a time in the ordinary world…'));
     const result = await draftScript({
       template: heroJourney,
@@ -51,15 +45,12 @@ describe('draftScript', () => {
     });
     expect(result.script).toMatch(/Once upon a time/);
     const call = env._calls[0];
-    expect(call.slug).toBe('x');
-    expect(call.body.provider).toBe('compat');
-    expect(call.body.endpoint).toBe('chat/completions');
-    expect(call.body.query.model).toBe('dynamic/text_gen');
-    // System prompt rides in messages[0] with role:'system' — OpenAI's
-    // compat endpoint accepts it directly.
-    expect(call.body.query.messages[0].role).toBe('system');
-    expect(call.body.query.messages[0].content).toContain("hero's journey");
-    expect(call.body.query.messages[1].role).toBe('user');
+    expect(call.model).toBe('@cf/google/gemma-4-26b-a4b-it');
+    expect(call.opts?.gateway?.id).toBe('x');
+    const messages = call.input.messages as Array<{ role: string; content: string }>;
+    expect(messages[0].role).toBe('system');
+    expect(messages[0].content).toContain("hero's journey");
+    expect(messages[1].role).toBe('user');
   });
 
   it('caps the returned script to 1500 chars', async () => {

@@ -121,7 +121,7 @@ describe('synthesizeTts', () => {
     };
   }
 
-  it('calls @cf/deepgram/aura-2-en through the spooool gateway, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {
+  it('calls @cf/deepgram/aura-2-en through gateway x, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {
     const seenCalls: Array<{ model: string; input: Record<string, unknown>; opts?: { gateway?: { id: string } } }> = [];
     const audioBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
     const r2 = r2Env();
@@ -143,7 +143,7 @@ describe('synthesizeTts', () => {
     expect(seenCalls).toHaveLength(1);
     expect(seenCalls[0].model).toBe('@cf/deepgram/aura-2-en');
     expect(seenCalls[0].input).toMatchObject({ text: 'Hello world.', speaker: 'asteria-en', encoding: 'mp3' });
-    expect(seenCalls[0].opts?.gateway?.id).toBe('spooool');
+    expect(seenCalls[0].opts?.gateway?.id).toBe('x');
     expect(r2._puts[0]).toMatchObject({ key: 'recorder/tts/j_abc.mp3', contentType: 'audio/mpeg' });
   });
 

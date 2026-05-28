@@ -216,7 +216,9 @@ export interface AIBindingEnv {
 
 const MAX_TTS_CHARS = 2000;
 const TTS_MODEL = '@cf/deepgram/aura-2-en';
-const TTS_GATEWAY_ID = 'spooool';
+// Route observability for TTS calls through gateway 'x' so the dynamic
+// /text_gen + /audio_gen calls land in the same dashboard.
+const TTS_GATEWAY_ID = 'x';
 
 /**
  * Voice profile → Deepgram Aura speaker. Aura ships ~40 named voices; we

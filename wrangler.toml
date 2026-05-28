@@ -132,7 +132,7 @@ class_name = "RateLimiterDO"
 class_name = "RenderContainer"
 image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.4"
 max_instances = 50
-instance_type = "standard-3"
+instance_type = "standard-4"
 
 # Durable Object binding for the render container. CF Containers require a
 # matching DO namespace registration so the worker can dispatch instances.

@@ -32,7 +32,7 @@ export interface SceneSpec {
 
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
-const TEXT_GATEWAY_SLUG = 'spooool';
+const TEXT_GATEWAY_SLUG = 'x';
 const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
 
 /**
@@ -42,7 +42,7 @@ const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
  *
  *   const aigateway = createAiGateway({ accountId, gateway, apiKey });
  *   const { text } = await generateText({
- *     model: aigateway(unified('dynamic/text')),
+ *     model: aigateway(unified('dynamic/text_gen')),
  *     messages: [...],
  *   });
  *
@@ -54,7 +54,7 @@ const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
  */
 async function chatComplete(
   args: {
-    route: 'dynamic/text';
+    route: 'dynamic/text_gen';
     /** Goes into the AI SDK `system` prop. */
     system: string;
     /** User-side messages only. The AI SDK rejects role:'system' inside
@@ -106,7 +106,7 @@ export async function draftScript(args: {
   ];
   let content: string;
   try {
-    content = await chatComplete({ route: 'dynamic/text', system, messages, env: args.env }, 2);
+    content = await chatComplete({ route: 'dynamic/text_gen', system, messages, env: args.env }, 2);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Script generation failed: ${msg}`);
@@ -142,7 +142,7 @@ export async function planScenes(args: {
   };
 
   const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text', system, messages, env: args.env }, 0);
+    const raw = await chatComplete({ route: 'dynamic/text_gen', system, messages, env: args.env }, 0);
     return parseOrThrow(raw);
   };
 

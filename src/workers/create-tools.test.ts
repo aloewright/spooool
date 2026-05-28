@@ -38,7 +38,7 @@ function envFor(): AIGatewayEnv {
 }
 
 describe('draftScript', () => {
-  it('calls generateText with the dynamic/text route and the template system prompt', async () => {
+  it('calls generateText with the dynamic/text_gen route and the template system prompt', async () => {
     generateTextSpy.mockResolvedValueOnce({ text: 'Once upon a time in the ordinary world…' });
     const result = await draftScript({
       template: heroJourney,
@@ -48,8 +48,8 @@ describe('draftScript', () => {
     expect(result.script).toMatch(/Once upon a time/);
     expect(generateTextSpy).toHaveBeenCalledTimes(1);
     const call = generateTextSpy.mock.calls[0][0];
-    // The provider wrapped `dynamic/text` and passed it through as `model`.
-    expect((call.model as { __unified: string }).__unified).toBe('dynamic/text');
+    // The provider wrapped `dynamic/text_gen` and passed it through as `model`.
+    expect((call.model as { __unified: string }).__unified).toBe('dynamic/text_gen');
     expect(call.system).toContain("hero's journey");
     expect(call.messages?.[0].role).toBe('user');
   });

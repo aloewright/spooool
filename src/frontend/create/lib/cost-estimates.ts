@@ -24,14 +24,14 @@ export interface StageCost {
 export const STAGE_COSTS: StageCost[] = [
   {
     stage: 'draft_script',
-    route: 'dynamic/text (spooool)',
+    route: 'dynamic/text_gen (x)',
     resolvedModel: '@cf/zai-org/glm-4.7-flash → fallback @cf/meta/llama-3.3-70b-instruct-fp8-fast',
     costUsd: 0.004,
     description: 'Drafts narration from your prompt + template system prompt.',
   },
   {
     stage: 'plan_scenes',
-    route: 'dynamic/text (spooool)',
+    route: 'dynamic/text_gen (x)',
     resolvedModel: '@cf/zai-org/glm-4.7-flash → fallback @cf/meta/llama-3.3-70b-instruct-fp8-fast',
     costUsd: 0.005,
     description: 'Breaks the script into title/beat/outro scenes with frame durations.',

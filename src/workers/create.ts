@@ -10,7 +10,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getTemplate, listTemplateMetadata } from './create/templates';
-import { runOneShotCMA as defaultRunOneShotCMA } from './create-cma';
 import type { AIBindingEnv, AIGatewayEnv, R2BindingEnv } from './create-tools';
 import type { RenderEnv } from './render';
 import { CREATE_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
@@ -20,8 +19,6 @@ export interface CreateEnv extends AIGatewayEnv, R2BindingEnv, AIBindingEnv, Ren
   COMPOSER_AGENT: DurableObjectNamespace;
   /** Optional — fail-open in local dev / tests when the binding isn't wired. */
   RATE_LIMITER?: DurableObjectNamespace;
-  /** Test seam — production uses the imported defaultRunOneShotCMA. */
-  runOneShotCMA?: typeof defaultRunOneShotCMA;
 }
 
 interface SessionUser { id: string; emailVerified: boolean }
@@ -68,12 +65,10 @@ createRoutes.post('/api/create/auto', async (c) => {
   const parsed = autoBodySchema.safeParse(raw);
   if (!parsed.success) return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
 
-  const run = c.env.runOneShotCMA ?? defaultRunOneShotCMA;
-
-  // The toolchain (draft → plan → tts → render dispatch) can run 60-90s
-  // — well past the worker 30s wall clock. Pre-insert the render_jobs
-  // row with status='queued', return the jobId immediately, then fire
-  // the toolchain via waitUntil so it survives the response cycle.
+  // Pre-insert the render_jobs row so the client can start polling
+  // /api/create/jobs/:id immediately. Each toolchain stage updates this
+  // row to reflect progress (status='rendering' once the container is
+  // dispatched, 'completed' / 'failed' from the container callbacks).
   const jobId = `j_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
   const now = Date.now();
   try {
@@ -85,41 +80,41 @@ createRoutes.post('/api/create/auto', async (c) => {
     return c.json({ error: 'Generation failed' }, 500);
   }
 
-  // Fire-and-forget the toolchain. Errors are funnelled into the
-  // render_jobs row so the client polling /api/create/jobs/:id sees a
-  // failure state instead of an apparently-stuck "queued" row.
-  c.executionCtx.waitUntil(
-    (async () => {
-      try {
-        await run({
-          userId: user.id,
-          templateId: parsed.data.templateId,
-          prompt: parsed.data.prompt,
-          env: c.env,
-          jobId,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        // Content-policy refusals become the user-facing error verbatim;
-        // everything else is collapsed into the generic message so we
-        // don't leak provider details.
-        const userMsg = /Generation failed, please try rephrasing/.test(msg)
-          ? msg
-          : 'Generation failed';
-        console.error('[create] auto toolchain failed', { jobId, msg });
-        try {
-          await c.env.DB.prepare(
-            `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
-          ).bind(userMsg, Date.now(), jobId).run();
-        } catch (dbErr) {
-          console.error('[create] failed to mark auto job as failed', {
-            jobId,
-            dbErr: dbErr instanceof Error ? dbErr.message : String(dbErr),
-          });
-        }
-      }
-    })(),
-  );
+  // Dispatch to a per-job ComposerAgent DO. The DO's runAutoMode method
+  // persists state + sets an alarm to kick off the first stage, then
+  // returns immediately. Subsequent stages run from the DO's alarm()
+  // handler, each in a fresh worker invocation with its own ~30s
+  // budget — which is the only way the full draft → plan → tts →
+  // finalize chain reliably completes without the route handler's
+  // waitUntil being cancelled mid-toolchain.
+  try {
+    const stub = c.env.COMPOSER_AGENT.get(c.env.COMPOSER_AGENT.idFromName(jobId));
+    const dispatchRes = await stub.fetch('https://composer-agent/run-auto-mode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.id,
+        templateId: parsed.data.templateId,
+        prompt: parsed.data.prompt,
+        jobId,
+      }),
+    });
+    if (!dispatchRes.ok) {
+      const body = await dispatchRes.text().catch(() => '');
+      console.error('[create] auto DO dispatch failed', { jobId, status: dispatchRes.status, body: body.slice(0, 200) });
+      // Mark the row failed so the client poll sees a terminal state.
+      await c.env.DB.prepare(
+        `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+      ).bind('Generation failed', Date.now(), jobId).run().catch(() => {});
+      return c.json({ error: 'Generation failed' }, 500);
+    }
+  } catch (err) {
+    console.error('[create] auto DO dispatch threw', { jobId, err: err instanceof Error ? err.message : String(err) });
+    await c.env.DB.prepare(
+      `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+    ).bind('Generation failed', Date.now(), jobId).run().catch(() => {});
+    return c.json({ error: 'Generation failed' }, 500);
+  }
 
   return c.json({ jobId });
 });

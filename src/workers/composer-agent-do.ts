@@ -9,12 +9,20 @@
 
 import { getTemplate, type Question } from './create/templates';
 import type { StoryTemplate } from './create/templates/types';
-import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv, type SceneSpec } from './create-tools';
 import type { RenderEnv } from './render';
 
 export interface ComposerAgentEnv extends AIGatewayEnv, R2BindingEnv, AIBindingEnv, RenderEnv {}
 
 export type AgentStatus = 'questioning' | 'rendering' | 'completed' | 'failed' | 'abandoned';
+
+/**
+ * Stage of the auto-mode toolchain. Each tick of the DO alarm runs one
+ * stage with a fresh worker-invocation budget, so the full toolchain
+ * (draft → plan → tts → finalize) runs across 4 invocations instead of
+ * trying to fit inside the route handler's ~10–30s waitUntil cap.
+ */
+export type AutoStage = 'pending' | 'drafting' | 'planning' | 'tts' | 'rendering' | 'done' | 'failed';
 
 interface PersistedState {
   userId: string;
@@ -24,6 +32,12 @@ interface PersistedState {
   currentQuestionIdx: number;
   jobId?: string;
   errorMessage?: string;
+  // Auto-mode fields (unset for guided sessions):
+  autoPrompt?: string;
+  autoStage?: AutoStage;
+  script?: string;
+  scenes?: SceneSpec[];
+  ttsR2Key?: string;
 }
 
 export type AnswerResult =
@@ -93,6 +107,140 @@ export class ComposerAgent {
     const s = await this.loadState();
     if (!s) throw new Error('Agent not primed');
     return s;
+  }
+
+  /**
+   * Auto-mode entry point. The /api/create/auto route calls this after it
+   * pre-inserts the render_jobs row. We save initial state and schedule an
+   * alarm for the first stage — control returns to the caller immediately
+   * so the route can respond with the jobId. Subsequent stages run from
+   * alarm() with fresh per-invocation budgets.
+   */
+  async runAutoMode(args: { userId: string; templateId: string; prompt: string; jobId: string }): Promise<void> {
+    if (await this.loadState()) throw new Error('DO already initialized for a different session');
+    const t = getTemplate(args.templateId);
+    if (!t) throw new Error(`Unknown template: ${args.templateId}`);
+    await this.saveState({
+      userId: args.userId,
+      templateId: args.templateId,
+      status: 'rendering',
+      answers: {},
+      currentQuestionIdx: 0,
+      jobId: args.jobId,
+      autoPrompt: args.prompt,
+      autoStage: 'pending',
+    });
+    // Fire alarm ASAP. CF schedules at the next available moment (sub-second).
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  /**
+   * Mark the render_jobs row failed with the given user-facing message.
+   * Best-effort — log on DB error but don't rethrow (the DO has nothing
+   * else to do at this point).
+   */
+  private async failJob(jobId: string, msg: string): Promise<void> {
+    try {
+      await this.env.DB.prepare(
+        `UPDATE render_jobs SET status='failed', error_message=?, updated_at=? WHERE id=?`,
+      ).bind(msg, Date.now(), jobId).run();
+    } catch (dbErr) {
+      console.error('[composer-agent] failed to mark auto job failed', {
+        jobId,
+        err: dbErr instanceof Error ? dbErr.message : String(dbErr),
+      });
+    }
+  }
+
+  /**
+   * DO alarm handler — runs the current auto-mode stage and schedules the
+   * next one. Each tick is a fresh worker invocation, so the LLM call in
+   * the current stage gets its own 30s budget rather than competing with
+   * earlier stages.
+   */
+  async alarm(): Promise<void> {
+    const s = await this.loadState();
+    if (!s || !s.autoStage || !s.jobId || !s.autoPrompt) {
+      // Not an auto-mode session or already terminal — nothing to do.
+      return;
+    }
+    const jobId = s.jobId;
+    const t = this.template();
+    const prompt = s.autoPrompt;
+
+    try {
+      if (s.autoStage === 'pending' || s.autoStage === 'drafting') {
+        const tStage = Date.now();
+        console.log('[composer-agent] auto draft_script start', { jobId });
+        const { script } = await draftScript({
+          template: t,
+          answers: { prompt },
+          env: this.env,
+        });
+        console.log('[composer-agent] auto draft_script ok', { jobId, duration_ms: Date.now() - tStage, script_chars: script.length });
+        await this.saveState({ ...s, autoStage: 'planning', script });
+        await this.ctx.storage.setAlarm(Date.now());
+        return;
+      }
+
+      if (s.autoStage === 'planning') {
+        if (!s.script) throw new Error('planning stage: missing script');
+        const tStage = Date.now();
+        console.log('[composer-agent] auto plan_scenes start', { jobId });
+        const { scenes } = await planScenes({ script: s.script, template: t, env: this.env });
+        console.log('[composer-agent] auto plan_scenes ok', { jobId, duration_ms: Date.now() - tStage, scene_count: scenes.length });
+        await this.saveState({ ...s, autoStage: 'tts', scenes });
+        await this.ctx.storage.setAlarm(Date.now());
+        return;
+      }
+
+      if (s.autoStage === 'tts') {
+        if (!s.script) throw new Error('tts stage: missing script');
+        const tStage = Date.now();
+        console.log('[composer-agent] auto synthesize_tts start', { jobId });
+        // TTS failure is non-fatal — content-policy refusals bubble; other
+        // errors get logged and the job proceeds with a silent video.
+        let r2Key: string | undefined;
+        try {
+          const result = await synthesizeTts({ script: s.script, voice: t.voice, jobId, env: this.env });
+          r2Key = result.r2Key;
+          console.log('[composer-agent] auto synthesize_tts ok', { jobId, duration_ms: Date.now() - tStage, r2Key });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/Generation failed, please try rephrasing/.test(msg)) {
+            await this.saveState({ ...s, autoStage: 'failed', errorMessage: msg, status: 'failed' });
+            await this.failJob(jobId, msg);
+            return;
+          }
+          console.warn('[composer-agent] auto synthesize_tts failed — rendering silent video', { jobId, duration_ms: Date.now() - tStage, msg: msg.slice(0, 200) });
+        }
+        await this.saveState({ ...s, autoStage: 'rendering', ttsR2Key: r2Key });
+        await this.ctx.storage.setAlarm(Date.now());
+        return;
+      }
+
+      if (s.autoStage === 'rendering') {
+        if (!s.scenes) throw new Error('rendering stage: missing scenes');
+        const tStage = Date.now();
+        console.log('[composer-agent] auto finalize_render start', { jobId });
+        await finalizeRender({
+          userId: s.userId,
+          scenes: s.scenes,
+          ttsR2Key: s.ttsR2Key,
+          env: this.env,
+          existingJobId: jobId,
+        });
+        console.log('[composer-agent] auto finalize_render ok', { jobId, duration_ms: Date.now() - tStage });
+        await this.saveState({ ...s, autoStage: 'done' });
+        return;
+      }
+      // 'done' / 'failed' — nothing to do.
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[composer-agent] auto stage failed', { jobId, stage: s.autoStage, msg: msg.slice(0, 200) });
+      await this.saveState({ ...s, autoStage: 'failed', errorMessage: msg, status: 'failed' });
+      await this.failJob(jobId, msg.slice(0, 200));
+    }
   }
 
   /**
@@ -174,6 +322,19 @@ export class ComposerAgent {
         const stages: string[] = [];
         const r = await this.generate((stage) => { stages.push(stage); });
         return Response.json({ ...r, stages }, { status: 200 });
+      }
+      if (request.method === 'POST' && url.pathname === '/run-auto-mode') {
+        const body = await request.json() as { userId?: string; templateId?: string; prompt?: string; jobId?: string };
+        if (!body.userId || !body.templateId || !body.prompt || !body.jobId) {
+          return Response.json({ error: 'userId, templateId, prompt, jobId required' }, { status: 400 });
+        }
+        await this.runAutoMode({
+          userId: body.userId,
+          templateId: body.templateId,
+          prompt: body.prompt,
+          jobId: body.jobId,
+        });
+        return Response.json({ ok: true, jobId: body.jobId }, { status: 200 });
       }
       if (request.method === 'GET' && url.pathname === '/stream') {
         if (request.headers.get('upgrade') !== 'websocket') {

@@ -66,23 +66,32 @@ function fakeExecutionCtx() {
   };
 }
 
-function stubComposer() {
+function stubComposer(opts: { autoModeFails?: boolean } = {}) {
+  const calls: Array<{ url: string; body: string | null }> = [];
   const ns = {
     idFromName(name: string) { return { name } as unknown as DurableObjectId; },
     get() {
       return {
         async fetch(url: string | Request, init?: RequestInit) {
           const u = typeof url === 'string' ? url : url.url;
+          const body = init?.body ? String(init.body) : null;
+          calls.push({ url: u, body });
           if (u.endsWith('/stream')) {
             // Node's undici Response forbids status 101 — fake it with a
             // plain object that Hono passes through unchanged.
             return { status: 101, body: null, headers: new Headers() } as unknown as Response;
+          }
+          if (u.endsWith('/run-auto-mode')) {
+            if (opts.autoModeFails) return new Response('{"error":"DO unavailable"}', { status: 503 });
+            const parsed = body ? JSON.parse(body) as { jobId?: string } : {};
+            return new Response(JSON.stringify({ ok: true, jobId: parsed.jobId }), { status: 200 });
           }
           return new Response(JSON.stringify({ firstQuestion: { id: 'protagonist', text: 'Who is the protagonist?' } }), { status: 200 });
         },
       };
     },
   };
+  (ns as unknown as { _calls: typeof calls })._calls = calls;
   return ns as unknown as DurableObjectNamespace;
 }
 
@@ -91,13 +100,13 @@ function envFor(extra: Partial<CreateEnv> = {}): CreateEnv {
     DB: stubDB(),
     COMPOSER_AGENT: stubComposer(),
     CF_ACCOUNT_ID: 'a',
-    CF_GATEWAY_ID: 'x',
+    CF_GATEWAY_ID: 'spooool',
     CF_AIG_TOKEN: 't',
     VIDEOS: {} as R2Bucket,
+    AI: { run: async () => new Uint8Array() } as unknown as CreateEnv['AI'],
     RENDER_CONTAINER: {} as DurableObjectNamespace,
     RENDER_CALLBACK_SECRET: 's',
     VIDEO_ENCODING: { send: async () => {} } as unknown as Queue<{ videoId: string; r2Key: string }>,
-    runOneShotCMA: vi.fn(async () => ({ jobId: 'j_auto' })),
     ...extra,
   } as CreateEnv;
 }
@@ -136,64 +145,44 @@ describe('GET /api/create/templates/:id', () => {
 });
 
 describe('POST /api/create/auto', () => {
-  it('pre-inserts a render_jobs row, returns jobId immediately, runs toolchain via waitUntil', async () => {
-    const runSpy = vi.fn(async (args: { jobId: string }) => ({ jobId: args.jobId }));
-    const { app, env } = buildApp({ id: 'u_1', emailVerified: true }, { runOneShotCMA: runSpy });
-    const exec = fakeExecutionCtx();
+  it('pre-inserts a render_jobs row, dispatches the ComposerAgent DO, returns jobId immediately', async () => {
+    const { app, env } = buildApp({ id: 'u_1', emailVerified: true });
     const res = await app.request(
       '/api/create/auto',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ templateId: 'hero-journey', prompt: 'A junior dev' }) },
       env,
-      exec.ctx,
+      fakeExecutionCtx().ctx,
     );
     expect(res.status).toBe(200);
     const body = await res.json() as { jobId: string };
     expect(body.jobId).toMatch(/^j_/);
-    // Row was pre-inserted with status='queued' BEFORE the toolchain runs.
+    // Row pre-inserted with status='queued' so the client poll has
+    // something to return immediately.
     const renderJobs = (env.DB as unknown as { renderJobs: Map<string, { id: string; status: string }> }).renderJobs;
     expect(renderJobs.get(body.jobId)).toMatchObject({ status: 'queued' });
-    // Drain waitUntil and confirm the toolchain was invoked with the SAME jobId.
-    await exec.drain();
-    expect(runSpy).toHaveBeenCalledTimes(1);
-    expect(runSpy.mock.calls[0][0]).toMatchObject({ jobId: body.jobId, userId: 'u_1', templateId: 'hero-journey' });
+    // DO was invoked with the right body — toolchain itself runs in the
+    // DO's alarm() handler (tested separately in composer-agent-do.test.ts).
+    const calls = (env.COMPOSER_AGENT as unknown as { _calls: Array<{ url: string; body: string | null }> })._calls;
+    const dispatch = calls.find((c) => c.url.endsWith('/run-auto-mode'));
+    expect(dispatch).toBeDefined();
+    const dispatchBody = JSON.parse(dispatch!.body ?? '{}') as { jobId: string; userId: string; templateId: string; prompt: string };
+    expect(dispatchBody).toMatchObject({ jobId: body.jobId, userId: 'u_1', templateId: 'hero-journey', prompt: 'A junior dev' });
   });
 
-  it('marks the row failed when the toolchain throws', async () => {
-    const runSpy = vi.fn(async () => { throw new Error('boom'); });
-    const { app, env } = buildApp({ id: 'u_1', emailVerified: true }, { runOneShotCMA: runSpy });
-    const exec = fakeExecutionCtx();
+  it('marks the row failed and 500s if DO dispatch fails', async () => {
+    const { app, env } = buildApp({ id: 'u_1', emailVerified: true }, { COMPOSER_AGENT: stubComposer({ autoModeFails: true }) });
     const res = await app.request(
       '/api/create/auto',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ templateId: 'hero-journey', prompt: 'A junior dev' }) },
       env,
-      exec.ctx,
+      fakeExecutionCtx().ctx,
     );
-    expect(res.status).toBe(200);
-    const body = await res.json() as { jobId: string };
-    await exec.drain();
+    expect(res.status).toBe(500);
     const renderJobs = (env.DB as unknown as { renderJobs: Map<string, { status: string; error_message: string | null }> }).renderJobs;
-    const row = renderJobs.get(body.jobId);
-    expect(row?.status).toBe('failed');
-    expect(row?.error_message).toBe('Generation failed');
-  });
-
-  it('passes through content-policy refusal as the row error message', async () => {
-    const runSpy = vi.fn(async () => { throw new Error('Generation failed, please try rephrasing your prompt.'); });
-    const { app, env } = buildApp({ id: 'u_1', emailVerified: true }, { runOneShotCMA: runSpy });
-    const exec = fakeExecutionCtx();
-    const res = await app.request(
-      '/api/create/auto',
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ templateId: 'hero-journey', prompt: 'A junior dev' }) },
-      env,
-      exec.ctx,
-    );
-    expect(res.status).toBe(200);
-    const body = await res.json() as { jobId: string };
-    await exec.drain();
-    const renderJobs = (env.DB as unknown as { renderJobs: Map<string, { status: string; error_message: string | null }> }).renderJobs;
-    const row = renderJobs.get(body.jobId);
-    expect(row?.status).toBe('failed');
-    expect(row?.error_message).toMatch(/please try rephrasing/);
+    // Even on dispatch failure the route marks the row 'failed' so the
+    // client doesn't poll a phantom queued job forever.
+    const rows = Array.from(renderJobs.values());
+    expect(rows.some((r) => r.status === 'failed')).toBe(true);
   });
 
   it('400s on invalid body', async () => {

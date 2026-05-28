@@ -4,6 +4,9 @@
 // providers directly" rule. Pure of side effects beyond the explicit
 // network / R2 calls so unit tests can mock fetch.
 
+import { generateText } from 'ai';
+import { createAiGateway } from 'ai-gateway-provider';
+import { createUnified } from 'ai-gateway-provider/providers/unified';
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
 
@@ -30,43 +33,43 @@ export interface SceneSpec {
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
 const TEXT_GATEWAY_SLUG = 'spooool';
-
-interface ChatCompletionResponse {
-  choices?: Array<{ message?: { content?: string } }>;
-}
+const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
 
 /**
- * Invoke a dynamic-route chat completion via the Workers AI binding's
- * gateway proxy. Equivalent shape to the official Cloudflare doc snippet
- * (https://developers.cloudflare.com/ai-gateway/features/dynamic-routing/).
+ * Invoke a dynamic-route chat completion via the `ai-gateway-provider`
+ * adapter for the Vercel AI SDK. Equivalent to the snippet in the
+ * Cloudflare docs:
  *
- * Why this and not `fetch()` to the compat URL: a Worker hitting the
- * gateway via fetch() gets rejected pre-route with error 2019
- * ("Compatibility..."). The binding's `.gateway(slug).run({provider:'compat',...})`
- * path is the documented work-around and is what dynamic routes are
- * designed to be called with from inside a Worker.
+ *   const aigateway = createAiGateway({ accountId, gateway, apiKey });
+ *   const { text } = await generateText({
+ *     model: aigateway(unified('dynamic/text')),
+ *     messages: [...],
+ *   });
+ *
+ * The provider posts to the gateway's Universal endpoint
+ * (`/v1/{account}/{gateway}`) with an array-of-steps body — NOT
+ * `/compat/chat/completions` — which is the only shape that works for
+ * dynamic-route invocations from inside a Worker (the compat URL is
+ * rejected with code 2019 from a Worker context).
  */
 async function chatComplete(
-  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIBindingEnv },
+  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIGatewayEnv },
   retries: number,
 ): Promise<string> {
+  const aigateway = createAiGateway({
+    accountId: args.env.CF_ACCOUNT_ID ?? CF_ACCOUNT_ID,
+    gateway: TEXT_GATEWAY_SLUG,
+    apiKey: args.env.CF_AIG_TOKEN,
+  });
+  const unified = createUnified();
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const raw = await args.env.AI.gateway(TEXT_GATEWAY_SLUG).run({
-        provider: 'compat',
-        endpoint: 'chat/completions',
-        query: { model: args.route, messages: args.messages },
+      const { text } = await generateText({
+        model: aigateway(unified(args.route)),
+        messages: args.messages,
       });
-      // The binding either returns the parsed JSON directly or a Response.
-      let body: ChatCompletionResponse;
-      if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
-        body = await (raw as Response).json() as ChatCompletionResponse;
-      } else {
-        body = raw as ChatCompletionResponse;
-      }
-      const content = body?.choices?.[0]?.message?.content;
-      if (typeof content === 'string') return content;
+      if (typeof text === 'string' && text.length > 0) return text;
       lastErr = new Error('AI Gateway returned no message content');
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
@@ -82,7 +85,7 @@ async function chatComplete(
 export async function draftScript(args: {
   template: StoryTemplate;
   answers: Record<string, string>;
-  env: AIBindingEnv;
+  env: AIGatewayEnv;
 }): Promise<{ script: string }> {
   const answersBlock = Object.entries(args.answers)
     .map(([qid, a]) => `Q[${qid}]: ${a}`)
@@ -107,7 +110,7 @@ export async function draftScript(args: {
 export async function planScenes(args: {
   script: string;
   template: StoryTemplate;
-  env: AIBindingEnv;
+  env: AIGatewayEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
   const messages = [
     {

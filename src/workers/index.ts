@@ -36,6 +36,7 @@ import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
+import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
@@ -47,7 +48,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -155,6 +156,7 @@ app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
 app.route('/', createRoutes);
+app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);

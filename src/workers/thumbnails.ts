@@ -20,11 +20,22 @@ export interface ThumbnailVariables {
   user: SessionUser | null;
 }
 
+// Cloudflare Stream customer subdomain. Per the docs, the per-account
+// customer-<CODE>.cloudflarestream.com domain is the supported playback
+// + thumbnail origin; videodelivery.net is legacy and may be retired.
+//
+// Source: https://developers.cloudflare.com/stream/viewing-videos/displaying-thumbnails/
+//
+// Hardcoded because the customer code is account-scoped (one per CF
+// account) and rarely changes. If we ever need per-environment override,
+// promote to an env var.
+export const STREAM_CUSTOMER_HOST = 'customer-od6lvjm5bwfl1lki.cloudflarestream.com';
+
 export function buildThumbnailCandidates(
   streamVideoId: string,
   durationSeconds: number | undefined,
 ): string[] {
-  const base = `https://videodelivery.net/${streamVideoId}/thumbnails/thumbnail.jpg`;
+  const base = `https://${STREAM_CUSTOMER_HOST}/${streamVideoId}/thumbnails/thumbnail.jpg`;
   if (!durationSeconds || !Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     return [`${base}?time=1s`, `${base}?time=3s`, `${base}?time=5s`];
   }

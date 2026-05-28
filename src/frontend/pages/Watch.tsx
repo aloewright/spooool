@@ -103,8 +103,12 @@ export function Watch(): JSX.Element {
     // (uploading, queued, encoding) and the case where Stream isn't
     // configured at all.
     if (video.stream_video_id && video.status === 'ready') {
+      // Cloudflare Stream's per-account customer subdomain is the
+      // supported playback origin; videodelivery.net is legacy and may
+      // be retired. Source:
+      // https://developers.cloudflare.com/stream/viewing-videos/securing-your-stream/
       return {
-        src: `https://videodelivery.net/${video.stream_video_id}/manifest/video.m3u8`,
+        src: `https://customer-od6lvjm5bwfl1lki.cloudflarestream.com/${video.stream_video_id}/manifest/video.m3u8`,
         type: 'application/x-mpegURL',
       };
     }

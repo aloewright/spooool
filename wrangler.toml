@@ -102,6 +102,14 @@ name = "EMAIL"
 [ai]
 binding = "AI"
 
+# Cloudflare Stream binding (ALO-???). Used by /api/stream/upload-url to
+# mint one-time direct creator upload URLs for the client without ever
+# exposing CF_STREAM_API_TOKEN to the browser, and to manage video
+# metadata + signed tokens from the worker. Docs:
+# https://developers.cloudflare.com/stream/manage-video-library/bindings/
+[stream]
+binding = "STREAM"
+
 # Durable Object — channel subscriber fan-out (ALO-156)
 [[durable_objects.bindings]]
 name = "CHANNEL_SUBSCRIBER_DO"

@@ -7,6 +7,13 @@
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
 
+/**
+ * Kept for backward-compat with downstream env intersections
+ * (`CreateEnv`, `ComposerAgentEnv`, `CMAEnv` all extend it). The fields
+ * are no longer consumed by `chatComplete` — text gen routes through
+ * the Workers AI binding instead — but other code paths may still
+ * reference these worker secrets, so we keep the type around.
+ */
 export interface AIGatewayEnv {
   CF_ACCOUNT_ID: string;
   CF_GATEWAY_ID: string;
@@ -22,38 +29,50 @@ export interface SceneSpec {
 
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
+const TEXT_GATEWAY_SLUG = 'spooool';
 
-function gatewayUrl(env: AIGatewayEnv): string {
-  return `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${env.CF_GATEWAY_ID}/compat/chat/completions`;
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
 }
 
-function gatewayHeaders(env: AIGatewayEnv): Record<string, string> {
-  return {
-    'content-type': 'application/json',
-    'cf-aig-authorization': `Bearer ${env.CF_AIG_TOKEN}`,
-    'cf-aig-zdr': 'true',
-  };
-}
-
+/**
+ * Invoke a dynamic-route chat completion via the Workers AI binding's
+ * gateway proxy. Equivalent shape to the official Cloudflare doc snippet
+ * (https://developers.cloudflare.com/ai-gateway/features/dynamic-routing/).
+ *
+ * Why this and not `fetch()` to the compat URL: a Worker hitting the
+ * gateway via fetch() gets rejected pre-route with error 2019
+ * ("Compatibility..."). The binding's `.gateway(slug).run({provider:'compat',...})`
+ * path is the documented work-around and is what dynamic routes are
+ * designed to be called with from inside a Worker.
+ */
 async function chatComplete(
-  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIGatewayEnv },
+  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIBindingEnv },
   retries: number,
 ): Promise<string> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
-    const res = await fetch(gatewayUrl(args.env), {
-      method: 'POST',
-      headers: gatewayHeaders(args.env),
-      body: JSON.stringify({ model: args.route, messages: args.messages }),
-    });
-    if (res.ok) {
-      const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const content = body.choices?.[0]?.message?.content;
+    try {
+      const raw = await args.env.AI.gateway(TEXT_GATEWAY_SLUG).run({
+        provider: 'compat',
+        endpoint: 'chat/completions',
+        query: { model: args.route, messages: args.messages },
+      });
+      // The binding either returns the parsed JSON directly or a Response.
+      let body: ChatCompletionResponse;
+      if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
+        body = await (raw as Response).json() as ChatCompletionResponse;
+      } else {
+        body = raw as ChatCompletionResponse;
+      }
+      const content = body?.choices?.[0]?.message?.content;
       if (typeof content === 'string') return content;
       lastErr = new Error('AI Gateway returned no message content');
-    } else {
-      lastErr = new Error(`AI Gateway ${res.status}`);
-      if (res.status < 500) break; // don't retry 4xx
+    } catch (err) {
+      lastErr = err instanceof Error ? err : new Error(String(err));
+      const msg = lastErr instanceof Error ? lastErr.message : '';
+      // Non-retryable: 4xx / route-shape errors look like client mistakes.
+      if (/\b4\d\d\b/.test(msg) || /invalid|bad request|not found/i.test(msg)) break;
     }
     if (attempt < retries) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
   }
@@ -63,7 +82,7 @@ async function chatComplete(
 export async function draftScript(args: {
   template: StoryTemplate;
   answers: Record<string, string>;
-  env: AIGatewayEnv;
+  env: AIBindingEnv;
 }): Promise<{ script: string }> {
   const answersBlock = Object.entries(args.answers)
     .map(([qid, a]) => `Q[${qid}]: ${a}`)
@@ -88,7 +107,7 @@ export async function draftScript(args: {
 export async function planScenes(args: {
   script: string;
   template: StoryTemplate;
-  env: AIGatewayEnv;
+  env: AIBindingEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
   const messages = [
     {
@@ -158,8 +177,29 @@ export interface R2BindingEnv {
  * We point at the `spooool` gateway so all TTS calls show up in that
  * dashboard alongside the dynamic-route invocations.
  */
+/**
+ * Shape of `env.AI.gateway(slug).run({...})` — the Workers-AI-binding
+ * call that invokes a Cloudflare AI Gateway dynamic route from inside a
+ * Worker. We use this for draft_script + plan_scenes (text gen via the
+ * `dynamic/text` route on the `spooool` gateway). Auth is handled by the
+ * binding itself; no CF_AIG_TOKEN required.
+ */
+interface AIGatewayBinding {
+  run: (body: {
+    provider: 'compat';
+    endpoint: 'chat/completions';
+    headers?: Record<string, string>;
+    query: {
+      model: string;
+      messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+      [k: string]: unknown;
+    };
+  }) => Promise<unknown>;
+}
+
 export interface AIBindingEnv {
   AI: {
+    gateway: (slug: string) => AIGatewayBinding;
     run: (
       model: string,
       input: Record<string, unknown>,

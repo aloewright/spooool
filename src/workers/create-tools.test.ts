@@ -1,54 +1,78 @@
-import { describe, expect, it, vi, afterEach } from 'vitest';
-import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { describe, expect, it, vi } from 'vitest';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type R2BindingEnv } from './create-tools';
 import { heroJourney } from './create/templates/hero-journey';
 import type { RenderEnv } from './render';
 
-const originalFetch = globalThis.fetch;
-afterEach(() => { globalThis.fetch = originalFetch; });
-
-function mockGateway(impl: (path: string, init: RequestInit) => Promise<Response>) {
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    return impl(url, init ?? {});
-  }) as unknown as typeof fetch;
-}
-
-function envFor(): AIGatewayEnv {
-  return {
-    CF_ACCOUNT_ID: 'acc_test',
-    CF_GATEWAY_ID: 'x',
-    CF_AIG_TOKEN: 'tok_test',
+interface GatewayCall {
+  slug: string;
+  body: {
+    provider: string;
+    endpoint: string;
+    query: { model: string; messages: Array<{ role: string; content: string }> };
   };
 }
 
+/**
+ * Stub `env.AI.gateway(slug).run({...})`. The stub captures every call
+ * and lets each test inject the response (or throw) for that call.
+ *
+ * Pass a `responder` that returns either the raw chat-completion JSON
+ * (which is what the binding gives back in production), a `Response`
+ * (some SDK revs wrap), or throws to simulate an error.
+ */
+function aiTextEnv(responder: (call: GatewayCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: GatewayCall[] } {
+  const calls: GatewayCall[] = [];
+  const env = {
+    AI: {
+      gateway(slug: string) {
+        return {
+          async run(body: GatewayCall['body']) {
+            const call: GatewayCall = { slug, body };
+            calls.push(call);
+            const result = await responder(call);
+            return result;
+          },
+        };
+      },
+      // Unused for text gen tests — required for the AIBindingEnv shape.
+      async run() { throw new Error('AI.run() not stubbed for this test'); },
+    },
+    _calls: calls,
+  } as unknown as AIBindingEnv & { _calls: GatewayCall[] };
+  return env;
+}
+
+function chatResponse(content: string) {
+  return { choices: [{ message: { content } }] };
+}
+
 describe('draftScript', () => {
-  it('calls dynamic/text with the template system prompt and returns the script', async () => {
-    let seenBody: { model: string; messages: Array<{ role: string; content: string }> } | null = null;
-    mockGateway(async (url, init) => {
-      seenBody = JSON.parse(init.body as string);
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'Once upon a time in the ordinary world…' } }] }), { status: 200 });
-    });
+  it('calls dynamic/text on the spooool gateway and returns the script', async () => {
+    const env = aiTextEnv(() => chatResponse('Once upon a time in the ordinary world…'));
     const result = await draftScript({
       template: heroJourney,
       answers: { protagonist: 'a junior dev', 'ordinary-world': 'a quiet startup' },
-      env: envFor(),
+      env,
     });
     expect(result.script).toMatch(/Once upon a time/);
-    expect(seenBody!.model).toBe('dynamic/text');
-    expect(seenBody!.messages[0].content).toContain("hero's journey");
+    const call = env._calls[0];
+    expect(call.slug).toBe('spooool');
+    expect(call.body.provider).toBe('compat');
+    expect(call.body.endpoint).toBe('chat/completions');
+    expect(call.body.query.model).toBe('dynamic/text');
+    expect(call.body.query.messages[0].content).toContain("hero's journey");
   });
 
   it('caps the returned script to 1500 chars', async () => {
-    mockGateway(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'x'.repeat(5000) } }] }), { status: 200 }));
-    const result = await draftScript({ template: heroJourney, answers: {}, env: envFor() });
+    const env = aiTextEnv(() => chatResponse('x'.repeat(5000)));
+    const result = await draftScript({ template: heroJourney, answers: {}, env });
     expect(result.script.length).toBe(1500);
   });
 
-  it('retries twice on 5xx and surfaces the provider message on final failure', async () => {
-    let calls = 0;
-    mockGateway(async () => { calls++; return new Response('upstream down', { status: 503 }); });
-    await expect(draftScript({ template: heroJourney, answers: {}, env: envFor() })).rejects.toThrow(/Script generation failed/);
-    expect(calls).toBe(3); // initial + 2 retries
+  it('retries twice on transient failure and surfaces the provider message on final failure', async () => {
+    const env = aiTextEnv(() => { throw new Error('AI Gateway 503: upstream down'); });
+    await expect(draftScript({ template: heroJourney, answers: {}, env })).rejects.toThrow(/Script generation failed/);
+    expect(env._calls.length).toBe(3); // initial + 2 retries
   });
 });
 
@@ -58,25 +82,21 @@ describe('planScenes', () => {
       { type: 'title', durationFrames: 90, text: 'Hello world' },
       { type: 'beat', durationFrames: 120, text: 'Then everything changed' },
     ];
-    mockGateway(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ scenes: fakeScenes }) } }] }), { status: 200 }));
-    const result = await planScenes({ script: 'Once upon a time…', template: heroJourney, env: envFor() });
+    const env = aiTextEnv(() => chatResponse(JSON.stringify({ scenes: fakeScenes })));
+    const result = await planScenes({ script: 'Once upon a time…', template: heroJourney, env });
     expect(result.scenes).toEqual(fakeScenes);
   });
 
   it('re-prompts once on malformed JSON, then throws', async () => {
-    let calls = 0;
-    mockGateway(async () => {
-      calls++;
-      return new Response(JSON.stringify({ choices: [{ message: { content: 'not json at all' } }] }), { status: 200 });
-    });
-    await expect(planScenes({ script: 'x', template: heroJourney, env: envFor() })).rejects.toThrow(/Scene plan invalid/);
-    expect(calls).toBe(2); // initial + 1 reprompt
+    const env = aiTextEnv(() => chatResponse('not json at all'));
+    await expect(planScenes({ script: 'x', template: heroJourney, env })).rejects.toThrow(/Scene plan invalid/);
+    expect(env._calls.length).toBe(2); // initial + 1 reprompt
   });
 
   it('caps scenes to 20 even when the LLM returns more', async () => {
     const many = Array.from({ length: 50 }, (_, i) => ({ type: 'beat', durationFrames: 60, text: `s${i}` }));
-    mockGateway(async () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ scenes: many }) } }] }), { status: 200 }));
-    const result = await planScenes({ script: 'x', template: heroJourney, env: envFor() });
+    const env = aiTextEnv(() => chatResponse(JSON.stringify({ scenes: many })));
+    const result = await planScenes({ script: 'x', template: heroJourney, env });
     expect(result.scenes).toHaveLength(20);
   });
 });
@@ -97,10 +117,18 @@ describe('synthesizeTts', () => {
   /**
    * Fake AI binding. `run` takes a model id + input + opts; in production it
    * resolves with audio bytes from Workers AI Deepgram. Tests pass a
-   * `run` impl to assert call shape + control the response.
+   * `run` impl to assert call shape + control the response. `gateway()` is
+   * stubbed to throw — TTS uses `env.AI.run` directly, not the dynamic-
+   * route gateway proxy (Vertex Gemini + Workers AI Deepgram each want
+   * different request shapes; see notes in create-tools.ts).
    */
   function aiEnv(run: (model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) => Promise<ArrayBuffer | Uint8Array | Response>): AIBindingEnv {
-    return { AI: { run } };
+    return {
+      AI: {
+        run,
+        gateway() { throw new Error('synthesizeTts should not invoke env.AI.gateway()'); },
+      } as unknown as AIBindingEnv['AI'],
+    };
   }
 
   it('calls @cf/deepgram/aura-2-en through the spooool gateway, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {

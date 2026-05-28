@@ -1,69 +1,77 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type AIGatewayEnv, type R2BindingEnv } from './create-tools';
+import { describe, expect, it, vi } from 'vitest';
+import { draftScript, planScenes, synthesizeTts, finalizeRender, type AIBindingEnv, type R2BindingEnv } from './create-tools';
 import { heroJourney } from './create/templates/hero-journey';
 import type { RenderEnv } from './render';
 
-interface GenerateTextCall {
-  model: unknown;
-  system?: string;
-  messages?: Array<{ role: string; content: string }>;
-}
-
-// Mock the Vercel AI SDK + ai-gateway-provider so we never make a real
-// network call. `chatComplete` calls `generateText({ model, messages })`,
-// so we intercept that and let each test inject the response.
-const generateTextSpy = vi.fn<(args: GenerateTextCall) => Promise<{ text: string }>>();
-vi.mock('ai', () => ({
-  generateText: (args: GenerateTextCall) => generateTextSpy(args),
-}));
-
-// The provider factories return opaque tokens that get passed through
-// to generateText; their identity doesn't matter for tests because the
-// spy never inspects them.
-vi.mock('ai-gateway-provider', () => ({
-  createAiGateway: () => (model: unknown) => model,
-}));
-vi.mock('ai-gateway-provider/providers/unified', () => ({
-  createUnified: () => (route: string) => ({ __unified: route }),
-}));
-
-beforeEach(() => { generateTextSpy.mockReset(); });
-
-function envFor(): AIGatewayEnv {
-  return {
-    CF_ACCOUNT_ID: 'acc_test',
-    CF_GATEWAY_ID: 'spooool',
-    CF_AIG_TOKEN: 'tok_test',
+interface GatewayCall {
+  slug: string;
+  body: {
+    provider: string;
+    endpoint: string;
+    query: { model: string; messages: Array<{ role: string; content: string }> };
   };
 }
 
+/**
+ * Stub `env.AI.gateway(slug).run({...})`. Tests pass a `responder`
+ * that returns either the raw chat completion JSON (the binding gives
+ * back parsed JSON in production), a `Response`, or throws.
+ */
+function aiTextEnv(responder: (call: GatewayCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: GatewayCall[] } {
+  const calls: GatewayCall[] = [];
+  const env = {
+    AI: {
+      gateway(slug: string) {
+        return {
+          async run(body: GatewayCall['body']) {
+            const call: GatewayCall = { slug, body };
+            calls.push(call);
+            return responder(call);
+          },
+        };
+      },
+      async run() { throw new Error('AI.run() not stubbed for this test'); },
+    },
+    _calls: calls,
+  } as unknown as AIBindingEnv & { _calls: GatewayCall[] };
+  return env;
+}
+
+function chatResponse(content: string) {
+  return { choices: [{ message: { content } }] };
+}
+
 describe('draftScript', () => {
-  it('calls generateText with the dynamic/text_gen route and the template system prompt', async () => {
-    generateTextSpy.mockResolvedValueOnce({ text: 'Once upon a time in the ordinary world…' });
+  it('calls dynamic/text_gen on gateway x and returns the script', async () => {
+    const env = aiTextEnv(() => chatResponse('Once upon a time in the ordinary world…'));
     const result = await draftScript({
       template: heroJourney,
       answers: { protagonist: 'a junior dev', 'ordinary-world': 'a quiet startup' },
-      env: envFor(),
+      env,
     });
     expect(result.script).toMatch(/Once upon a time/);
-    expect(generateTextSpy).toHaveBeenCalledTimes(1);
-    const call = generateTextSpy.mock.calls[0][0];
-    // The provider wrapped `dynamic/text_gen` and passed it through as `model`.
-    expect((call.model as { __unified: string }).__unified).toBe('dynamic/text_gen');
-    expect(call.system).toContain("hero's journey");
-    expect(call.messages?.[0].role).toBe('user');
+    const call = env._calls[0];
+    expect(call.slug).toBe('x');
+    expect(call.body.provider).toBe('compat');
+    expect(call.body.endpoint).toBe('chat/completions');
+    expect(call.body.query.model).toBe('dynamic/text_gen');
+    // System prompt rides in messages[0] with role:'system' — OpenAI's
+    // compat endpoint accepts it directly.
+    expect(call.body.query.messages[0].role).toBe('system');
+    expect(call.body.query.messages[0].content).toContain("hero's journey");
+    expect(call.body.query.messages[1].role).toBe('user');
   });
 
   it('caps the returned script to 1500 chars', async () => {
-    generateTextSpy.mockResolvedValueOnce({ text: 'x'.repeat(5000) });
-    const result = await draftScript({ template: heroJourney, answers: {}, env: envFor() });
+    const env = aiTextEnv(() => chatResponse('x'.repeat(5000)));
+    const result = await draftScript({ template: heroJourney, answers: {}, env });
     expect(result.script.length).toBe(1500);
   });
 
   it('retries twice on transient failure and surfaces the provider message on final failure', async () => {
-    generateTextSpy.mockRejectedValue(new Error('AI Gateway 503: upstream down'));
-    await expect(draftScript({ template: heroJourney, answers: {}, env: envFor() })).rejects.toThrow(/Script generation failed/);
-    expect(generateTextSpy).toHaveBeenCalledTimes(3); // initial + 2 retries
+    const env = aiTextEnv(() => { throw new Error('AI Gateway 503: upstream down'); });
+    await expect(draftScript({ template: heroJourney, answers: {}, env })).rejects.toThrow(/Script generation failed/);
+    expect(env._calls.length).toBe(3); // initial + 2 retries
   });
 });
 
@@ -73,21 +81,21 @@ describe('planScenes', () => {
       { type: 'title', durationFrames: 90, text: 'Hello world' },
       { type: 'beat', durationFrames: 120, text: 'Then everything changed' },
     ];
-    generateTextSpy.mockResolvedValueOnce({ text: JSON.stringify({ scenes: fakeScenes }) });
-    const result = await planScenes({ script: 'Once upon a time…', template: heroJourney, env: envFor() });
+    const env = aiTextEnv(() => chatResponse(JSON.stringify({ scenes: fakeScenes })));
+    const result = await planScenes({ script: 'Once upon a time…', template: heroJourney, env });
     expect(result.scenes).toEqual(fakeScenes);
   });
 
   it('re-prompts once on malformed JSON, then throws', async () => {
-    generateTextSpy.mockResolvedValue({ text: 'not json at all' });
-    await expect(planScenes({ script: 'x', template: heroJourney, env: envFor() })).rejects.toThrow(/Scene plan invalid/);
-    expect(generateTextSpy).toHaveBeenCalledTimes(2); // initial + 1 reprompt
+    const env = aiTextEnv(() => chatResponse('not json at all'));
+    await expect(planScenes({ script: 'x', template: heroJourney, env })).rejects.toThrow(/Scene plan invalid/);
+    expect(env._calls.length).toBe(2); // initial + 1 reprompt
   });
 
   it('caps scenes to 20 even when the LLM returns more', async () => {
     const many = Array.from({ length: 50 }, (_, i) => ({ type: 'beat', durationFrames: 60, text: `s${i}` }));
-    generateTextSpy.mockResolvedValueOnce({ text: JSON.stringify({ scenes: many }) });
-    const result = await planScenes({ script: 'x', template: heroJourney, env: envFor() });
+    const env = aiTextEnv(() => chatResponse(JSON.stringify({ scenes: many })));
+    const result = await planScenes({ script: 'x', template: heroJourney, env });
     expect(result.scenes).toHaveLength(20);
   });
 });
@@ -190,7 +198,6 @@ describe('finalizeRender', () => {
       VIDEO_ENCODING: { send: async () => {} } as unknown as Queue<{ videoId: string; r2Key: string }>,
     } as RenderEnv;
 
-    // Spy by wrapping submitRenderJob via env-injected helper.
     const submitSpy = vi.fn(async (input: { userId: string; takeKeys: string[]; compositionProps: Record<string, unknown> }) => {
       seen.push(input);
       return { jobId: 'j_finalize' };

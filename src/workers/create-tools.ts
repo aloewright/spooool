@@ -4,9 +4,6 @@
 // providers directly" rule. Pure of side effects beyond the explicit
 // network / R2 calls so unit tests can mock fetch.
 
-import { generateText } from 'ai';
-import { createAiGateway } from 'ai-gateway-provider';
-import { createUnified } from 'ai-gateway-provider/providers/unified';
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
 
@@ -33,53 +30,60 @@ export interface SceneSpec {
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
 const TEXT_GATEWAY_SLUG = 'x';
-const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
+
+interface ChatCompletionResponse {
+  choices?: Array<{ message?: { content?: string } }>;
+}
 
 /**
- * Invoke a dynamic-route chat completion via the `ai-gateway-provider`
- * adapter for the Vercel AI SDK. Equivalent to the snippet in the
- * Cloudflare docs:
+ * Invoke a dynamic-route chat completion via the Workers AI binding's
+ * gateway proxy:
  *
- *   const aigateway = createAiGateway({ accountId, gateway, apiKey });
- *   const { text } = await generateText({
- *     model: aigateway(unified('dynamic/text_gen')),
- *     messages: [...],
- *   });
+ *   env.AI.gateway('x').run({
+ *     provider: 'compat',
+ *     endpoint: 'chat/completions',
+ *     query: { model: 'dynamic/text_gen', messages: [...] },
+ *   })
  *
- * The provider posts to the gateway's Universal endpoint
- * (`/v1/{account}/{gateway}`) with an array-of-steps body — NOT
- * `/compat/chat/completions` — which is the only shape that works for
- * dynamic-route invocations from inside a Worker (the compat URL is
- * rejected with code 2019 from a Worker context).
+ * Previously tried `ai-gateway-provider` + Vercel AI SDK. That package
+ * posts to the gateway's Universal endpoint with an array body which
+ * the gateway rejects ("anyOf at '/' not met") for dynamic routes
+ * containing Vertex Gemini + Workers AI fallbacks — the request shape
+ * is matched against each provider's schema directly with no compat
+ * translation. The binding's compat proxy goes through
+ * `/compat/chat/completions` and is the only invocation shape
+ * confirmed working end-to-end from inside a Worker on gateway x.
  */
 async function chatComplete(
   args: {
     route: 'dynamic/text_gen';
-    /** Goes into the AI SDK `system` prop. */
-    system: string;
-    /** User-side messages only. The AI SDK rejects role:'system' inside
-     *  `messages` as a prompt-injection risk; use the dedicated `system`
-     *  field instead. */
-    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-    env: AIGatewayEnv;
+    /**
+     * Full chat history including any system message. OpenAI's compat
+     * endpoint accepts `role: 'system'` directly — we don't need a
+     * separate `system` field like the Vercel AI SDK requires.
+     */
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
+    env: AIBindingEnv;
   },
   retries: number,
 ): Promise<string> {
-  const aigateway = createAiGateway({
-    accountId: args.env.CF_ACCOUNT_ID ?? CF_ACCOUNT_ID,
-    gateway: TEXT_GATEWAY_SLUG,
-    apiKey: args.env.CF_AIG_TOKEN,
-  });
-  const unified = createUnified();
   let lastErr: unknown = null;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const { text } = await generateText({
-        model: aigateway(unified(args.route)),
-        system: args.system,
-        messages: args.messages,
+      const raw = await args.env.AI.gateway(TEXT_GATEWAY_SLUG).run({
+        provider: 'compat',
+        endpoint: 'chat/completions',
+        query: { model: args.route, messages: args.messages },
       });
-      if (typeof text === 'string' && text.length > 0) return text;
+      // The binding either returns the parsed JSON directly or a Response.
+      let body: ChatCompletionResponse;
+      if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
+        body = await (raw as Response).json() as ChatCompletionResponse;
+      } else {
+        body = raw as ChatCompletionResponse;
+      }
+      const content = body?.choices?.[0]?.message?.content;
+      if (typeof content === 'string') return content;
       lastErr = new Error('AI Gateway returned no message content');
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));
@@ -95,18 +99,21 @@ async function chatComplete(
 export async function draftScript(args: {
   template: StoryTemplate;
   answers: Record<string, string>;
-  env: AIGatewayEnv;
+  env: AIBindingEnv;
 }): Promise<{ script: string }> {
   const answersBlock = Object.entries(args.answers)
     .map(([qid, a]) => `Q[${qid}]: ${a}`)
     .join('\n');
-  const system = `${args.template.systemPromptFragment}\nProduce only the narration text, no scene headers, no markdown.`;
   const messages = [
+    {
+      role: 'system' as const,
+      content: `${args.template.systemPromptFragment}\nProduce only the narration text, no scene headers, no markdown.`,
+    },
     { role: 'user' as const, content: answersBlock || 'No answers provided; invent plausible details consistent with the template.' },
   ];
   let content: string;
   try {
-    content = await chatComplete({ route: 'dynamic/text_gen', system, messages, env: args.env }, 2);
+    content = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 2);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Script generation failed: ${msg}`);
@@ -117,10 +124,13 @@ export async function draftScript(args: {
 export async function planScenes(args: {
   script: string;
   template: StoryTemplate;
-  env: AIGatewayEnv;
+  env: AIBindingEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
-  const system = `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`;
   const messages = [
+    {
+      role: 'system' as const,
+      content: `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`,
+    },
     { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` },
   ];
 
@@ -142,7 +152,7 @@ export async function planScenes(args: {
   };
 
   const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text_gen', system, messages, env: args.env }, 0);
+    const raw = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 0);
     return parseOrThrow(raw);
   };
 

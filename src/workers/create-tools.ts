@@ -80,15 +80,27 @@ async function chatComplete(
         headers: {},
         query: { model: args.route, messages: args.messages },
       });
-      // The binding either returns the parsed JSON directly or a Response.
-      let body: ChatCompletionResponse;
+      // The binding may return a parsed JSON, a Response, a ReadableStream,
+      // or a raw string. Walk through possibilities and surface what we
+      // got when nothing matches so we can fix parsing on the next pass.
+      let body: ChatCompletionResponse | undefined;
       if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
         body = await (raw as Response).json() as ChatCompletionResponse;
+      } else if (typeof raw === 'string') {
+        try { body = JSON.parse(raw) as ChatCompletionResponse; } catch { /* fall through */ }
       } else {
         body = raw as ChatCompletionResponse;
       }
       const content = body?.choices?.[0]?.message?.content;
-      if (typeof content === 'string') return content;
+      if (typeof content === 'string' && content.length > 0) return content;
+      // Diagnostic: dump what we got so the next attempt can decode it.
+      const shape = raw == null ? String(raw) : typeof raw === 'object'
+        ? `object keys=${Object.keys(raw as Record<string, unknown>).join(',')}`
+        : `${typeof raw}=${String(raw).slice(0, 200)}`;
+      const preview = (() => {
+        try { return JSON.stringify(raw)?.slice(0, 500); } catch { return '<unstringifiable>'; }
+      })();
+      console.warn('[create-tools] chatComplete: no content', { shape, preview });
       lastErr = new Error('AI Gateway returned no message content');
     } catch (err) {
       lastErr = err instanceof Error ? err : new Error(String(err));

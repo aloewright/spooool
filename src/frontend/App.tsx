@@ -5,11 +5,12 @@ import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import './styles/strand.css';
 
-// Route-level code splitting: each page (and the hls.js it depends on for
-// /watch) is fetched only when navigated to. Cuts the initial JS payload on
-// the home route from ~275KB gz to the React-vendor + Home shell. See ALO-199
-// (and ALO-204 for the video.js → hls.js swap that took the watch chunk from
-// ~570KB raw to ~150KB raw).
+// Route-level code splitting: each page (and the @cloudflare/stream-react
+// SDK loader the /watch chunk depends on) is fetched only when navigated to.
+// Cuts the initial JS payload on the home route to the React-vendor + Home
+// shell. History: ALO-199 set up the split; ALO-204 swapped hls.js for
+// video.js; we then ripped both out in favour of @cloudflare/stream-react
+// once playback was unified on Cloudflare Stream.
 const Watch = lazy(() => import('./pages/Watch').then((m) => ({ default: m.Watch })));
 const Upload = lazy(() => import('./pages/Upload').then((m) => ({ default: m.Upload })));
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));

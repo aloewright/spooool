@@ -29,8 +29,10 @@
     "worker:logs": "wrangler tail --format json | jq ."
   },
   "dependencies": {
+    "@cloudflare/ai-utils": "^1.0.1",
     "@cloudflare/containers": "^0.3.5",
     "@cloudflare/kumo": "^1.16.0",
+    "@cloudflare/stream-react": "^1.9.3",
     "@cloudflare/workers-types": "^4.20240221.1",
     "@hotwired/turbo": "^8.0.23",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -65,7 +67,6 @@
     "remotion": "^4.0.467",
     "stripe": "^14.7.0",
     "tailwind-merge": "^1.14.0",
-    "video.js": "^8.23.7",
     "web-vitals": "^5.2.0",
     "zod": "^4.3.6"
   },

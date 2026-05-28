@@ -15,8 +15,8 @@ const VideoTags = lazy(() =>
   import('../components/VideoTags').then((m) => ({ default: m.VideoTags })),
 );
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
-import { createNativePlayer, type NativePlayer } from '../lib/native-player';
 import { keyToPlayerAction } from '../lib/player-keys';
+import { StreamPlayer, type Player } from '../lib/stream-player';
 import {
   clearStoredPosition,
   formatTimeParam,
@@ -51,8 +51,6 @@ type VideoResponse = {
   status?: string;
 };
 
-type PlaybackSource = { src: string; type: string } | null;
-
 type UpNextVideo = {
   id: string;
   title: string;
@@ -84,8 +82,12 @@ export function Watch(): JSX.Element {
   // ALO-213: surface stored resume position so the viewer can override it.
   // null = nothing to resume; number = seconds we'd resume at.
   const [resumeOffer, setResumeOffer] = useState<number | null>(null);
-  const videoEl = useRef<HTMLVideoElement | null>(null);
-  const playerRef = useRef<NativePlayer | null>(null);
+  // The StreamPlayer iframe hydrates asynchronously. `playerRef.current` is
+  // populated by onReady and nulled by onTeardown; `playerEpoch` is bumped
+  // alongside so dependent effects can re-bind when the underlying player
+  // is swapped (e.g. when navigating between videos).
+  const playerRef = useRef<Player | null>(null);
+  const [playerEpoch, setPlayerEpoch] = useState(0);
 
   // ALO-147: ?t= deep link wins over a stored resume position.
   const startAt = useMemo(
@@ -96,29 +98,14 @@ export function Watch(): JSX.Element {
   // has a saved position. Persists for the lifetime of this Watch mount.
   const watchFromStart = searchParams.get('start') === '1';
 
-  const playbackSource: PlaybackSource = useMemo(() => {
-    if (!video) return null;
-    // Use Stream HLS only when transcoding is finished — until then the
-    // manifest 404s. R2 fallback covers the in-between canonical states
-    // (uploading, queued, encoding) and the case where Stream isn't
-    // configured at all.
-    if (video.stream_video_id && video.status === 'ready') {
-      // Cloudflare Stream's per-account customer subdomain is the
-      // supported playback origin; videodelivery.net is legacy and may
-      // be retired. Source:
-      // https://developers.cloudflare.com/stream/viewing-videos/securing-your-stream/
-      return {
-        src: `https://customer-od6lvjm5bwfl1lki.cloudflarestream.com/${video.stream_video_id}/manifest/video.m3u8`,
-        type: 'application/x-mpegURL',
-      };
-    }
-    if (video.r2_key) {
-      // Direct R2 playback. Only browser-playable formats (MP4/H.264, WebM)
-      // will work here; other containers need Stream to transcode first.
-      return { src: `/api/videos/${encodeURIComponent(video.id)}/stream`, type: 'video/mp4' };
-    }
-    return null;
-  }, [video]);
+  const handlePlayerReady = useCallback((p: Player): void => {
+    playerRef.current = p;
+    setPlayerEpoch((n) => n + 1);
+  }, []);
+  const handlePlayerTeardown = useCallback((): void => {
+    playerRef.current = null;
+    setPlayerEpoch((n) => n + 1);
+  }, []);
 
   useEffect(() => {
     if (!id) {
@@ -306,22 +293,6 @@ export function Watch(): JSX.Element {
     }
   }, [id, likeBusy, session]);
 
-  useEffect(() => {
-    const el = videoEl.current;
-    if (!el || !playbackSource) {
-      return;
-    }
-
-    playerRef.current?.dispose();
-    el.controls = true;
-    playerRef.current = createNativePlayer(el, playbackSource);
-
-    return () => {
-      playerRef.current?.dispose();
-      playerRef.current = null;
-    };
-  }, [playbackSource]);
-
   // ALO-146/147/213: seek to ?t= when present, otherwise resume from
   // localStorage (unless ?start=1 forces a fresh play). Runs once per
   // loadedmetadata so we know the duration before deciding.
@@ -359,7 +330,7 @@ export function Watch(): JSX.Element {
     return () => {
       player.off('loadedmetadata', onLoaded);
     };
-  }, [id, playbackSource, startAt, watchFromStart]);
+  }, [id, playerEpoch, startAt, watchFromStart]);
 
   // ALO-146: persist position. Save while playing on a 5s tick, on pause,
   // and on tab hide (which is when most viewers vanish without "ending").
@@ -393,7 +364,7 @@ export function Watch(): JSX.Element {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', persist);
     };
-  }, [id, playbackSource]);
+  }, [id, playerEpoch]);
 
   // ALO-188: window-level keyboard shortcuts.
   useEffect(() => {
@@ -441,7 +412,7 @@ export function Watch(): JSX.Element {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [playbackSource]);
+  }, [playerEpoch]);
 
   // ALO-153: when the current video ends and auto-advance is on, navigate to
   // the first up-next entry. Reads from refs so we don't rebind the listener
@@ -459,7 +430,7 @@ export function Watch(): JSX.Element {
     return () => {
       player.off('ended', onEnded);
     };
-  }, [id, navigate, playbackSource]);
+  }, [id, navigate, playerEpoch]);
 
   useEffect(() => {
     const player = playerRef.current;
@@ -497,7 +468,7 @@ export function Watch(): JSX.Element {
       ping();
       player.off('play', onPlay);
     };
-  }, [id, playbackSource]);
+  }, [id, playerEpoch]);
 
   // ALO-213: dismiss the resume banner and rewind to 0. Clears storage so
   // the next visit doesn't re-offer the same position.
@@ -563,13 +534,31 @@ export function Watch(): JSX.Element {
           boxShadow: 'var(--shadow-card)',
         }}
       >
-        <video
-          ref={videoEl}
-          className="native-player"
-          playsInline
-          preload="metadata"
-          style={{ width: '100%', display: 'block', background: 'black' }}
-        />
+        {video.stream_video_id && video.status === 'ready' ? (
+          <StreamPlayer
+            videoId={video.stream_video_id}
+            startTime={startAt ?? undefined}
+            onReady={handlePlayerReady}
+            onTeardown={handlePlayerTeardown}
+          />
+        ) : (
+          <div
+            className="ds-empty"
+            style={{
+              aspectRatio: '16 / 9',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'white',
+              padding: 'var(--space-3)',
+              textAlign: 'center',
+            }}
+          >
+            {video.status && video.status !== 'ready'
+              ? 'This video is still encoding — check back in a moment.'
+              : 'Video unavailable.'}
+          </div>
+        )}
       </div>
       {resumeOffer != null && (
         <div

@@ -18,8 +18,14 @@ enabled = true
 head_sampling_rate = 1.0
 
 # Static Frontend Assets (built by Vite → dist/)
+#
+# `binding = "ASSETS"` is required for og-meta.ts and any other worker
+# route that needs to fetch the SPA HTML (e.g. to HTMLRewriter-inject
+# OG meta tags). Without the binding, `env.ASSETS` is undefined and
+# `/watch/:id` 500s with TypeError reading 'fetch'.
 [assets]
 directory = "./dist"
+binding = "ASSETS"
 not_found_handling = "single-page-application"
 # /robots.txt and /sitemap.xml are dynamic worker responses; without listing
 # them here the SPA fallback would shadow them with index.html.

@@ -5,6 +5,7 @@ import type { RenderEnv } from './render';
 
 interface GenerateTextCall {
   model: unknown;
+  system?: string;
   messages?: Array<{ role: string; content: string }>;
 }
 
@@ -49,7 +50,8 @@ describe('draftScript', () => {
     const call = generateTextSpy.mock.calls[0][0];
     // The provider wrapped `dynamic/text` and passed it through as `model`.
     expect((call.model as { __unified: string }).__unified).toBe('dynamic/text');
-    expect(call.messages?.[0].content).toContain("hero's journey");
+    expect(call.system).toContain("hero's journey");
+    expect(call.messages?.[0].role).toBe('user');
   });
 
   it('caps the returned script to 1500 chars', async () => {

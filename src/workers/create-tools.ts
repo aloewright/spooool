@@ -53,7 +53,16 @@ const CF_ACCOUNT_ID = '85d376fc54617bcb57185547f08e528b';
  * rejected with code 2019 from a Worker context).
  */
 async function chatComplete(
-  args: { route: 'dynamic/text'; messages: Array<{ role: 'system' | 'user'; content: string }>; env: AIGatewayEnv },
+  args: {
+    route: 'dynamic/text';
+    /** Goes into the AI SDK `system` prop. */
+    system: string;
+    /** User-side messages only. The AI SDK rejects role:'system' inside
+     *  `messages` as a prompt-injection risk; use the dedicated `system`
+     *  field instead. */
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+    env: AIGatewayEnv;
+  },
   retries: number,
 ): Promise<string> {
   const aigateway = createAiGateway({
@@ -67,6 +76,7 @@ async function chatComplete(
     try {
       const { text } = await generateText({
         model: aigateway(unified(args.route)),
+        system: args.system,
         messages: args.messages,
       });
       if (typeof text === 'string' && text.length > 0) return text;
@@ -90,16 +100,13 @@ export async function draftScript(args: {
   const answersBlock = Object.entries(args.answers)
     .map(([qid, a]) => `Q[${qid}]: ${a}`)
     .join('\n');
+  const system = `${args.template.systemPromptFragment}\nProduce only the narration text, no scene headers, no markdown.`;
   const messages = [
-    {
-      role: 'system' as const,
-      content: `${args.template.systemPromptFragment}\nProduce only the narration text, no scene headers, no markdown.`,
-    },
     { role: 'user' as const, content: answersBlock || 'No answers provided; invent plausible details consistent with the template.' },
   ];
   let content: string;
   try {
-    content = await chatComplete({ route: 'dynamic/text', messages, env: args.env }, 2);
+    content = await chatComplete({ route: 'dynamic/text', system, messages, env: args.env }, 2);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`Script generation failed: ${msg}`);
@@ -112,12 +119,8 @@ export async function planScenes(args: {
   template: StoryTemplate;
   env: AIGatewayEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
+  const system = `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`;
   const messages = [
-    {
-      role: 'system' as const,
-      content:
-        `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`,
-    },
     { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` },
   ];
 
@@ -139,7 +142,7 @@ export async function planScenes(args: {
   };
 
   const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text', messages, env: args.env }, 0);
+    const raw = await chatComplete({ route: 'dynamic/text', system, messages, env: args.env }, 0);
     return parseOrThrow(raw);
   };
 

@@ -73,6 +73,11 @@ async function chatComplete(
       const raw = await args.env.AI.gateway(TEXT_GATEWAY_SLUG).run({
         provider: 'compat',
         endpoint: 'chat/completions',
+        // Pass `headers: {}` explicitly — the binding's internal code
+        // does Object.keys/entries on this and throws "Cannot convert
+        // undefined or null to object" when omitted, even though the
+        // type marks it optional.
+        headers: {},
         query: { model: args.route, messages: args.messages },
       });
       // The binding either returns the parsed JSON directly or a Response.

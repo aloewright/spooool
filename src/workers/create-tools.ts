@@ -13,8 +13,9 @@ import { gatewayChat, type AiGatewayEnv } from './ai-gateway';
  * Kept for backward-compat with downstream env intersections
  * (`CreateEnv`, `ComposerAgentEnv`, `CMAEnv` all extend it). The fields
  * are no longer consumed by `chatComplete` — text gen routes through
- * the Workers AI binding instead — but other code paths may still
- * reference these worker secrets, so we keep the type around.
+ * `gatewayChat` (either gateway-binding or run-gateway mode) — but other
+ * code paths may still reference these worker secrets, so we keep the
+ * type around.
  */
 export interface AIGatewayEnv {
   CF_ACCOUNT_ID: string;
@@ -47,15 +48,17 @@ const MAX_SCENES = 20;
  * chunks). By iterating manually we can detect RUN_ERROR and re-throw so callers'
  * retry loops work correctly.
  *
- * Why `env as unknown as AiGatewayEnv`: AIBindingEnv.AI.gateway() returns
- * AIGatewayBinding (whose run() returns Promise<unknown>) while AiGatewayEnv
- * requires CloudflareAiGateway (whose run() returns Promise<Response>). The
- * shapes are structurally incompatible so a direct assignment would fail tsc.
- * The cast is safe because gatewayChat() in run-gateway mode (which is what
- * the test sets via AI_GATEWAY_MODE:'run-gateway') uses only env.AI.run, never
- * env.AI.gateway(). See CLAUDE.md "Inside a Worker" for the full breakdown.
- * TODO: remove cast when the widen of CloudflareAiGateway.run to Promise<unknown>
- * can be applied without breaking createWorkersAi* factory calls in ai-gateway.ts.
+ * Why `env as unknown as AiGatewayEnv`: the real Worker `Ai` binding structurally
+ * satisfies BOTH `AIGatewayBinding` and ai-gateway.ts's `CloudflareAiGateway` shapes
+ * at runtime. The only mismatch is a tsc-level `Promise<unknown>` vs `Promise<Response>`
+ * divergence on the gateway `run` return type — `AIGatewayBinding.run` returns
+ * `Promise<unknown>` while `AiGatewayEnv`'s `CloudflareAiGateway.run` returns
+ * `Promise<Response>`. The cast bridges that divergence without editing either consumer.
+ * Note: in gateway-binding mode (the production default), `gatewayChat` DOES call
+ * `env.AI.gateway('x')` via `createWorkersAiChat`; the cast is safe because the real
+ * binding satisfies both shapes. See CLAUDE.md "Inside a Worker" for the full breakdown.
+ * TODO: remove cast when `CloudflareAiGateway.run` is widened to `Promise<unknown>`
+ * upstream without breaking createWorkersAi* factory calls in ai-gateway.ts.
  */
 async function chatComplete(
   args: {
@@ -70,7 +73,8 @@ async function chatComplete(
   );
   // Cast required: AIBindingEnv.AI.gateway returns AIGatewayBinding (run → Promise<unknown>)
   // while AiGatewayEnv.AI.gateway returns CloudflareAiGateway (run → Promise<Response>).
-  // Safe here because run-gateway mode uses only env.AI.run, not env.AI.gateway.
+  // Safe at runtime: the real Ai binding satisfies both shapes; only the tsc return-type
+  // divergence on gateway().run requires the cast. See doc comment above for full context.
   const stream = chat({
     adapter: gatewayChat(args.env as unknown as AiGatewayEnv),
     systemPrompts: systemMessages.map((m) => m.content),
@@ -79,7 +83,16 @@ async function chatComplete(
   let text = '';
   for await (const chunk of stream) {
     if (chunk.type === 'RUN_ERROR') {
-      throw new Error(('message' in chunk && typeof chunk.message === 'string') ? chunk.message : 'AI Gateway call failed');
+      // RUN_ERROR carries the provider message differently per mode: run-gateway
+      // sets a flat `message`; the @cloudflare gateway-binding adapter nests it as
+      // `error.message` — and @tanstack/ai's strip-to-spec middleware may remove the
+      // nested `error` before this consumer sees it, in which case only the generic
+      // string is available. For full provider diagnostics, run in run-gateway mode.
+      const c = chunk as { message?: unknown; error?: { message?: unknown } };
+      const msg = (typeof c.message === 'string' && c.message)
+        || (typeof c.error?.message === 'string' && c.error.message)
+        || 'AI Gateway call failed';
+      throw new Error(msg);
     }
     if (chunk.type === 'TEXT_MESSAGE_CONTENT' && 'delta' in chunk && typeof chunk.delta === 'string') {
       text += chunk.delta;
@@ -197,10 +210,11 @@ export interface R2BindingEnv {
  */
 /**
  * Shape of `env.AI.gateway(slug).run({...})` — the Workers-AI-binding
- * call that invokes a Cloudflare AI Gateway dynamic route from inside a
- * Worker. We use this for draft_script + plan_scenes (text gen via the
- * `dynamic/text` route on the `spooool` gateway). Auth is handled by the
- * binding itself; no CF_AIG_TOKEN required.
+ * call that invokes a Cloudflare AI Gateway route from inside a Worker.
+ * Retained for backward-compat typing of `AIBindingEnv`; the gateway-binding
+ * transport is used by `chatComplete` in production (gateway-binding mode)
+ * via `gatewayChat` → `createWorkersAiChat({ binding: env.AI.gateway('x') })`.
+ * Auth is handled by the binding itself; no CF_AIG_TOKEN required.
  */
 interface AIGatewayBinding {
   run: (body: {

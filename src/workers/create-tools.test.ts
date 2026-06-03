@@ -67,6 +67,71 @@ describe('draftScript', () => {
     await expect(draftScript({ template: heroJourney, answers: {}, env })).rejects.toThrow(/Script generation failed/);
     expect(env._calls.length).toBe(3); // initial + 2 retries
   });
+
+  it('[gateway-binding mode] returns a script via gateway binding (success-path coverage for production transport)', async () => {
+    // Build an env WITHOUT AI_GATEWAY_MODE so chatComplete defaults to
+    // gateway-binding mode and routes through createWorkersAiChat({ binding: env.AI.gateway('x') }).
+    // The gateway binding's run() returns a minimal OpenAI-compat JSON response
+    // (non-streaming shape). The @cloudflare/tanstack-ai adapter calls
+    // binding.run(request, { signal }), uses the response as if returned by
+    // the OpenAI SDK fetch, and emits TEXT_MESSAGE_CONTENT chunks which
+    // chatComplete accumulates into the final string.
+    // env.AI.run is stubbed to throw — it must NOT be called in this mode,
+    // verifying that the gateway-binding path is the only one exercised.
+    //
+    // Why success-path rather than error-path: when gateway.run() throws, the
+    // @cloudflare/tanstack-ai adapter catches the error, falls back to a second
+    // non-streaming call, which also throws. The OpenAI SDK's internal retry
+    // logic then waits before giving up, causing the test to exceed vitest's
+    // 5 s default timeout. The success-path is equally valid coverage of the
+    // production transport — it confirms gateway-binding mode is wired end-to-end.
+    const gatewayRunCalls: unknown[] = [];
+    // The @cloudflare/tanstack-ai workers-ai adapter always requests stream:true
+    // first. Return a proper OpenAI-compat SSE stream so the streaming path
+    // succeeds and emits TEXT_MESSAGE_CONTENT chunks (the non-streaming fallback
+    // only fires on a fetch error, which we can't trigger without a timeout).
+    const content = 'A hero rises from the ordinary world.';
+    const model = '@cf/google/gemma-4-26b-a4b-it';
+    const streamId = 'workers-ai-test';
+    const created = Math.floor(Date.now() / 1000);
+    function makeOpenAiSseResponse(text: string): Response {
+      // Emit: one delta chunk with the content, then a finish chunk, then [DONE].
+      const deltaChunk = JSON.stringify({
+        id: streamId, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
+      });
+      const doneChunk = JSON.stringify({
+        id: streamId, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      });
+      const sse = `data: ${deltaChunk}\n\ndata: ${doneChunk}\n\ndata: [DONE]\n\n`;
+      return new Response(sse, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      });
+    }
+    const env = {
+      // No AI_GATEWAY_MODE → resolveMode returns 'gateway-binding'
+      AI: {
+        gateway(_slug: string) {
+          return {
+            async run(req: unknown): Promise<Response> {
+              gatewayRunCalls.push(req);
+              return makeOpenAiSseResponse(content);
+            },
+          };
+        },
+        run(_model: string, _input: Record<string, unknown>, _opts?: unknown): never {
+          throw new Error('env.AI.run must not be called in gateway-binding mode');
+        },
+      },
+    } as unknown as AIBindingEnv;
+
+    const result = await draftScript({ template: heroJourney, answers: {}, env });
+    expect(result.script).toMatch(/hero rises/i);
+    // At least one gateway.run call was made (streaming attempt or non-streaming
+    // fallback) — confirms the gateway-binding transport was exercised.
+    expect(gatewayRunCalls.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('planScenes', () => {

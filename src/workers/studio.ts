@@ -123,6 +123,7 @@ studioRoutes.post('/api/studio/image', async (c) => {
 studioRoutes.post('/api/videos/:id/thumbnail/from-asset', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
 
   const videoId = c.req.param('id');
   const body = await c.req.json().catch(() => null);

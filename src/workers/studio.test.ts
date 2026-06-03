@@ -386,6 +386,15 @@ describe('POST /api/videos/:id/thumbnail/from-asset', () => {
     expect((await r).status).toBe(401);
   });
 
+  it('403 when email not verified', async () => {
+    const { r } = postFromAsset(
+      { id: 'u1', email: 'a@b.c', name: 'A', emailVerified: false },
+      'v1',
+      { asset_id: 'a1' },
+    );
+    expect((await r).status).toBe(403);
+  });
+
   it('400 on invalid body (missing asset_id)', async () => {
     const { r } = postFromAsset(
       verifiedUser, 'v1', {},

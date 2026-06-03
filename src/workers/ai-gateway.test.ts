@@ -48,12 +48,16 @@ function makeEnv(overrides = {}) {
 describe('ai-gateway gateway-binding mode', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('defaults to gateway-binding mode', () => {
-    expect(resolveMode(makeEnv())).toBe('gateway-binding');
+  it('defaults to run-gateway mode (the proven path)', () => {
+    expect(resolveMode(makeEnv())).toBe('run-gateway');
+  });
+
+  it('resolveMode returns gateway-binding when explicitly set', () => {
+    expect(resolveMode(makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' }))).toBe('gateway-binding');
   });
 
   it('gatewayChat builds the adapter against env.AI.gateway(GATEWAY_ID), not plain env.AI', () => {
-    const env = makeEnv();
+    const env = makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' });
     gatewayChat(env);
     expect(env.AI.gateway).toHaveBeenCalledWith(GATEWAY_ID);
     expect(createWorkersAiChat).toHaveBeenCalledWith(DEFAULT_CHAT_MODEL, { binding: env.AI.gateway(GATEWAY_ID) });
@@ -245,10 +249,10 @@ describe('ai-gateway: every activity is gateway-routed', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it.each([
-    ['image', () => gatewayImage(makeEnv()), createWorkersAiImage, DEFAULT_IMAGE_MODEL],
-    ['tts', () => gatewayTts(makeEnv()), createWorkersAiTts, DEFAULT_TTS_MODEL],
-    ['transcription', () => gatewayTranscription(makeEnv()), createWorkersAiTranscription, DEFAULT_STT_MODEL],
-    ['summarize', () => gatewaySummarize(makeEnv()), createWorkersAiSummarize, DEFAULT_SUMMARIZE_MODEL],
+    ['image', () => gatewayImage(makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' })), createWorkersAiImage, DEFAULT_IMAGE_MODEL],
+    ['tts', () => gatewayTts(makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' })), createWorkersAiTts, DEFAULT_TTS_MODEL],
+    ['transcription', () => gatewayTranscription(makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' })), createWorkersAiTranscription, DEFAULT_STT_MODEL],
+    ['summarize', () => gatewaySummarize(makeEnv({ AI_GATEWAY_MODE: 'gateway-binding' })), createWorkersAiSummarize, DEFAULT_SUMMARIZE_MODEL],
   ] as const)(
     'gateway%s routes through env.AI.gateway(GATEWAY_ID), not plain env.AI',
     (_label, call, factory, model) => {

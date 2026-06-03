@@ -63,12 +63,17 @@ export const DEFAULT_STT_MODEL = '@cf/openai/whisper-large-v3-turbo';
 export const DEFAULT_SUMMARIZE_MODEL = '@cf/facebook/bart-large-cnn';
 
 /**
- * Resolve the active mode from env. Defaults to 'gateway-binding'.
- * The 'run-gateway' branch uses env.AI.run with gateway opts for the full
- * request flow (see runGatewayChat / runGatewayTts below).
+ * Resolve the active mode from env. Defaults to 'run-gateway' — the proven,
+ * observability-preserving `env.AI.run('@cf/..', .., { gateway: { id } })` path
+ * (byte-for-byte parity with create-tools.ts today; it also preserves the
+ * provider error message, which the gateway-binding adapter loses to
+ * @tanstack/ai's strip-to-spec middleware). Set `AI_GATEWAY_MODE` to
+ * 'gateway-binding' to opt into the @cloudflare/tanstack-ai gateway-binding
+ * adapter once it's smoke-verified on the account (see runGatewayChat /
+ * runGatewayTts below and the E11 AI Studio spec, Appendix B).
  */
 export function resolveMode(env: AiGatewayEnv): AiGatewayMode {
-  return env.AI_GATEWAY_MODE === 'run-gateway' ? 'run-gateway' : 'gateway-binding';
+  return env.AI_GATEWAY_MODE === 'gateway-binding' ? 'gateway-binding' : 'run-gateway';
 }
 
 /**
@@ -247,9 +252,9 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
 /**
  * Returns a @tanstack/ai text adapter for chat. Transport is selected by
  * `resolveMode(env)`:
- *   - 'gateway-binding' (default): adapter built against `env.AI.gateway(GATEWAY_ID)`.
- *   - 'run-gateway': custom adapter driving `env.AI.run('@cf/<model>', ..., { gateway })`
- *     directly (de-risking fallback, byte-for-byte parity with create-tools.ts).
+ *   - 'run-gateway' (default): custom adapter driving `env.AI.run('@cf/<model>', ..., { gateway })`
+ *     directly (the proven path, byte-for-byte parity with create-tools.ts).
+ *   - 'gateway-binding': adapter built against `env.AI.gateway(GATEWAY_ID)` (opt-in once verified).
  * Either way the call is gateway-routed — bare `env.AI` (plain binding) is never used.
  */
 export function gatewayChat(env: AiGatewayEnv, model: string = DEFAULT_CHAT_MODEL) {

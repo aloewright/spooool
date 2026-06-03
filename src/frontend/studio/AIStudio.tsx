@@ -2,7 +2,7 @@
 // Sends messages to ALO-644's POST /api/studio/chat endpoint via SSE.
 // Rate limit: 30 studio requests per hour.
 
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { UIMessage } from '@tanstack/ai-client';
 import { useChat } from '@tanstack/ai-react';
 import { Spinner } from '../create/Spinner';
@@ -17,9 +17,8 @@ function messageText(m: UIMessage): string {
 }
 
 export function AIStudio(): JSX.Element {
-  const { messages, sendMessage, isLoading, error } = useChat({
-    connection: studioChatConnection(),
-  });
+  const connection = useMemo(() => studioChatConnection(), []);
+  const { messages, sendMessage, isLoading, error } = useChat({ connection });
 
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);
@@ -34,7 +33,7 @@ export function AIStudio(): JSX.Element {
   async function onSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
     const t = input.trim();
-    if (!t) return;
+    if (!t || isLoading) return;
     setInput('');
     void sendMessage(t);
   }
@@ -125,7 +124,7 @@ export function AIStudio(): JSX.Element {
         className="btn btn--primary"
         disabled={!input.trim() || isLoading}
       >
-        {isLoading ? <Spinner size={16} inline label="Submitting…" /> : 'Send'}
+        {isLoading ? 'Sending…' : 'Send'}
       </button>
     </form>
   );

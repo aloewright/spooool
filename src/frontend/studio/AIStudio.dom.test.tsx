@@ -111,13 +111,15 @@ describe('AIStudio', () => {
 
     await act(async () => {
       // Simulate React controlled input update.
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        HTMLTextAreaElement.prototype,
-        'value',
-      )?.set;
-      nativeInputValueSetter?.call(textarea, USER_MSG);
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      if (setter) setter.call(textarea, USER_MSG);
+      else (textarea as HTMLTextAreaElement).value = USER_MSG;
       textarea!.dispatchEvent(new Event('input', { bubbles: true }));
     });
+
+    // Sanity-check: the textarea must carry USER_MSG so a future setter
+    // regression fails loudly rather than silently passing '' to sendMessage.
+    expect(textarea!.value).toBe(USER_MSG);
 
     // Submit the form.
     const form = container!.querySelector<HTMLFormElement>('form');

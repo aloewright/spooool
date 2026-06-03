@@ -110,7 +110,9 @@ describe('draftScript', () => {
       });
     }
     const env = {
-      // No AI_GATEWAY_MODE → resolveMode returns 'gateway-binding'
+      // Explicit gateway-binding mode (run-gateway is the default now) so this
+      // test exercises createWorkersAiChat({ binding: env.AI.gateway('x') }).
+      AI_GATEWAY_MODE: 'gateway-binding' as const,
       AI: {
         gateway(_slug: string) {
           return {

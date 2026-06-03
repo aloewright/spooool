@@ -36,6 +36,7 @@ import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
+import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
@@ -63,6 +64,11 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUplo
   // wrangler.toml). Used by ogMetaRoutes to fetch index.html and HTMLRewriter
   // it with per-video OG tags.
   ASSETS: { fetch: (req: Request) => Promise<Response> };
+  // E11 ALO-642: selects the AI-Gateway transport mode for ai-gateway.ts.
+  // 'gateway-binding' (default) uses { binding: env.AI.gateway('x') };
+  // 'run-gateway' uses the env.AI.run('@cf/..', .., { gateway: { id: 'x' } })
+  // custom adapter. Never plain { binding: env.AI } (drops observability).
+  AI_GATEWAY_MODE?: AiGatewayMode;
 };
 
 type Variables = {

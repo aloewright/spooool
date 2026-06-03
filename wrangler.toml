@@ -190,6 +190,11 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 EMAIL_FROM = "noreply@spooool.com"
 EMAIL_FROM_NAME = "Spooool"
 
+# ALO-642: default AI-Gateway transport mode for ai-gateway.ts. Flip to
+# "run-gateway" only if env.AI.gateway('x') binding misbehaves for an
+# activity on this account (see the E11 AI Studio spec, Appendix B).
+AI_GATEWAY_MODE = "gateway-binding"
+
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)

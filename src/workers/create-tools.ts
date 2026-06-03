@@ -4,11 +4,11 @@
 // providers directly" rule. Pure of side effects beyond the explicit
 // network / R2 calls so unit tests can mock fetch.
 
-import { chat } from '@tanstack/ai';
+import { chat, generateSpeech } from '@tanstack/ai';
 import { z } from 'zod';
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
-import { gatewayChat, type AiGatewayEnv } from './ai-gateway';
+import { gatewayChat, gatewayTts, type AiGatewayEnv } from './ai-gateway';
 
 /**
  * Kept for backward-compat with downstream env intersections
@@ -53,8 +53,10 @@ const sceneSchema = z.object({
  * { messages, max_tokens: 800 }, { gateway: { id: 'x' } }) per CLAUDE.md
  * "Working pattern from a Worker today").
  *
- * No retries here — callers (draftScript's loop, planScenes' tryOnce pattern)
- * own their own retry / re-prompt logic. One call = one env.AI.run invocation.
+ * No retries here — callers own their own retry / re-prompt logic:
+ * draftScript's loop retries up to 3×; planScenes relies on chat({outputSchema})
+ * which validates internally and throws on malformed output without retrying.
+ * One call = one env.AI.run invocation.
  *
  * Why we iterate the stream instead of using stream:false: when env.AI.run
  * throws, runGatewayChat converts the error into a RUN_ERROR chunk rather than
@@ -240,10 +242,6 @@ export interface AIBindingEnv {
 }
 
 const MAX_TTS_CHARS = 2000;
-const TTS_MODEL = '@cf/deepgram/aura-2-en';
-// Route observability for TTS calls through gateway 'x' so the dynamic
-// /text_gen + /audio_gen calls land in the same dashboard.
-const TTS_GATEWAY_ID = 'x';
 
 /**
  * Voice profile → Deepgram Aura speaker. Aura ships ~40 named voices; we
@@ -268,13 +266,22 @@ export async function synthesizeTts(args: {
 }): Promise<{ r2Key: string; durationMs: number }> {
   if (args.script.length > MAX_TTS_CHARS) throw new Error('script too long for TTS');
 
-  let raw: ArrayBuffer | Uint8Array | Response;
+  // Route through @tanstack/ai generateSpeech() + gatewayTts adapter.
+  // In run-gateway mode (tests + production fallback), gatewayTts selects
+  // runGatewayTts which calls env.AI.run('@cf/deepgram/aura-2-en', ...,
+  // { gateway: { id: 'x' } }) and base64-encodes the result into TTSResult.audio.
+  // Cast required: AIBindingEnv.AI diverges from AiGatewayEnv.AI on
+  // gateway().run return type (Promise<unknown> vs Promise<Response>).
+  // Safe at runtime — see chatComplete doc comment for the full explanation.
+  // TODO: remove cast when CloudflareAiGateway.run is widened to Promise<unknown>.
+  let result: { audio: string };
   try {
-    raw = await args.env.AI.run(
-      TTS_MODEL,
-      { text: args.script, speaker: auraSpeaker(args.voice.profile), encoding: 'mp3' },
-      { gateway: { id: TTS_GATEWAY_ID } },
-    );
+    result = await generateSpeech({
+      adapter: gatewayTts(args.env as unknown as AiGatewayEnv),
+      text: args.script,
+      voice: auraSpeaker(args.voice.profile),
+      format: 'mp3',
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (isContentPolicyMsg(msg)) {
@@ -284,19 +291,12 @@ export async function synthesizeTts(args: {
     throw new Error(`TTS synthesis failed: ${msg.slice(0, 200)}`);
   }
 
-  // Aura returns audio as a Uint8Array; future SDK revs may wrap in a
-  // Response — handle both.
-  let audioBytes: ArrayBuffer;
-  if (raw instanceof Response) {
-    audioBytes = await raw.arrayBuffer();
-  } else if (raw instanceof Uint8Array) {
-    audioBytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-  } else {
-    audioBytes = raw;
-  }
-  if (!audioBytes || audioBytes.byteLength === 0) {
-    throw new Error('TTS synthesis returned empty audio');
-  }
+  // runGatewayTts returns base64-encoded audio in TTSResult.audio; decode it
+  // to raw bytes before writing to R2.
+  const bin = atob(result.audio);
+  const audioBytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) audioBytes[i] = bin.charCodeAt(i);
+  if (audioBytes.byteLength === 0) throw new Error('TTS synthesis returned empty audio');
 
   const r2Key = `recorder/tts/${args.jobId}.mp3`;
   let putErr: unknown = null;

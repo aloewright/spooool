@@ -167,8 +167,10 @@ describe('synthesizeTts', () => {
   function r2Env(): { VIDEOS: R2Bucket; _puts: Array<{ key: string; bytes: number; contentType?: string }> } {
     const puts: Array<{ key: string; bytes: number; contentType?: string }> = [];
     const VIDEOS = {
-      put: async (key: string, body: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }) => {
-        const bytes = body instanceof ArrayBuffer ? body.byteLength : -1;
+      put: async (key: string, body: ArrayBuffer | Uint8Array | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }) => {
+        // After the generateSpeech() refactor, synthesizeTts passes a Uint8Array
+        // (decoded from base64). Support both ArrayBuffer and Uint8Array.
+        const bytes = body instanceof Uint8Array ? body.byteLength : body instanceof ArrayBuffer ? body.byteLength : -1;
         puts.push({ key, bytes, contentType: opts?.httpMetadata?.contentType });
       },
     } as unknown as R2Bucket;
@@ -176,30 +178,40 @@ describe('synthesizeTts', () => {
   }
 
   /**
-   * Fake AI binding. `run` takes a model id + input + opts; in production it
-   * resolves with audio bytes from Workers AI Deepgram. `gateway()` is
-   * stubbed to throw — TTS uses `env.AI.run` directly, not the dynamic-
-   * route gateway proxy (Vertex Gemini + Workers AI Deepgram each want
-   * different request shapes; see notes in create-tools.ts).
+   * Fake AI binding for TTS tests — run-gateway mode so generateSpeech()
+   * routes through runGatewayTts → env.AI.run (the only Worker-side path
+   * confirmed working per CLAUDE.md). AI_GATEWAY_MODE must be set so
+   * gatewayTts() selects runGatewayTts instead of the gateway-binding adapter.
+   *
+   * `run` takes a model id + input + opts; in run-gateway mode runGatewayTts
+   * calls env.AI.run('@cf/deepgram/aura-2-en', { text, speaker, encoding: 'mp3' },
+   * { gateway: { id: 'x' } }) and base64-encodes the result into TTSResult.audio.
+   * synthesizeTts then decodes it with atob() before writing to R2.
+   *
+   * gateway() is stubbed to throw — in run-gateway mode the gateway binding is
+   * never used for TTS.
    */
   function aiEnv(run: (model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) => Promise<ArrayBuffer | Uint8Array | Response>): AIBindingEnv {
     return {
+      AI_GATEWAY_MODE: 'run-gateway' as const,
       AI: {
         run,
-        gateway() { throw new Error('synthesizeTts should not invoke env.AI.gateway()'); },
+        gateway() { throw new Error('synthesizeTts should not invoke env.AI.gateway() in run-gateway mode'); },
       } as unknown as AIBindingEnv['AI'],
-    };
+    } as unknown as AIBindingEnv;
   }
 
   it('calls @cf/deepgram/aura-2-en through gateway x, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {
     const seenCalls: Array<{ model: string; input: Record<string, unknown>; opts?: { gateway?: { id: string } } }> = [];
-    const audioBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
+    // 4 raw audio bytes; runGatewayTts base64-encodes them into TTSResult.audio;
+    // synthesizeTts atob()-decodes back to the original bytes before R2.put.
+    const rawAudio = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
     const r2 = r2Env();
     const env: TtsEnv = {
       ...r2,
       ...aiEnv(async (model, input, opts) => {
         seenCalls.push({ model, input, opts });
-        return audioBytes;
+        return rawAudio;
       }),
     };
     const result = await synthesizeTts({
@@ -210,11 +222,14 @@ describe('synthesizeTts', () => {
     });
     expect(result.r2Key).toBe('recorder/tts/j_abc.mp3');
     expect(result.durationMs).toBeGreaterThan(0);
+    // runGatewayTts calls env.AI.run exactly once with the correct model + input.
     expect(seenCalls).toHaveLength(1);
     expect(seenCalls[0].model).toBe('@cf/deepgram/aura-2-en');
     expect(seenCalls[0].input).toMatchObject({ text: 'Hello world.', speaker: 'asteria-en', encoding: 'mp3' });
     expect(seenCalls[0].opts?.gateway?.id).toBe('x');
     expect(r2._puts[0]).toMatchObject({ key: 'recorder/tts/j_abc.mp3', contentType: 'audio/mpeg' });
+    // Base64 round-trip: atob(btoa(rawAudio)) must recover the original 4 bytes.
+    expect(r2._puts[0].bytes).toBe(4);
   });
 
   it('rejects scripts longer than 2000 chars before calling Workers AI', async () => {
@@ -225,6 +240,8 @@ describe('synthesizeTts', () => {
   });
 
   it('masks content-policy refusals with a generic message', async () => {
+    // runGatewayTts propagates env.AI.run rejections to generateSpeech(), which
+    // synthesizeTts catches and masks when isContentPolicyMsg returns true.
     const env: TtsEnv = {
       ...r2Env(),
       ...aiEnv(async () => { throw new Error('Inference failed: content_policy_violation — forbidden'); }),
@@ -235,6 +252,8 @@ describe('synthesizeTts', () => {
   });
 
   it('surfaces upstream errors as TTS synthesis failed', async () => {
+    // runGatewayTts propagates env.AI.run rejections to generateSpeech(), which
+    // synthesizeTts catches and re-wraps with the 'TTS synthesis failed:' prefix.
     const env: TtsEnv = {
       ...r2Env(),
       ...aiEnv(async () => { throw new Error('Workers AI 500 - model busy'); }),

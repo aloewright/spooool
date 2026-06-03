@@ -211,6 +211,22 @@ describe('ai-gateway run-gateway mode', () => {
     expect(payload.messages[0]).toEqual({ role: 'system', content: 'Be concise.\nCite sources.' });
   });
 
+  it('gatewayChat.chatStream emits RUN_STARTED then RUN_ERROR when env.AI.run rejects, never calling env.AI.gateway', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    (env.AI.run as any).mockRejectedValue(new Error('boom'));
+
+    const adapter: any = gatewayChat(env);
+    const chunks: any[] = [];
+    for await (const c of adapter.chatStream({ messages: [{ role: 'user', content: 'hi' }] })) {
+      chunks.push(c);
+    }
+
+    expect(chunks.map((c) => c.type)).toEqual(['RUN_STARTED', 'RUN_ERROR']);
+    const errorChunk = chunks.find((c) => c.type === 'RUN_ERROR');
+    expect(errorChunk.message).toContain('boom');
+    expect(env.AI.gateway).not.toHaveBeenCalled();
+  });
+
   it('gatewayTts handles a ReadableStream result by draining it to bytes', async () => {
     const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
     // Simulate env.AI.run returning a ReadableStream (e.g. @cf/deepgram/aura-2-en streaming path)

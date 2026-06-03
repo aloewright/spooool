@@ -224,6 +224,9 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
       yield { type: 'RUN_FINISHED', runId, model, timestamp, finishReason: 'stop' } as StreamChunk;
     },
     async structuredOutput(options: StructuredOutputOptions<Record<string, never>>): Promise<StructuredOutputResult<unknown>> {
+      // Unlike chatStream (which emits a RUN_ERROR event), structuredOutput lets a
+      // rejected env.AI.run propagate to the activity layer — it's a non-streaming
+      // Promise contract. Intentional; do not wrap in a try/catch that swallows.
       const raw = await env.AI.run(
         model,
         { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages), max_tokens: 800 },

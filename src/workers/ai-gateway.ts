@@ -16,6 +16,10 @@
  */
 
 import { createWorkersAiChat } from '@cloudflare/tanstack-ai/adapters/workers-ai';
+import { createWorkersAiImage } from '@cloudflare/tanstack-ai/adapters/workers-ai-image';
+import { createWorkersAiTts } from '@cloudflare/tanstack-ai/adapters/workers-ai-tts';
+import { createWorkersAiTranscription } from '@cloudflare/tanstack-ai/adapters/workers-ai-transcription';
+import { createWorkersAiSummarize } from '@cloudflare/tanstack-ai/adapters/workers-ai-summarize';
 
 export const GATEWAY_ID = 'x';
 
@@ -80,4 +84,20 @@ function gatewayBinding(env: AiGatewayEnv) {
  */
 export function gatewayChat(env: AiGatewayEnv, model: string = DEFAULT_CHAT_MODEL) {
   return createWorkersAiChat(model, { binding: gatewayBinding(env) });
+}
+
+export function gatewayImage(env: AiGatewayEnv, model: string = DEFAULT_IMAGE_MODEL) {
+  return createWorkersAiImage(model, { binding: gatewayBinding(env) });
+}
+
+export function gatewayTts(env: AiGatewayEnv, model: string = DEFAULT_TTS_MODEL) {
+  return createWorkersAiTts(model, { binding: gatewayBinding(env) });
+}
+
+export function gatewayTranscription(env: AiGatewayEnv, model: string = DEFAULT_STT_MODEL) {
+  return createWorkersAiTranscription(model, { binding: gatewayBinding(env) });
+}
+
+export function gatewaySummarize(env: AiGatewayEnv, model: string = DEFAULT_SUMMARIZE_MODEL) {
+  return createWorkersAiSummarize(model, { binding: gatewayBinding(env) });
 }

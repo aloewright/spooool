@@ -175,6 +175,54 @@ describe('ai-gateway run-gateway mode', () => {
     expect(createWorkersAiChat).not.toHaveBeenCalled();
     expect(createWorkersAiTts).not.toHaveBeenCalled();
   });
+
+  it('gatewayChat.chatStream prepends systemPrompts as { role: "system" } before user messages', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue({ response: 'ok' });
+
+    const userMessages = [{ role: 'user', content: 'what time is it?' }];
+    const chunks: any[] = [];
+    for await (const chunk of gatewayChat(env).chatStream({
+      model: DEFAULT_CHAT_MODEL,
+      messages: userMessages,
+      systemPrompts: [{ content: 'You are a helpful assistant.' }],
+    } as any)) {
+      chunks.push(chunk);
+    }
+
+    const [, payload] = env.AI.run.mock.calls[0];
+    expect(payload.messages[0]).toEqual({ role: 'system', content: 'You are a helpful assistant.' });
+    expect(payload.messages[1]).toMatchObject({ role: 'user', content: 'what time is it?' });
+    // confirm the stream still emitted content
+    expect(chunks.find((c) => c.type === 'TEXT_MESSAGE_CONTENT')?.delta).toBe('ok');
+  });
+
+  it('gatewayChat.chatStream handles plain-string systemPrompts', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue({ response: 'ok' });
+
+    for await (const _ of gatewayChat(env).chatStream({
+      model: DEFAULT_CHAT_MODEL,
+      messages: [{ role: 'user', content: 'hi' }],
+      systemPrompts: ['Be concise.', 'Cite sources.'],
+    } as any)) { /* drain */ }
+
+    const [, payload] = env.AI.run.mock.calls[0];
+    expect(payload.messages[0]).toEqual({ role: 'system', content: 'Be concise.\nCite sources.' });
+  });
+
+  it('gatewayTts handles a ReadableStream result by draining it to bytes', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    // Simulate env.AI.run returning a ReadableStream (e.g. @cf/deepgram/aura-2-en streaming path)
+    const stream = new Response(new Uint8Array([5, 6, 7, 8])).body!;
+    env.AI.run.mockResolvedValue(stream);
+
+    const result = await gatewayTts(env).generateSpeech({ model: DEFAULT_TTS_MODEL, text: 'stream test' } as any);
+
+    expect(result.format).toBe('mp3');
+    const decoded = Uint8Array.from(atob(result.audio), (c) => c.charCodeAt(0));
+    expect(Array.from(decoded)).toEqual([5, 6, 7, 8]);
+  });
 });
 
 describe('ai-gateway: every activity is gateway-routed', () => {

@@ -15,7 +15,7 @@
  *   See /Users/aloe/.claude/CLAUDE.md "Inside a Worker" for the full breakdown.
  */
 
-import type { TextAdapter, TextOptions, TTSAdapter, TTSOptions, TTSResult, StreamChunk } from '@tanstack/ai';
+import type { TextAdapter, TextOptions, TTSAdapter, TTSOptions, TTSResult, StreamChunk, SystemPrompt, ModelMessage } from '@tanstack/ai';
 // StructuredOutput{Options,Result} are only re-exported from the /adapters subpath,
 // not the package root (the root's adapter re-export list omits them).
 import type { StructuredOutputOptions, StructuredOutputResult } from '@tanstack/ai/adapters';
@@ -64,8 +64,8 @@ export const DEFAULT_SUMMARIZE_MODEL = '@cf/facebook/bart-large-cnn';
 
 /**
  * Resolve the active mode from env. Defaults to 'gateway-binding'.
- * The 'run-gateway' branch (added in a later task) uses env.AI.run with
- * gateway opts for the full request flow.
+ * The 'run-gateway' branch uses env.AI.run with gateway opts for the full
+ * request flow (see runGatewayChat / runGatewayTts below).
  */
 export function resolveMode(env: AiGatewayEnv): AiGatewayMode {
   return env.AI_GATEWAY_MODE === 'run-gateway' ? 'run-gateway' : 'gateway-binding';
@@ -90,6 +90,30 @@ function bytesToBase64(bytes: Uint8Array): string {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
   }
   return btoa(binary);
+}
+
+/**
+ * Merge systemPrompts + messages into a single flat array for env.AI.run.
+ *
+ * Mirrors the official @cloudflare/tanstack-ai `buildOpenAIMessages` ordering:
+ * system prompts are prepended as a single `{ role: 'system' }` entry (joined
+ * with "\n") before the conversation messages. `SystemPrompt` is
+ * `string | { content: string; metadata? }` — we normalise both shapes by
+ * extracting `.content` (or using the string directly) before joining.
+ */
+function buildMessages(
+  systemPrompts: Array<SystemPrompt> | undefined,
+  messages: Array<ModelMessage>,
+): Array<{ role: string; content: string | null | unknown }> {
+  const result: Array<{ role: string; content: string | null | unknown }> = [];
+  if (systemPrompts && systemPrompts.length > 0) {
+    const systemContent = systemPrompts
+      .map((sp) => (typeof sp === 'string' ? sp : sp.content))
+      .join('\n');
+    result.push({ role: 'system', content: systemContent });
+  }
+  result.push(...(messages as Array<{ role: string; content: string | null | unknown }>));
+  return result;
 }
 
 /**
@@ -126,6 +150,11 @@ function runGatewayTts(env: AiGatewayEnv, model: string): TTSAdapter {
         bytes = raw;
       } else if (raw instanceof ArrayBuffer) {
         bytes = new Uint8Array(raw);
+      } else if (raw != null && typeof (raw as ReadableStream).getReader === 'function') {
+        // @cf/deepgram/aura-2-en may return a ReadableStream of MPEG audio bytes.
+        // Wrap it in a Response so we can await arrayBuffer() without draining
+        // the reader manually — same pattern the official TTS adapter uses.
+        bytes = new Uint8Array(await new Response(raw as ReadableStream).arrayBuffer());
       } else if (raw && typeof raw === 'object' && 'audio' in raw && typeof (raw as { audio: unknown }).audio === 'string') {
         // JSON wrapper { audio: "base64..." } — already encoded, pass through.
         return { id: crypto.randomUUID(), model, audio: (raw as { audio: string }).audio, format: 'mp3', contentType: 'audio/mp3' };
@@ -177,7 +206,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
       try {
         raw = await env.AI.run(
           model,
-          { messages: options.messages, max_tokens: 800 },
+          { messages: buildMessages(options.systemPrompts, options.messages), max_tokens: 800 },
           { gateway: { id: GATEWAY_ID } },
         );
       } catch (error) {
@@ -197,7 +226,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
     async structuredOutput(options: StructuredOutputOptions<Record<string, never>>): Promise<StructuredOutputResult<unknown>> {
       const raw = await env.AI.run(
         model,
-        { messages: options.chatOptions.messages, max_tokens: 800 },
+        { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages), max_tokens: 800 },
         { gateway: { id: GATEWAY_ID } },
       );
       const rawText = narrowChatText(raw);

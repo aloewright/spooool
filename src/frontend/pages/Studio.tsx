@@ -1,10 +1,12 @@
-import { Navigate, useLocation } from 'react-router-dom';
+import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { StudioRoot } from '../studio';
 import { Spinner } from '../create/Spinner';
 
 export function Studio(): JSX.Element {
   const location = useLocation();
+  const [sp] = useSearchParams();
+  const videoId = sp.get('videoId') ?? undefined;
   const { data: session, isPending } = useSession();
   if (isPending) {
     return (
@@ -26,7 +28,7 @@ export function Studio(): JSX.Element {
     <main className="app-main app-main--narrow stack-lg fade-in">
       <h1 className="ds-h2">AI Studio</h1>
       <p className="ds-lede">Brainstorm ideas, titles, scripts, and thumbnails with a creative assistant.</p>
-      <StudioRoot />
+      <StudioRoot videoId={videoId} />
     </main>
   );
 }

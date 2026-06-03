@@ -27,6 +27,9 @@ export default defineConfig({
           // web-vitals is only reached via the lazy import('./lib/rum'),
           // so isolating it keeps the eager `vendor` chunk smaller.
           if (id.includes('web-vitals')) return 'web-vitals';
+          // @tanstack/ai* (ai-react + ai-client) is only loaded by the lazy /studio
+          // route — keep it out of the eager vendor chunk.
+          if (id.includes('@tanstack/ai')) return 'tanstack-ai';
           // Group long-tail node_modules together so we don't end up with
           // dozens of tiny chunks (cf. https://rolldown.rs/reference/OutputOptions).
           return 'vendor';

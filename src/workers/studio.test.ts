@@ -41,9 +41,29 @@ describe('POST /api/studio/chat', () => {
     const text = await r.text();
     expect(text).toContain('data:');
     expect(text).toContain('hi there');
+    expect(text).toContain('RUN_FINISHED'); // stream terminates on the AG-UI run-finished event
   });
   it('400 on invalid body (no messages)', async () => {
     const r = await harness({ id: 'u1', email: 'a@b.c', name: 'A', emailVerified: true })({});
     expect(r.status).toBe(400);
+  });
+  it('429 when rate-limited (gate runs before chat())', async () => {
+    // RATE_LIMITER DO stub that denies the take — rateLimit() POSTs to the
+    // stub and reads { allowed:false, retryAfterMs } back.
+    const RATE_LIMITER = {
+      idFromName: () => ({}),
+      get: () => ({
+        fetch: async () => new Response(
+          JSON.stringify({ allowed: false, remaining: 0, limit: 30, retryAfterMs: 1000, resetMs: 0 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      }),
+    };
+    const r = await harness(
+      { id: 'u1', email: 'a@b.c', name: 'A', emailVerified: true },
+      { RATE_LIMITER },
+    )(okBody);
+    expect(r.status).toBe(429);
+    expect(r.headers.get('Retry-After')).toBeTruthy();
   });
 });

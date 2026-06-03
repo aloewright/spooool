@@ -5,6 +5,7 @@
 // network / R2 calls so unit tests can mock fetch.
 
 import { chat } from '@tanstack/ai';
+import { z } from 'zod';
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
 import { gatewayChat, type AiGatewayEnv } from './ai-gateway';
@@ -32,6 +33,19 @@ export interface SceneSpec {
 
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
+
+/**
+ * Zod schema for the LLM-returned scene plan. Matches SceneSpec exactly so
+ * the inferred type is structurally compatible and no assertion is needed.
+ */
+const sceneSchema = z.object({
+  scenes: z.array(z.object({
+    type: z.enum(['title', 'beat', 'outro']),
+    durationFrames: z.number(),
+    text: z.string(),
+    subtitle: z.string().optional(),
+  })),
+});
 
 /**
  * Shared text-gen helper. Routes through @tanstack/ai `chat()` via the
@@ -141,46 +155,31 @@ export async function planScenes(args: {
   template: StoryTemplate;
   env: AIBindingEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
-  const messages = [
-    {
-      role: 'system' as const,
-      content: `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`,
-    },
-    { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` },
-  ];
+  const systemPrompt = `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`;
+  const userMessage = { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` };
 
-  const parseOrThrow = (raw: string): SceneSpec[] => {
-    const parsed = JSON.parse(raw) as { scenes?: unknown };
-    if (!parsed || !Array.isArray(parsed.scenes)) throw new Error('missing scenes array');
-    return parsed.scenes.slice(0, MAX_SCENES).map((s) => {
-      const obj = s as { type?: unknown; durationFrames?: unknown; text?: unknown; subtitle?: unknown };
-      if (obj.type !== 'title' && obj.type !== 'beat' && obj.type !== 'outro') throw new Error('bad scene type');
-      if (typeof obj.durationFrames !== 'number' || !Number.isFinite(obj.durationFrames)) throw new Error('bad durationFrames');
-      if (typeof obj.text !== 'string') throw new Error('bad text');
-      return {
-        type: obj.type,
-        durationFrames: Math.max(1, Math.floor(obj.durationFrames)),
-        text: obj.text,
-        subtitle: typeof obj.subtitle === 'string' ? obj.subtitle : undefined,
-      };
-    });
-  };
-
-  const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env });
-    return parseOrThrow(raw);
-  };
-
+  // Use chat({ outputSchema }) to get structured output in one env.AI.run call.
+  // On malformed or schema-invalid output, @tanstack/ai throws internally —
+  // we catch and re-wrap with a stable "Scene plan invalid:" prefix.
+  // Cast mirrors chatComplete's cast: see doc comment on chatComplete above for
+  // the AIBindingEnv → AiGatewayEnv divergence explanation.
+  // TODO: remove cast when CloudflareAiGateway.run is widened to Promise<unknown>.
+  let parsed: z.infer<typeof sceneSchema>;
   try {
-    return { scenes: await tryOnce() };
-  } catch {
-    try {
-      return { scenes: await tryOnce() };
-    } catch (secondErr) {
-      const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
-      throw new Error(`Scene plan invalid: ${msg}`);
-    }
+    parsed = await chat({
+      adapter: gatewayChat(args.env as unknown as AiGatewayEnv),
+      systemPrompts: [systemPrompt],
+      messages: [userMessage],
+      outputSchema: sceneSchema,
+    });
+  } catch (err) {
+    throw new Error(`Scene plan invalid: ${err instanceof Error ? err.message : String(err)}`);
   }
+  const scenes = parsed.scenes.slice(0, MAX_SCENES).map((s) => ({
+    ...s,
+    durationFrames: Math.max(1, Math.floor(s.durationFrames)),
+  }));
+  return { scenes };
 }
 
 // Re-export VoiceProfile for downstream tools / tests.

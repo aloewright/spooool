@@ -145,10 +145,13 @@ describe('planScenes', () => {
     expect(result.scenes).toEqual(fakeScenes);
   });
 
-  it('re-prompts once on malformed JSON, then throws', async () => {
+  it('throws Scene plan invalid on malformed JSON (no internal retry)', async () => {
+    // The old hand-rolled double-attempt is replaced by chat({ outputSchema }),
+    // which validates internally and throws on malformed / invalid output.
+    // We assert the error message shape only; call count is not asserted because
+    // outputSchema validation is an internal detail of the @tanstack/ai layer.
     const env = aiTextEnv(() => chatResponse('not json at all'));
     await expect(planScenes({ script: 'x', template: heroJourney, env })).rejects.toThrow(/Scene plan invalid/);
-    expect(env._calls.length).toBe(2); // initial + 1 reprompt
   });
 
   it('caps scenes to 20 even when the LLM returns more', async () => {

@@ -18,6 +18,9 @@ interface RunCall {
 function aiTextEnv(responder: (call: RunCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: RunCall[] } {
   const calls: RunCall[] = [];
   const env = {
+    // AI_GATEWAY_MODE:'run-gateway' routes chatComplete through runGatewayChat,
+    // which calls env.AI.run (the only Worker-side path confirmed working per CLAUDE.md).
+    AI_GATEWAY_MODE: 'run-gateway' as const,
     AI: {
       async run(model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) {
         const call: RunCall = { model, input, opts };

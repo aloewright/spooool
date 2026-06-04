@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Hono } from 'hono';
+import { Hono, type Context, type Next } from 'hono';
 import { feedRoutes, type FeedsEnv } from './feeds';
 
 // ---- compact in-memory D1 + KV doubles (shared by all feeds tests) ----------
@@ -93,7 +93,7 @@ function fakeDB(store: Store): D1Database {
 function fakeKV(): KVNamespace {
   const m = new Map<string, string>();
   return {
-    get: async (k: string) => (m.has(k) ? m.get(k)! : null),
+    get: async (k: string) => m.get(k) ?? null,
     put: async (k: string, v: string) => void m.set(k, v),
     delete: async (k: string) => void m.delete(k),
   } as unknown as KVNamespace;
@@ -107,7 +107,7 @@ function makeApp(store: Store, user: { id: string } | null) {
   const env: FeedsEnv = { DB: fakeDB(store), CACHE: fakeKV() };
   // Mimic index.ts middleware that sets c.get('user').
   const app = new Hono();
-  app.use('*', async (c: any, next: any) => { c.set('user', user); await next(); });
+  app.use('*', async (c: Context, next: Next) => { c.set('user', user); await next(); });
   app.route('/', feedRoutes);
   return { app, env };
 }
@@ -269,7 +269,7 @@ describe('feed sources', () => {
 
 async function callWith(env: FeedsEnv, store: Store, user: { id: string } | null, method: string, path: string, body?: unknown) {
   const app = new Hono();
-  app.use('*', async (c: any, next: any) => { c.set('user', user); await next(); });
+  app.use('*', async (c: Context, next: Next) => { c.set('user', user); await next(); });
   app.route('/', feedRoutes);
   const req = new Request(`http://x${path}`, {
     method,
@@ -309,8 +309,8 @@ describe('feed items assembly', () => {
 
     const res = await callWith(env, store, user, 'GET', `/api/feeds/${id}/items`);
     expect(res.status).toBe(200);
-    expect(res.json.items.map((i: any) => i.id)).toEqual(['yt_new', 'spv1']);
-    expect(store.feeds.find((f) => f.id === id)!.last_viewed_at).not.toBeNull();
+    expect(res.json.items.map((i: { id: string }) => i.id)).toEqual(['yt_new', 'spv1']);
+    expect(store.feeds.find((f) => f.id === id)?.last_viewed_at).not.toBeNull();
   });
 
   it('keeps the feed alive when one source errors', async () => {
@@ -330,7 +330,7 @@ describe('feed items assembly', () => {
       const res = await callWith(env, store, user, 'GET', `/api/feeds/${id}/items`);
       expect(res.status).toBe(200);
       expect(res.json.items).toEqual([]);
-      expect(res.json.sources.some((s: any) => s.error)).toBe(true);
+      expect(res.json.sources.some((s: { error?: string }) => s.error)).toBe(true);
     } finally {
       globalThis.fetch = originalFetch;
     }

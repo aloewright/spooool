@@ -216,10 +216,13 @@ describe('handleAiGenMessage', () => {
       const costRun = runs.find((r) => r.sql.includes('INSERT INTO ai_costs'));
       expect(costRun).toBeDefined();
       expect(costRun!.sql).toContain("unit_kind");
-      // unit_kind is now a bound param (helper uses parameterized SQL); check bind values.
-      // Bind order from aiCostStatement: id, userId, op, route, model, units, unitKind, estUsd, projectId, createdAt
-      expect(costRun!.binds[1]).toBe('u1');       // userId
-      expect(costRun!.binds[6]).toBe('seconds');  // unitKind
+      // Bind order from aiCostStatement: id(0), userId(1), op(2), route(3), model(4),
+      //                                  units(5), unitKind(6), estUsd(7), projectId(8), createdAt(9)
+      expect(costRun!.binds[1]).toBe('u1');              // userId
+      expect(costRun!.binds[4]).toBe('google/veo-3.1'); // model
+      expect(costRun!.binds[5]).toBe(8);                 // units (8 seconds per Veo clip)
+      expect(costRun!.binds[6]).toBe('seconds');         // unitKind
+      expect(costRun!.binds[7]).toBe(0.40);              // estUsd (EST_USD_PER_VIDEO)
     });
   });
 

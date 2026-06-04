@@ -139,6 +139,12 @@ export async function getCostSnapshot(env: CostsEnv): Promise<CostSnapshot> {
   };
 }
 
+// Rounds to 4 decimal places intentionally — NOT 2 (cents). Sub-cent AI costs
+// like $0.0013/image would be silently floored to $0.00 at 2 dp, making the
+// spend ledger always report zero until charges accumulate to at least $0.005.
+// Callers that display dollars for humans should use .toFixed(2) on the result;
+// this function only ensures the stored/compared value retains enough precision
+// to trigger alert thresholds correctly. Do NOT change the multiplier to 100.
 function roundCents(n: number): number {
   return Math.round(n * 10000) / 10000;
 }

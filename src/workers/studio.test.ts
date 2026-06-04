@@ -45,9 +45,12 @@ const okBody = { messages: [{ role: 'user', content: 'help me name my video' }] 
 function makeDbStub(overrides: Record<string, unknown> = {}) {
   const batchCalls: Array<Array<unknown>> = [];
 
-  const makeStmt = (sql: string): Record<string, unknown> => {
+  // makeStmt records bound args on the statement object so tests can assert them
+  // after DB.batch is called (the batch stub stores statement objects, not results).
+  const makeStmt = (sql: string, boundArgs: unknown[] = []): Record<string, unknown> => {
     const stmt: Record<string, unknown> = {};
-    stmt['bind'] = (..._args: unknown[]) => makeStmt(sql);
+    // Each .bind() call returns a new statement copy that carries the bound args.
+    stmt['bind'] = (...args: unknown[]) => makeStmt(sql, args);
     stmt['run'] = vi.fn(async () => ({}));
     stmt['first'] = vi.fn(async () => {
       if (sql.includes('SUM(bytes)')) return { used: 100 };
@@ -57,6 +60,7 @@ function makeDbStub(overrides: Record<string, unknown> = {}) {
       return null;
     });
     stmt['sql'] = sql;
+    stmt['_binds'] = boundArgs;  // recorded for test assertions
     return stmt;
   };
 
@@ -255,6 +259,18 @@ describe('POST /api/studio/image', () => {
     const stmt1 = stmts[1] as Record<string, unknown>;
     expect(String(stmt0['sql'] ?? '')).toContain('INSERT INTO generated_assets');
     expect(String(stmt1['sql'] ?? '')).toContain('INSERT INTO ai_costs');
+
+    // Assert the ai_costs bound values so a typo in EST_USD_PER_IMAGE or a units
+    // swap would not ship silently with green tests.
+    // Bind order from aiCostStatement: id(0), userId(1), op(2), route(3), model(4),
+    //                                  units(5), unitKind(6), estUsd(7), projectId(8), createdAt(9)
+    const aiCostBinds = stmt1['_binds'] as unknown[];
+    expect(aiCostBinds[1]).toBe('u1');                                        // userId
+    expect(aiCostBinds[2]).toBe('image_gen');                                  // op
+    expect(aiCostBinds[4]).toBe('@cf/black-forest-labs/flux-1-schnell');       // model (IMAGE_MODEL)
+    expect(aiCostBinds[5]).toBe(1);                                            // units
+    expect(aiCostBinds[6]).toBe('images');                                     // unitKind
+    expect(aiCostBinds[7]).toBe(0.0013);                                       // estUsd (EST_USD_PER_IMAGE)
   });
 
   it('413 when storage quota exceeded — no VIDEOS.put, no DB.batch', async () => {

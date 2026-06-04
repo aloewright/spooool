@@ -339,6 +339,134 @@ describe('POST /api/studio/image', () => {
 });
 
 // ────────────────────────────────────────────────────────────
+// Video generation tests (POST /api/studio/video)
+// ────────────────────────────────────────────────────────────
+describe('POST /api/studio/video', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function makeAiGenStub() {
+    const sends: Array<unknown> = [];
+    return {
+      send: vi.fn(async (msg: unknown) => { sends.push(msg); }),
+      _sends: sends,
+    };
+  }
+
+  function makeVideoDbStub() {
+    const runs: Array<{ sql: string; binds: unknown[] }> = [];
+
+    const makeStmt = (sql: string) => {
+      let boundValues: unknown[] = [];
+      const stmt: Record<string, unknown> = {
+        sql,
+        bind: (...args: unknown[]) => { boundValues = args; return stmt; },
+        run: vi.fn(async () => { runs.push({ sql, binds: [...boundValues] }); return {}; }),
+        first: vi.fn(async () => {
+          if (sql.includes('SUM(bytes)')) return { used: 0 };
+          if (sql.includes('storage_bytes_quota')) return { quota: 5 * 1024 * 1024 * 1024 };
+          return null;
+        }),
+      };
+      return stmt;
+    };
+
+    const db: Record<string, unknown> = {
+      prepare: (sql: string) => makeStmt(sql),
+      batch: vi.fn(async () => []),
+      _runs: runs,
+    };
+    return db;
+  }
+
+  function postVideo(user: U, body: unknown, extraEnv: Record<string, unknown> = {}) {
+    const db = makeVideoDbStub();
+    const videos = makeVideosStub();
+    const aiGen = makeAiGenStub();
+    const { app, base } = buildApp(user, db, videos, { AI_GEN: aiGen, ...extraEnv });
+    const r = app.request('http://localhost/api/studio/video', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }, base);
+    return { r, db, aiGen };
+  }
+
+  it('401 when unauthenticated', async () => {
+    expect((await postVideo(null, { prompt: 'a rocket launch' }).r).status).toBe(401);
+  });
+
+  it('403 when email not verified', async () => {
+    expect((await postVideo(unverifiedUser, { prompt: 'a rocket launch' }).r).status).toBe(403);
+  });
+
+  it('429 when rate-limited', async () => {
+    const RATE_LIMITER = {
+      idFromName: () => ({}),
+      get: () => ({
+        fetch: async () => new Response(
+          JSON.stringify({ allowed: false, remaining: 0, limit: 30, retryAfterMs: 1000, resetMs: 0 }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      }),
+    };
+    const { r } = postVideo(verifiedUser, { prompt: 'a rocket launch' }, { RATE_LIMITER });
+    const res = await r;
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBeTruthy();
+  });
+
+  it('400 on missing prompt', async () => {
+    expect((await postVideo(verifiedUser, {}).r).status).toBe(400);
+  });
+
+  it('400 on empty prompt', async () => {
+    expect((await postVideo(verifiedUser, { prompt: '' }).r).status).toBe(400);
+  });
+
+  it('400 on prompt exceeding 2048 chars', async () => {
+    expect((await postVideo(verifiedUser, { prompt: 'a'.repeat(2049) }).r).status).toBe(400);
+  });
+
+  it('202 happy path — response shape, generated_assets INSERT, AI_GEN.send', async () => {
+    const { r, db, aiGen } = postVideo(verifiedUser, { prompt: 'a waterfall in slow motion' });
+    const res = await r;
+    expect(res.status).toBe(202);
+
+    const body = await res.json() as Record<string, unknown>;
+
+    // Response shape
+    expect(typeof body.assetId).toBe('string');
+    expect(body.assetId).toMatch(/^a_[0-9a-f]{16}$/);
+    expect(body.status).toBe('queued');
+
+    // generated_assets INSERT
+    // SQL literals: kind='video', source='video_gen' (not bind params).
+    // Bind order: [0]=assetId, [1]=userId, [2]=spec_json, [3]=created_at, [4]=updated_at
+    const runs = (db as Record<string, unknown>)['_runs'] as Array<{ sql: string; binds: unknown[] }>;
+    const insertRun = runs.find((r) => r.sql.includes('INSERT INTO generated_assets'));
+    expect(insertRun).toBeDefined();
+    // SQL contains the literal kind/source values
+    expect(insertRun!.sql).toContain("'video'");
+    expect(insertRun!.sql).toContain("'video_gen'");
+    expect(insertRun!.sql).toContain("'queued'");
+    expect(insertRun!.binds[0]).toMatch(/^a_[0-9a-f]{16}$/); // assetId
+    expect(insertRun!.binds[1]).toBe('u1');                   // userId
+    // spec_json is at index 2
+    const specJson = insertRun!.binds[2] as string;
+    const spec = JSON.parse(specJson) as Record<string, unknown>;
+    expect(spec.model).toBe('google/veo-3.1');
+    expect(spec.prompt).toBe('a waterfall in slow motion');
+
+    // AI_GEN.send called with correct payload
+    expect(aiGen.send).toHaveBeenCalledTimes(1);
+    const sent = aiGen._sends[0] as Record<string, unknown>;
+    expect(sent.assetId).toBe(body.assetId);
+    expect(sent.userId).toBe('u1');
+    expect(sent.prompt).toBe('a waterfall in slow motion');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
 // from-asset (set generated image as thumbnail)
 // ────────────────────────────────────────────────────────────
 describe('POST /api/videos/:id/thumbnail/from-asset', () => {

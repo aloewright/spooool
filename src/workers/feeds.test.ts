@@ -120,7 +120,9 @@ async function call(store: Store, user: { id: string } | null, method: string, p
     body: body ? JSON.stringify(body) : undefined,
   });
   const res = await app.fetch(req, env);
-  const json = res.status === 204 ? null : await res.json().catch(() => null);
+  // Cast to any: these helpers drive assertions against many response shapes;
+  // typing each would add noise without catching real bugs in tests.
+  const json = (res.status === 204 ? null : await res.json().catch(() => null)) as any;
   return { status: res.status, json };
 }
 
@@ -277,7 +279,9 @@ async function callWith(env: FeedsEnv, store: Store, user: { id: string } | null
     body: body ? JSON.stringify(body) : undefined,
   });
   const res = await app.fetch(req, env);
-  const json = res.status === 204 ? null : await res.json().catch(() => null);
+  // Cast to any: these helpers drive assertions against many response shapes;
+  // typing each would add noise without catching real bugs in tests.
+  const json = (res.status === 204 ? null : await res.json().catch(() => null)) as any;
   return { status: res.status, json };
 }
 

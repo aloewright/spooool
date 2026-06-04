@@ -15,5 +15,8 @@ export default defineConfig({
       'src/**/*.{test,spec}.{ts,tsx}',
       'scripts/**/*.test.{js,mjs,ts}',
     ],
+    env: {
+      NODE_ENV: 'test',
+    },
   },
 });

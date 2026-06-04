@@ -50,6 +50,8 @@ const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Stu
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
+const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
+const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -226,6 +228,9 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
+      </Link>
+      <Link to="/feeds">
+        <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
       </Link>
       <Link to="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
@@ -787,6 +792,15 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route
+            path="/feeds"
+            element={
+              <RequireAuth>
+                <Feeds />
+              </RequireAuth>
+            }
+          />
+          <Route path="/feeds/:id" element={<FeedView />} />
           <Route
             path="/onboarding"
             element={

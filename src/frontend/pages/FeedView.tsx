@@ -1,3 +1,128 @@
+import { useCallback, useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import {
+  addSource,
+  fetchFeedItems,
+  removeSource,
+  type FeedItem,
+  type FeedItemsResponse,
+  type FeedSourceKind,
+} from '../lib/feeds-client';
+import { FeedItemCard } from '../components/FeedItemCard';
+
+const SOURCE_KINDS: Array<{ kind: FeedSourceKind; label: string; placeholder: string }> = [
+  { kind: 'spooool_channel', label: 'spooool channel', placeholder: 'spooool username' },
+  { kind: 'youtube_channel', label: 'YouTube channel', placeholder: 'channel URL or @handle' },
+  { kind: 'youtube_playlist', label: 'YouTube playlist', placeholder: 'playlist URL' },
+  { kind: 'youtube_search', label: 'YouTube search', placeholder: 'search terms' },
+  { kind: 'tiktok_video', label: 'TikTok video', placeholder: 'tiktok.com video URL' },
+];
+
 export function FeedView(): JSX.Element {
-  return <main className="app-main" />;
+  const { id = '' } = useParams();
+  const [data, setData] = useState<FeedItemsResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [kind, setKind] = useState<FeedSourceKind>('youtube_channel');
+  const [ref, setRef] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  const load = useCallback(async (): Promise<void> => {
+    setError(null);
+    try {
+      setData(await fetchFeedItems(id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load feed');
+    }
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchFeedItems(id)
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load feed'); });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  async function onAddSource(e: React.FormEvent): Promise<void> {
+    e.preventDefault();
+    if (!ref.trim() || adding) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await addSource(id, { kind, ref: ref.trim() });
+      setRef('');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add source');
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function onRemoveSource(sourceId: string): Promise<void> {
+    try {
+      await removeSource(id, sourceId);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to remove source');
+    }
+  }
+
+  const isOwner = data?.feed.is_owner === true;
+
+  return (
+    <main className="app-main stack-lg fade-in">
+      <h1 className="ds-h2" style={{ margin: 0 }}>{data?.feed.name ?? 'Feed'}</h1>
+      {data?.feed.description ? <p className="ds-meta">{data.feed.description}</p> : null}
+
+      {error ? <p className="status-error">{error}</p> : null}
+
+      {isOwner ? (
+        <section className="stack-sm" aria-label="Manage sources">
+          <form onSubmit={onAddSource} className="row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <select className="ds-input" value={kind} onChange={(e) => setKind(e.target.value as FeedSourceKind)} aria-label="Source type">
+              {SOURCE_KINDS.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
+            </select>
+            <input
+              className="ds-input"
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              placeholder={SOURCE_KINDS.find((s) => s.kind === kind)?.placeholder}
+              aria-label="Source reference"
+              style={{ flex: 1, minWidth: 200 }}
+            />
+            <button type="submit" className="ds-btn" disabled={!ref.trim() || adding}>
+              {adding ? 'Adding…' : 'Add source'}
+            </button>
+          </form>
+
+          {data && data.sources.length > 0 ? (
+            <ul className="feed-sources" style={{ listStyle: 'none', padding: 0, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {data.sources.map((s) => (
+                <li key={s.sourceId} className={`feed-source-chip${s.error ? ' feed-source-chip--error' : ''}${s.stale ? ' feed-source-chip--stale' : ''}`}>
+                  <span>{s.label || s.kind}</span>
+                  {s.error ? <span className="ds-meta"> · unavailable</span> : s.stale ? <span className="ds-meta"> · cached</span> : null}
+                  <button type="button" aria-label={`Remove ${s.label || s.kind}`} onClick={() => onRemoveSource(s.sourceId)} style={{ marginLeft: 6 }}>×</button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      {data === null && !error ? <p className="ds-empty">Loading…</p> : null}
+
+      {data !== null && data.items.length === 0 ? (
+        <p className="ds-empty">No videos yet. {isOwner ? 'Add a source above to start filling this feed.' : ''}</p>
+      ) : null}
+
+      {data !== null && data.items.length > 0 ? (
+        <div className="feed-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+          {data.items.map((item: FeedItem) => (
+            <FeedItemCard key={`${item.source}:${item.id}`} item={item} />
+          ))}
+        </div>
+      ) : null}
+    </main>
+  );
 }

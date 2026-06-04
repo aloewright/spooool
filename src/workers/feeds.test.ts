@@ -266,3 +266,73 @@ describe('feed sources', () => {
     expect((await call(store, owner, 'DELETE', `/api/feeds/${id}/sources/${sid}`)).status).toBe(200);
   });
 });
+
+async function callWith(env: FeedsEnv, store: Store, user: { id: string } | null, method: string, path: string, body?: unknown) {
+  const app = new Hono();
+  app.use('*', async (c: any, next: any) => { c.set('user', user); await next(); });
+  app.route('/', feedRoutes);
+  const req = new Request(`http://x${path}`, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const res = await app.fetch(req, env);
+  const json = res.status === 204 ? null : await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
+describe('feed items assembly', () => {
+  function ytItem(id: string, publishedAt: number) {
+    return {
+      source: 'youtube', id, title: `t-${id}`, author: 'chan', thumbnailUrl: null,
+      publishedAt, durationSec: null, url: `https://www.youtube.com/watch?v=${id}`,
+      embed: { kind: 'youtube', videoId: id },
+    };
+  }
+
+  it('merges spooool + cached youtube items newest-first and touches last_viewed_at', async () => {
+    const store = emptyStore();
+    store.users.push({ id: 'creator1', username: 'cool', label: 'Cool Creator' });
+    store.videos.push({
+      id: 'spv1', user_id: 'creator1', title: 'Spool One', thumbnail_url: null,
+      created_at: '2026-03-01 00:00:00', author: 'Cool Creator',
+    });
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const id = feed.json.feed.id as string;
+    await call(store, user, 'POST', `/api/feeds/${id}/sources`, { kind: 'spooool_channel', ref: 'cool' });
+    await call(store, user, 'POST', `/api/feeds/${id}/sources`, { kind: 'youtube_channel', ref: 'UCX6OQ3DkcsbYNE6H8uQQuVA' });
+
+    // Pre-seed the per-source KV cache the YouTube client uses, so no network.
+    const { env } = makeApp(store, user);
+    await env.CACHE.put('yt:channel:UCX6OQ3DkcsbYNE6H8uQQuVA', JSON.stringify([ytItem('yt_new', Date.parse('2026-04-01T00:00:00Z'))]));
+
+    const res = await callWith(env, store, user, 'GET', `/api/feeds/${id}/items`);
+    expect(res.status).toBe(200);
+    expect(res.json.items.map((i: any) => i.id)).toEqual(['yt_new', 'spv1']);
+    expect(store.feeds.find((f) => f.id === id)!.last_viewed_at).not.toBeNull();
+  });
+
+  it('keeps the feed alive when one source errors', async () => {
+    const store = emptyStore();
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const id = feed.json.feed.id as string;
+    await call(store, user, 'POST', `/api/feeds/${id}/sources`, { kind: 'youtube_search', ref: 'breaks' });
+
+    const { env } = makeApp(store, user);
+    // No cache seeded + search uses real fetch → produce path throws → error result,
+    // but the endpoint must still return 200 with a per-source error flag.
+    // Force the failure deterministically by stubbing fetch to reject.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { throw new Error('network down'); }) as typeof fetch;
+    try {
+      const res = await callWith(env, store, user, 'GET', `/api/feeds/${id}/items`);
+      expect(res.status).toBe(200);
+      expect(res.json.items).toEqual([]);
+      expect(res.json.sources.some((s: any) => s.error)).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});

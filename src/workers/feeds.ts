@@ -54,6 +54,10 @@ const addSourceSchema = z.object({
   kind: z.enum(['spooool_channel', 'youtube_channel', 'youtube_playlist', 'youtube_search', 'tiktok_video']),
   ref: z.string().min(1).max(2048),
 });
+const itemsQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().positive().max(100).default(24),
+});
 
 const createSchema = z.object({
   name: z.string().min(1).max(120),
@@ -79,6 +83,57 @@ function publicFeed(f: FeedRow) {
 
 async function loadFeed(env: FeedsEnv, id: string): Promise<FeedRow | null> {
   return env.DB.prepare(`${FEED_SELECT} WHERE id = ?`).bind(id).first<FeedRow>();
+}
+
+const YT_PER_SOURCE = 15;
+
+async function spoooolChannelItems(env: FeedsEnv, userId: string): Promise<FeedItem[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT v.id, v.title, v.thumbnail_url, v.created_at, COALESCE(u.displayName, u.name) AS author
+     FROM videos v LEFT JOIN user u ON u.id = v.user_id
+     WHERE v.user_id = ? AND v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.dmca_status IS NULL
+     ORDER BY v.created_at DESC LIMIT ?`,
+  )
+    .bind(userId, YT_PER_SOURCE)
+    .all<{ id: string; title: string; thumbnail_url: string | null; created_at: string; author: string | null }>();
+  return (results ?? []).map((r) => ({
+    source: 'spooool' as const,
+    id: r.id,
+    title: r.title,
+    author: r.author ?? 'spooool',
+    thumbnailUrl: r.thumbnail_url,
+    publishedAt: parseSqliteTimestamp(r.created_at),
+    durationSec: null,
+    url: `/watch/${r.id}`,
+  }));
+}
+
+// Resolve one stored source row into a SourceResult. A failure degrades to an
+// error result for that source only — never throws.
+async function fetchSourceItems(env: FeedsEnv, s: SourceRow): Promise<SourceResult> {
+  const base = { sourceId: s.id, kind: s.kind };
+  try {
+    if (s.kind === 'spooool_channel') {
+      return { ...base, items: await spoooolChannelItems(env, s.ref) };
+    }
+    if (s.kind === 'youtube_channel') {
+      const r = await getYouTubeChannelItems(env, s.ref);
+      return { ...base, items: r.items, error: r.error, stale: r.stale };
+    }
+    if (s.kind === 'youtube_playlist') {
+      const r = await getYouTubePlaylistItems(env, s.ref);
+      return { ...base, items: r.items, error: r.error, stale: r.stale };
+    }
+    if (s.kind === 'youtube_search') {
+      const r = await getYouTubeSearchItems(env, s.ref);
+      return { ...base, items: r.items, error: r.error, stale: r.stale };
+    }
+    // tiktok_video
+    const r = await getTikTokItem(env, s.ref, parseSqliteTimestamp(s.added_at));
+    return { ...base, items: r.item ? [r.item] : [], error: r.error };
+  } catch (err) {
+    return { ...base, items: [], error: err instanceof Error ? err.message : 'source failed' };
+  }
 }
 
 // Validate + normalize a user-supplied source into the stored { ref, label }.
@@ -239,4 +294,41 @@ feedRoutes.delete('/api/feeds/:id/sources/:sid', async (c) => {
     .bind(c.req.param('sid'), feed.id)
     .run();
   return c.json({ ok: true });
+});
+
+feedRoutes.get('/api/feeds/:id/items', async (c) => {
+  const feed = await loadFeed(c.env, c.req.param('id'));
+  if (!feed) return c.json({ error: 'Feed not found' }, 404);
+  const user = c.get('user');
+  const isOwner = user?.id === feed.user_id;
+  if (!feed.is_public && !isOwner) return c.json({ error: 'Feed not found' }, 404);
+
+  const parsed = itemsQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: 'Invalid query', details: parsed.error.flatten() }, 400);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT id, feed_id, kind, ref, label, position, added_at FROM feed_sources WHERE feed_id = ? ORDER BY position ASC, added_at ASC`,
+  )
+    .bind(feed.id)
+    .all<SourceRow>();
+  const rows = results ?? [];
+
+  const sourceResults = await Promise.all(rows.map((s) => fetchSourceItems(c.env, s)));
+  const assembled = assembleFeed(sourceResults, parsed.data.cursor ?? null, parsed.data.limit);
+
+  // Touch last_viewed_at so the cron warmer keeps this feed's caches fresh.
+  await c.env.DB.prepare(`UPDATE feeds SET last_viewed_at = ? WHERE id = ?`)
+    .bind(Date.now(), feed.id)
+    .run();
+
+  // Enrich the source summary with labels for the manage panel.
+  const labelById = new Map(rows.map((r) => [r.id, r.label]));
+  const sources = assembled.sources.map((s) => ({ ...s, label: labelById.get(s.sourceId) ?? '' }));
+
+  return c.json({
+    feed: { ...publicFeed(feed), is_owner: isOwner },
+    items: assembled.items,
+    nextCursor: assembled.nextCursor,
+    sources,
+  });
 });

@@ -235,10 +235,10 @@ function HeaderNav(): JSX.Element {
       <Link to="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
       </Link>
-      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user.email}`} style={iconBtn}>
+      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user.email}`} style={iconBtn}>
+      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button

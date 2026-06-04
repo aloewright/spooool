@@ -6,6 +6,7 @@ import { ChannelSubscriberDO } from './channel-do';
 import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
+import { handleAiGenMessage } from './ai-video-consumer';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
@@ -183,7 +184,13 @@ const workerHandlers = {
   async queue(batch: MessageBatch<unknown>, env: EnvBindings): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleEncodingMessage(env, message.body);
+        if (batch.queue === 'ai-gen') {
+          // handleAiGenMessage never throws (errors → status='failed' + ack).
+          // Retrying gen-video re-bills Veo, so we always ack regardless.
+          await handleAiGenMessage(env, message.body);
+        } else {
+          await handleEncodingMessage(env, message.body);
+        }
         message.ack();
       } catch (error) {
         console.error('video-encoding queue message failed', {

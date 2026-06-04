@@ -3,9 +3,11 @@ import {
   buildCostAlertProps,
   evaluateAlerts,
   getCostSnapshot,
+  parseAiSpendThresholdUsd,
   parseThresholdBytes,
   runCostMonitorSweep,
   todayKey,
+  type CostAlert,
   type CostSnapshot,
   type CostsEnv,
 } from './costs';
@@ -62,6 +64,7 @@ const SAMPLE_SNAPSHOT: CostSnapshot = {
   videos: { total: 42, soft_deleted: 1, last_30d: 5 },
   users: { total: 7, last_30d: 2 },
   comments: { total: 12 },
+  ai_spend: { total_usd: 10.5, last_30d_usd: 3.25 },
 };
 
 describe('parseThresholdBytes', () => {
@@ -81,15 +84,68 @@ describe('parseThresholdBytes', () => {
 });
 
 describe('evaluateAlerts', () => {
-  it('returns no alerts below the threshold', () => {
-    const small: CostSnapshot = { ...SAMPLE_SNAPSHOT, storage: { used_bytes: 1024, used_gib: 0, estimated_monthly_usd: 0 } };
-    expect(evaluateAlerts(small, 1024 * 1024)).toEqual([]);
+  it('returns no alerts when both are below thresholds', () => {
+    const small: CostSnapshot = {
+      ...SAMPLE_SNAPSHOT,
+      storage: { used_bytes: 1024, used_gib: 0, estimated_monthly_usd: 0 },
+      ai_spend: { total_usd: 0, last_30d_usd: 0 },
+    };
+    expect(evaluateAlerts(small, 1024 * 1024, 50)).toEqual([]);
   });
 
   it('returns a storage alert at and above the threshold', () => {
-    const alerts = evaluateAlerts(SAMPLE_SNAPSHOT, 50 * 1024 * 1024 * 1024);
+    const alerts = evaluateAlerts(SAMPLE_SNAPSHOT, 50 * 1024 * 1024 * 1024, 1000);
     expect(alerts).toHaveLength(1);
     expect(alerts[0]).toMatchObject({ reason: 'storage_threshold' });
+  });
+
+  it('returns an ai_spend_threshold alert when last_30d_usd >= threshold', () => {
+    const snap: CostSnapshot = {
+      ...SAMPLE_SNAPSHOT,
+      storage: { used_bytes: 0, used_gib: 0, estimated_monthly_usd: 0 },
+      ai_spend: { total_usd: 60, last_30d_usd: 55 },
+    };
+    const alerts = evaluateAlerts(snap, 100 * 1024 * 1024 * 1024, 50);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ reason: 'ai_spend_threshold', threshold_usd: 50, observed_usd: 55 });
+  });
+
+  it('does NOT emit ai_spend_threshold when last_30d_usd < threshold', () => {
+    const snap: CostSnapshot = {
+      ...SAMPLE_SNAPSHOT,
+      storage: { used_bytes: 0, used_gib: 0, estimated_monthly_usd: 0 },
+      ai_spend: { total_usd: 10, last_30d_usd: 49.99 },
+    };
+    const alerts = evaluateAlerts(snap, 100 * 1024 * 1024 * 1024, 50);
+    expect(alerts.find((a) => a.reason === 'ai_spend_threshold')).toBeUndefined();
+  });
+
+  it('emits both alerts when both thresholds are tripped', () => {
+    const snap: CostSnapshot = {
+      ...SAMPLE_SNAPSHOT,
+      ai_spend: { total_usd: 100, last_30d_usd: 75 },
+    };
+    const alerts = evaluateAlerts(snap, 50 * 1024 * 1024 * 1024, 50);
+    expect(alerts).toHaveLength(2);
+    expect(alerts.find((a) => a.reason === 'storage_threshold')).toBeDefined();
+    expect(alerts.find((a) => a.reason === 'ai_spend_threshold')).toBeDefined();
+  });
+});
+
+describe('parseAiSpendThresholdUsd', () => {
+  it('defaults to 50 when undefined', () => {
+    expect(parseAiSpendThresholdUsd(undefined)).toBe(50);
+  });
+
+  it('defaults when the value is not a positive number', () => {
+    expect(parseAiSpendThresholdUsd('not-a-number')).toBe(50);
+    expect(parseAiSpendThresholdUsd('0')).toBe(50);
+    expect(parseAiSpendThresholdUsd('-10')).toBe(50);
+  });
+
+  it('accepts a positive numeric override', () => {
+    expect(parseAiSpendThresholdUsd('100')).toBe(100);
+    expect(parseAiSpendThresholdUsd('0.5')).toBe(0.5);
   });
 });
 
@@ -113,7 +169,33 @@ describe('buildCostAlertProps', () => {
       videos_total: 42,
       users_total: 7,
       comments_total: 12,
+      ai_spend_total_usd: '10.50',
+      ai_spend_30d_usd: '3.25',
+      ai_spend_threshold_usd: '',
     });
+  });
+
+  it('includes ai_spend fields and ai_spend_threshold_usd when ai_spend alert is present', () => {
+    const alerts: CostAlert[] = [
+      { reason: 'storage_threshold', threshold_bytes: 50 * 1024 * 1024 * 1024, observed_bytes: SAMPLE_SNAPSHOT.storage.used_bytes },
+      { reason: 'ai_spend_threshold', threshold_usd: 50, observed_usd: 55 },
+    ];
+    const props = buildCostAlertProps(SAMPLE_SNAPSHOT, alerts);
+    expect(props.ai_spend_total_usd).toBe('10.50');
+    expect(props.ai_spend_30d_usd).toBe('3.25');
+    expect(props.ai_spend_threshold_usd).toBe('50.00');
+    expect(String(props.alert_reasons)).toContain('storage_threshold');
+    expect(String(props.alert_reasons)).toContain('ai_spend_threshold');
+  });
+
+  it('does not crash when only an ai_spend alert is present (no storage alert → threshold_gib empty)', () => {
+    const alerts: CostAlert[] = [
+      { reason: 'ai_spend_threshold', threshold_usd: 50, observed_usd: 75 },
+    ];
+    const props = buildCostAlertProps(SAMPLE_SNAPSHOT, alerts);
+    expect(props.threshold_gib).toBe('');
+    expect(props.ai_spend_threshold_usd).toBe('50.00');
+    expect(props.alert_reasons).toBe('ai_spend_threshold');
   });
 });
 
@@ -127,6 +209,8 @@ describe('getCostSnapshot', () => {
       { n: 50 }, // total users
       { n: 4 }, // 30d users
       { n: 99 }, // comments
+      { used: 7.5 }, // ai_costs total SUM(est_usd)
+      { used: 2.25 }, // ai_costs 30d SUM(est_usd)
     ]);
     const snap = await getCostSnapshot({ DB: db, CACHE: fakeKv() } as unknown as CostsEnv);
     expect(snap.storage.used_bytes).toBe(1024 * 1024 * 1024);
@@ -135,6 +219,8 @@ describe('getCostSnapshot', () => {
     expect(snap.videos).toEqual({ total: 10, soft_deleted: 2, last_30d: 3 });
     expect(snap.users).toEqual({ total: 50, last_30d: 4 });
     expect(snap.comments).toEqual({ total: 99 });
+    expect(snap.ai_spend.total_usd).toBe(7.5);
+    expect(snap.ai_spend.last_30d_usd).toBe(2.25);
   });
 
   it('treats null SUM/COUNT rows as zero', async () => {
@@ -146,16 +232,20 @@ describe('getCostSnapshot', () => {
       { n: null },
       { n: null },
       { n: null },
+      { used: null }, // ai_costs total
+      { used: null }, // ai_costs 30d
     ]);
     const snap = await getCostSnapshot({ DB: db, CACHE: fakeKv() } as unknown as CostsEnv);
     expect(snap.storage.used_bytes).toBe(0);
     expect(snap.videos.total).toBe(0);
     expect(snap.users.total).toBe(0);
+    expect(snap.ai_spend.total_usd).toBe(0);
+    expect(snap.ai_spend.last_30d_usd).toBe(0);
   });
 });
 
 describe('runCostMonitorSweep', () => {
-  function dbForSnapshot(usedBytes: number): D1Database {
+  function dbForSnapshot(usedBytes: number, aiSpend30d = 0): D1Database {
     return fakeDb([
       { used: usedBytes },
       { n: 0 },
@@ -164,6 +254,8 @@ describe('runCostMonitorSweep', () => {
       { n: 0 },
       { n: 0 },
       { n: 0 },
+      { used: 0 },        // ai_costs total
+      { used: aiSpend30d }, // ai_costs 30d
     ]);
   }
 

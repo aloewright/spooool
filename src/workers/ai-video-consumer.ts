@@ -20,6 +20,7 @@
 
 import { z } from 'zod';
 import { sendToStream } from './encoding';
+import { writeAiCost } from './ai-costs';
 
 // Order-of-magnitude cost placeholder (Workers AI Neurons → USD).
 // Veo 3.1 pricing: ~$0.40 per 8 s clip at 720p (update when CF publishes exact rate).
@@ -106,12 +107,7 @@ export async function handleAiGenMessage(env: AiGenEnv, body: unknown): Promise<
       .run();
 
     // ── 6. Record AI cost ─────────────────────────────────────────────────────
-    const costId = `c_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    await env.DB.prepare(
-      "INSERT INTO ai_costs (id, user_id, op, route, model, units, unit_kind, est_usd, project_id, created_at) VALUES (?,?, 'video_gen','dynamic/video_gen','google/veo-3.1', 8, 'seconds', ?, NULL, ?)",
-    )
-      .bind(costId, userId, EST_USD_PER_VIDEO, Date.now())
-      .run();
+    await writeAiCost(env.DB, { userId, op: 'video_gen', route: 'dynamic/video_gen', model: 'google/veo-3.1', units: 8, unitKind: 'seconds', estUsd: EST_USD_PER_VIDEO });
   } catch (err) {
     // On any failure: mark asset failed and return normally (do NOT rethrow).
     // Rethrowing would cause the queue handler to retry the message, which

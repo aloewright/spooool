@@ -216,8 +216,10 @@ describe('handleAiGenMessage', () => {
       const costRun = runs.find((r) => r.sql.includes('INSERT INTO ai_costs'));
       expect(costRun).toBeDefined();
       expect(costRun!.sql).toContain("unit_kind");
-      expect(costRun!.sql).toContain("'seconds'");
-      expect(costRun!.binds[1]).toBe('u1'); // userId
+      // unit_kind is now a bound param (helper uses parameterized SQL); check bind values.
+      // Bind order from aiCostStatement: id, userId, op, route, model, units, unitKind, estUsd, projectId, createdAt
+      expect(costRun!.binds[1]).toBe('u1');       // userId
+      expect(costRun!.binds[6]).toBe('seconds');  // unitKind
     });
   });
 

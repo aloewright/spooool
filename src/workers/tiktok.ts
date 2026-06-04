@@ -2,7 +2,7 @@
 // only no-OAuth way to render a TikTok video. Not a model provider — outside
 // the AI-Gateway rule.
 
-import type { FeedItem } from './feed-item';
+import { kvHash, type FeedItem } from './feed-item';
 
 export interface TikTokEnv {
   CACHE: KVNamespace;
@@ -46,7 +46,7 @@ function tiktokId(url: string): string {
 }
 
 function key(url: string): string {
-  return `tt:video:${url.trim()}`.slice(0, 480);
+  return `tt:video:${kvHash(url.trim())}`;
 }
 
 export async function getTikTokItem(

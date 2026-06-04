@@ -3,7 +3,7 @@
 // by the AI-Gateway rule or scripts/check-no-direct-providers.mjs. Calls go
 // direct (server-side) with env.YOUTUBE_API_KEY.
 
-import type { FeedItem } from './feed-item';
+import { kvHash, type FeedItem } from './feed-item';
 
 const UC_ID_RE = /^UC[\w-]{22}$/;
 const PLAYLIST_ID_RE = /^(PL|UU|OL|FL|RD|LL)[\w-]+$/;
@@ -153,7 +153,7 @@ function keyChannel(channelId: string): string {
   return `yt:channel:${channelId}`;
 }
 function keySearch(query: string): string {
-  return `yt:search:${query.trim().toLowerCase()}`.slice(0, 480);
+  return `yt:search:${kvHash(query.trim().toLowerCase())}`;
 }
 function keyUploads(channelId: string): string {
   return `yt:uploads:${channelId}`;

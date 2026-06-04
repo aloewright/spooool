@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   assembleFeed,
+  kvHash,
   parseSqliteTimestamp,
   type FeedItem,
   type SourceResult,
@@ -33,6 +34,21 @@ describe('parseSqliteTimestamp', () => {
   });
   it('returns 0 for unparseable input', () => {
     expect(parseSqliteTimestamp('not-a-date')).toBe(0);
+  });
+});
+
+describe('kvHash', () => {
+  it('is deterministic for the same input', () => {
+    expect(kvHash('lofi beats')).toBe(kvHash('lofi beats'));
+  });
+  it('distinguishes inputs that share a long prefix (no cache-key collision)', () => {
+    const base = 'x'.repeat(600);
+    expect(kvHash(base + 'a')).not.toBe(kvHash(base + 'b'));
+  });
+  it('produces a short, key-safe token', () => {
+    const h = kvHash('https://www.tiktok.com/@user/video/7300000000000000000');
+    expect(h).toMatch(/^[a-z0-9]+$/);
+    expect(h.length).toBeLessThanOrEqual(7);
   });
 });
 

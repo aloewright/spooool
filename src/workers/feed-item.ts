@@ -45,6 +45,20 @@ export function parseSqliteTimestamp(ts: string): number {
   return Number.isNaN(ms) ? 0 : ms;
 }
 
+// Stable, fixed-length token for building KV cache keys from arbitrary user
+// input (search queries, URLs). FNV-1a 32-bit → base36. Synchronous (no
+// crypto.subtle/async ripple through the cache layer) and collision-resistant
+// enough for a cache-key namespace, so two distinct inputs never share a key
+// even when their prefixes match.
+export function kvHash(input: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
+}
+
 // Sort newest-first; tie-break by id desc so pagination is stable.
 function compareDesc(a: FeedItem, b: FeedItem): number {
   if (b.publishedAt !== a.publishedAt) return b.publishedAt - a.publishedAt;

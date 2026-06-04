@@ -79,6 +79,15 @@ id = "0b560dd1327445bd8b5eb6efca3e82e0"
 binding = "VIDEO_ENCODING"
 queue = "video-encoding"
 
+# Queue - AI Generative Video (ALO-647)
+# Consumer must be registered server-side (not declared here — wrangler errors on
+# re-declaration at deploy time). Register once with:
+#   npx wrangler queues consumer add ai-gen spooool
+# or via the Cloudflare dashboard, mirroring the video-encoding consumer setup.
+[[queues.producers]]
+binding = "AI_GEN"
+queue = "ai-gen"
+
 # Consumer is registered server-side; wrangler errors if re-declared on deploy.
 # To change batch size / DLQ, edit via the Cloudflare dashboard or `wrangler queues consumer`.
 

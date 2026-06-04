@@ -11,6 +11,11 @@ import { defineConfig } from 'vitest/config';
 // fast.
 export default defineConfig({
   test: {
+    // Force test NODE_ENV so React uses its development build (and act() works)
+    // even when the host shell exports NODE_ENV=production.
+    env: {
+      NODE_ENV: 'test',
+    },
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'scripts/**/*.test.{js,mjs,ts}',

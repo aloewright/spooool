@@ -186,3 +186,83 @@ describe('feeds CRUD', () => {
     expect((await call(store, { id: 'other' }, 'DELETE', `/api/feeds/${id}`)).status).toBe(403);
   });
 });
+
+describe('feed sources', () => {
+  it('adds a spooool_channel source resolved from a username', async () => {
+    const store = emptyStore();
+    store.users.push({ id: 'creator1', username: 'cool', label: 'Cool Creator' });
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const id = feed.json.feed.id as string;
+
+    const added = await call(store, user, 'POST', `/api/feeds/${id}/sources`, {
+      kind: 'spooool_channel',
+      ref: 'cool',
+    });
+    expect(added.status).toBe(200);
+    expect(added.json.source).toMatchObject({ kind: 'spooool_channel', ref: 'creator1', label: 'Cool Creator' });
+  });
+
+  it('rejects a spooool_channel for an unknown username', async () => {
+    const store = emptyStore();
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const res = await call(store, user, 'POST', `/api/feeds/${feed.json.feed.id}/sources`, {
+      kind: 'spooool_channel',
+      ref: 'ghost',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('adds a youtube_search source (no resolution needed)', async () => {
+    const store = emptyStore();
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const res = await call(store, user, 'POST', `/api/feeds/${feed.json.feed.id}/sources`, {
+      kind: 'youtube_search',
+      ref: 'lofi beats',
+    });
+    expect(res.status).toBe(200);
+    expect(res.json.source).toMatchObject({ kind: 'youtube_search', ref: 'lofi beats' });
+  });
+
+  it('validates a tiktok_video URL', async () => {
+    const store = emptyStore();
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const ok = await call(store, user, 'POST', `/api/feeds/${feed.json.feed.id}/sources`, {
+      kind: 'tiktok_video',
+      ref: 'https://www.tiktok.com/@u/video/7300000000000000000',
+    });
+    expect(ok.status).toBe(200);
+    const bad = await call(store, user, 'POST', `/api/feeds/${feed.json.feed.id}/sources`, {
+      kind: 'tiktok_video',
+      ref: 'https://example.com/x',
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it('rejects an unparseable youtube_playlist ref', async () => {
+    const store = emptyStore();
+    const user = { id: 'u1' };
+    const feed = await call(store, user, 'POST', '/api/feeds', { name: 'F' });
+    const res = await call(store, user, 'POST', `/api/feeds/${feed.json.feed.id}/sources`, {
+      kind: 'youtube_playlist',
+      ref: 'not a playlist',
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('only the owner can add or remove sources', async () => {
+    const store = emptyStore();
+    const owner = { id: 'owner' };
+    const feed = await call(store, owner, 'POST', '/api/feeds', { name: 'F' });
+    const id = feed.json.feed.id as string;
+    const added = await call(store, owner, 'POST', `/api/feeds/${id}/sources`, { kind: 'youtube_search', ref: 'x' });
+    const sid = added.json.source.id as string;
+
+    expect((await call(store, { id: 'other' }, 'POST', `/api/feeds/${id}/sources`, { kind: 'youtube_search', ref: 'y' })).status).toBe(403);
+    expect((await call(store, { id: 'other' }, 'DELETE', `/api/feeds/${id}/sources/${sid}`)).status).toBe(403);
+    expect((await call(store, owner, 'DELETE', `/api/feeds/${id}/sources/${sid}`)).status).toBe(200);
+  });
+});

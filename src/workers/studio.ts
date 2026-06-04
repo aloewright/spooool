@@ -12,6 +12,7 @@ import { gatewayChat, gatewayImage, DEFAULT_IMAGE_MODEL, type AiGatewayEnv, type
 import type { AIBindingEnv } from './create-tools';
 import { STUDIO_GEN_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
+import { aiCostStatement } from './ai-costs';
 
 export interface StudioEnv extends AIBindingEnv {
   RATE_LIMITER?: DurableObjectNamespace;
@@ -108,14 +109,11 @@ studioRoutes.post('/api/studio/image', async (c) => {
   await c.env.VIDEOS.put(r2Key, decoded, { httpMetadata: { contentType: IMAGE_CONTENT_TYPE } });
 
   const now = Date.now();
-  const costId = `c_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
   await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO generated_assets (id, user_id, kind, source, r2_key, stream_video_id, bytes, status, spec_json, error_message, project_id, created_at, updated_at) VALUES (?, ?, 'image', 'image_gen', ?, NULL, ?, 'ready', ?, NULL, NULL, ?, ?)`
     ).bind(assetId, user.id, r2Key, bytes, JSON.stringify({ model: IMAGE_MODEL, prompt: parsed.data.prompt }), now, now),
-    c.env.DB.prepare(
-      `INSERT INTO ai_costs (id, user_id, op, route, model, units, unit_kind, est_usd, project_id, created_at) VALUES (?, ?, 'image_gen', 'dynamic/image_gen', ?, 1, 'images', ?, NULL, ?)`
-    ).bind(costId, user.id, IMAGE_MODEL, EST_USD_PER_IMAGE, now),
+    aiCostStatement(c.env.DB, { userId: user.id, op: 'image_gen', route: 'dynamic/image_gen', model: IMAGE_MODEL, units: 1, unitKind: 'images', estUsd: EST_USD_PER_IMAGE }),
   ]);
 
   // dataUrl lets the panel preview immediately (studio/images/* has no public GET route).

@@ -24,6 +24,11 @@ const passwordUpdateSchema = z.object({
   newPassword: z.string().min(8).max(200),
 });
 
+const notificationPrefsSchema = z.object({
+  notifyEmailNewUpload: z.boolean(),
+  notifyEmailComments: z.boolean(),
+});
+
 export const accountRoutes = new Hono<{
   Bindings: AccountEnv;
   Variables: AccountVariables;
@@ -35,7 +40,8 @@ accountRoutes.get('/api/account', async (c) => {
 
   const [row, storage] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
+      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for,
+              notify_email_new_upload, notify_email_comments
        FROM user WHERE id = ?`,
     )
       .bind(user.id)
@@ -45,6 +51,8 @@ accountRoutes.get('/api/account', async (c) => {
         name: string;
         deletion_requested_at: number | null;
         deletion_scheduled_for: number | null;
+        notify_email_new_upload: number;
+        notify_email_comments: number;
       }>(),
     // ALO-139: surface the user's quota + current usage so the account
     // settings page (and any future creator dashboard) can render a
@@ -59,6 +67,8 @@ accountRoutes.get('/api/account', async (c) => {
     name: row.name,
     deletionRequestedAt: row.deletion_requested_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    notifyEmailNewUpload: row.notify_email_new_upload !== 0,
+    notifyEmailComments: row.notify_email_comments !== 0,
     storage,
   });
 });
@@ -109,6 +119,35 @@ accountRoutes.put('/api/account/password', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : 'Password change failed' }, 400);
   }
   return c.json({ ok: true });
+});
+
+accountRoutes.put('/api/account/notifications', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const json = await c.req.json().catch(() => null);
+  const parsed = notificationPrefsSchema.safeParse(json);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid preferences', details: parsed.error.flatten() }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE user
+     SET notify_email_new_upload = ?, notify_email_comments = ?, updatedAt = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      parsed.data.notifyEmailNewUpload ? 1 : 0,
+      parsed.data.notifyEmailComments ? 1 : 0,
+      Date.now(),
+      user.id,
+    )
+    .run();
+
+  return c.json({
+    notifyEmailNewUpload: parsed.data.notifyEmailNewUpload,
+    notifyEmailComments: parsed.data.notifyEmailComments,
+  });
 });
 
 accountRoutes.post('/api/account/delete', async (c) => {

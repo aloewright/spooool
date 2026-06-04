@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT,
   deletion_requested_at INTEGER,
   deletion_scheduled_for INTEGER,
+  notify_email_new_upload INTEGER NOT NULL DEFAULT 1,
+  notify_email_comments INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

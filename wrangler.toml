@@ -82,6 +82,22 @@ queue = "video-encoding"
 # Consumer is registered server-side; wrangler errors if re-declared on deploy.
 # To change batch size / DLQ, edit via the Cloudflare dashboard or `wrangler queues consumer`.
 
+# Queue - AI Generative Video b-roll (Veo 3.1)
+# Decouples the long-running env.AI.run('google/veo-3.1', ...) call from the
+# request path and provides automatic retries via max_retries below.
+# NOTE: enable 'google/veo-3.1' on AI Gateway 'x' in the CF dashboard before
+# deploying — it is not proxied by default. (Manual operator step.)
+[[queues.producers]]
+binding = "AI_GEN"
+queue = "ai-gen"
+
+[[queues.consumers]]
+queue = "ai-gen"
+# Process one message at a time — Veo 3.1 calls are long-running and the Worker
+# CPU budget is shared; batching would not help and could hit wall-clock limits.
+max_batch_size = 1
+max_retries = 3
+
 # Analytics Engine — view + watch-time datapoints (ALO-144)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"

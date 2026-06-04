@@ -237,7 +237,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
         { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages), max_tokens: 800 },
         { gateway: { id: GATEWAY_ID } },
       );
-      const rawText = narrowChatText(raw);
+      const rawText = await narrowChatText(raw);
       let data: unknown = rawText;
       try {
         data = JSON.parse(rawText);

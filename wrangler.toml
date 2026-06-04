@@ -82,6 +82,21 @@ queue = "video-encoding"
 # Consumer is registered server-side; wrangler errors if re-declared on deploy.
 # To change batch size / DLQ, edit via the Cloudflare dashboard or `wrangler queues consumer`.
 
+# Queue - AI Generative Video Pipeline (ALO-642)
+# Producer: POST /api/studio/video enqueues a job here.
+# Consumer: handleAiGenMessage calls env.AI.run('google/veo-3.1', ..., { gateway: { id: 'x' } }).
+# max_batch_size=1 because each Veo call is long-running; we don't want parallel
+# generation competing for the same 30s CPU budget in a single batch invocation.
+[[queues.producers]]
+binding = "AI_GEN"
+queue = "ai-gen"
+
+[[queues.consumers]]
+queue = "ai-gen"
+max_batch_size = 1
+max_retries = 3
+dead_letter_queue = "ai-gen-dlq"
+
 # Analytics Engine — view + watch-time datapoints (ALO-144)
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"

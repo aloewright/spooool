@@ -6,6 +6,8 @@ import { ChannelSubscriberDO } from './channel-do';
 import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
+import { handleAiGenMessage } from './ai-video-consumer';
+import { studioRoutes, type StudioEnv } from './studio';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
@@ -49,7 +51,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & StudioEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -163,6 +165,7 @@ app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
 app.route('/', createRoutes);
 app.route('/', streamUploadRoutes);
+app.route('/', studioRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
@@ -181,10 +184,14 @@ const workerHandlers = {
   async queue(batch: MessageBatch<unknown>, env: EnvBindings): Promise<void> {
     for (const message of batch.messages) {
       try {
-        await handleEncodingMessage(env, message.body);
+        if (batch.queue === 'ai-gen') {
+          await handleAiGenMessage(env, message.body);
+        } else {
+          await handleEncodingMessage(env, message.body);
+        }
         message.ack();
       } catch (error) {
-        console.error('video-encoding queue message failed', {
+        console.error(`${batch.queue} queue message failed`, {
           error: error instanceof Error ? error.message : String(error),
         });
         message.retry();

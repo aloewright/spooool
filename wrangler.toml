@@ -190,6 +190,15 @@ ADMIN_EMAILS = "aloewright@gmail.com"
 EMAIL_FROM = "noreply@spooool.com"
 EMAIL_FROM_NAME = "Spooool"
 
+# ALO-642/643: AI-Gateway transport mode for ai-gateway.ts. Default is
+# "run-gateway" — the proven env.AI.run('@cf/..', .., { gateway: { id: 'x' } })
+# path: gateway-routed/observable, byte-for-byte parity with the previous
+# create-tools behavior, and it preserves the provider error message (which the
+# gateway-binding adapter loses to @tanstack/ai's strip-to-spec middleware).
+# Switch to "gateway-binding" to use the @cloudflare/tanstack-ai gateway-binding
+# adapter once it's smoke-verified on this account (see E11 AI Studio spec, App. B).
+AI_GATEWAY_MODE = "run-gateway"
+
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)

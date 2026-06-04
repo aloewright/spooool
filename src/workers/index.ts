@@ -6,6 +6,7 @@ import { ChannelSubscriberDO } from './channel-do';
 import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
+import { transitionVideoStatus } from './video-status';
 import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
@@ -50,6 +51,7 @@ type SessionUser = {
 };
 
 type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
+  ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -92,6 +94,42 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+
+// Encode container callbacks — called by EncoderContainer with x-render-secret.
+// These sit outside CSRF middleware (same exemption as other webhooks).
+function timingSafeEqual(a: string, b: string): boolean {
+  const enc = new TextEncoder();
+  const ab = enc.encode(a), bb = enc.encode(b);
+  const len = Math.max(ab.length, bb.length);
+  let diff = ab.length ^ bb.length;
+  for (let i = 0; i < len; i++) diff |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
+  return diff === 0;
+}
+
+app.post('/api/webhooks/encode/:id/complete', async (c) => {
+  const secret = c.env.RENDER_CALLBACK_SECRET;
+  if (!secret || !timingSafeEqual(c.req.header('x-render-secret') ?? '', secret)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const videoId = c.req.param('id');
+  const body = await c.req.json().catch(() => null) as { masterKey?: string } | null;
+  if (!body?.masterKey) return c.json({ error: 'masterKey required' }, 400);
+  await transitionVideoStatus(c.env.DB, videoId, 'ready');
+  console.log('[encode] complete', { videoId, masterKey: body.masterKey });
+  return c.json({ ok: true });
+});
+
+app.post('/api/webhooks/encode/:id/fail', async (c) => {
+  const secret = c.env.RENDER_CALLBACK_SECRET;
+  if (!secret || !timingSafeEqual(c.req.header('x-render-secret') ?? '', secret)) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+  const videoId = c.req.param('id');
+  const body = await c.req.json().catch(() => null) as { error?: string } | null;
+  await transitionVideoStatus(c.env.DB, videoId, 'failed');
+  console.error('[encode] failed', { videoId, error: body?.error });
+  return c.json({ ok: true });
+});
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -174,6 +212,7 @@ app.route('/', ogMetaRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
 export { RenderContainer } from './render-container';
+export { EncoderContainer } from './encoder-container';
 export { ComposerAgent } from './composer-agent-do';
 
 const workerHandlers = {

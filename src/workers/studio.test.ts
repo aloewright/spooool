@@ -427,6 +427,49 @@ describe('POST /api/studio/video', () => {
     expect((await postVideo(verifiedUser, { prompt: 'a'.repeat(2049) }).r).status).toBe(400);
   });
 
+  it('503 when AI_GEN binding is absent — no generated_assets INSERT', async () => {
+    // Build env without AI_GEN so the guard fires before any DB write.
+    const db = makeVideoDbStub();
+    const videos = makeVideosStub();
+    const { app, base } = buildApp(verifiedUser, db, videos, {}); // no AI_GEN key
+    const res = await app.request('http://localhost/api/studio/video', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'a rocket launch' }),
+    }, base);
+
+    expect(res.status).toBe(503);
+
+    // No INSERT should have been executed
+    const runs = (db as Record<string, unknown>)['_runs'] as Array<{ sql: string }>;
+    expect(runs.find((r) => r.sql.includes('INSERT INTO generated_assets'))).toBeUndefined();
+  });
+
+  it('503 when AI_GEN.send rejects — row is updated to failed', async () => {
+    const db = makeVideoDbStub();
+    const videos = makeVideosStub();
+    const failingAiGen = {
+      send: vi.fn(async () => { throw new Error('queue full'); }),
+      _sends: [] as unknown[],
+    };
+    const { app, base } = buildApp(verifiedUser, db, videos, { AI_GEN: failingAiGen });
+    const res = await app.request('http://localhost/api/studio/video', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'a rocket launch' }),
+    }, base);
+
+    expect(res.status).toBe(503);
+    const body = await res.json() as Record<string, unknown>;
+    expect(typeof body.error).toBe('string');
+
+    // The INSERT ran first, then the failure UPDATE ran
+    const runs = (db as Record<string, unknown>)['_runs'] as Array<{ sql: string }>;
+    expect(runs.find((r) => r.sql.includes('INSERT INTO generated_assets'))).toBeDefined();
+    const failUpdate = runs.find((r) => r.sql.includes("status='failed'"));
+    expect(failUpdate).toBeDefined();
+  });
+
   it('202 happy path — response shape, generated_assets INSERT, AI_GEN.send', async () => {
     const { r, db, aiGen } = postVideo(verifiedUser, { prompt: 'a waterfall in slow motion' });
     const res = await r;

@@ -127,6 +127,8 @@ studioRoutes.post('/api/studio/video', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
 
+  if (!c.env.AI_GEN) return c.json({ error: 'Video generation is unavailable.' }, 503);
+
   const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
   if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
 
@@ -143,7 +145,13 @@ studioRoutes.post('/api/studio/video', async (c) => {
     .bind(assetId, user.id, JSON.stringify({ model: 'google/veo-3.1', prompt: parsed.data.prompt }), now, now)
     .run();
 
-  await c.env.AI_GEN!.send({ assetId, userId: user.id, prompt: parsed.data.prompt });
+  try {
+    await c.env.AI_GEN.send({ assetId, userId: user.id, prompt: parsed.data.prompt });
+  } catch (err) {
+    await c.env.DB.prepare(`UPDATE generated_assets SET status='failed', error_message=?, updated_at=? WHERE id=? AND user_id=?`)
+      .bind('Failed to enqueue generation', Date.now(), assetId, user.id).run();
+    return c.json({ error: 'Failed to enqueue video generation. Try again.' }, 503);
+  }
 
   return c.json({ assetId, status: 'queued' }, 202);
 });

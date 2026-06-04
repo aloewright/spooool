@@ -49,6 +49,17 @@ export async function handleAiGenMessage(env: AiGenEnv, body: unknown): Promise<
 
   const { assetId, userId, prompt } = parsed.data;
 
+  // At-least-once queue delivery: claim the asset so a redelivered message can't
+  // re-generate (and re-bill) an already-processed asset. Only a row still in
+  // 'queued' is claimable; if 0 rows change, another delivery already handled it.
+  const claim = await env.DB.prepare(
+    `UPDATE generated_assets SET status='processing', updated_at=? WHERE id=? AND user_id=? AND status='queued'`,
+  ).bind(Date.now(), assetId, userId).run();
+  if (!claim.meta || claim.meta.changes === 0) {
+    console.warn('[ai-gen] asset not claimable (already processed/missing)', { assetId });
+    return; // no-op: do NOT call Veo, do NOT bill
+  }
+
   try {
     // ── 1. Generate video via Veo ────────────────────────────────────────────
     // Consumer is a Worker → use env.AI.run with gateway opt (compat fetch → CF-2019).

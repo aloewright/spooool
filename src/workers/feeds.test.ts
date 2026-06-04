@@ -75,7 +75,7 @@ function fakeDB(store: Store): D1Database {
           const [id, feed_id, kind, ref, label] = binds as [string, string, string, string, string];
           store.feed_sources.push({ id, feed_id, kind, ref, label, position: 0, added_at: 't' });
         } else if (q.startsWith('DELETE FROM feed_sources WHERE id = ?')) {
-          store.feed_sources = store.feed_sources.filter((s) => s.id !== binds[0]);
+          store.feed_sources = store.feed_sources.filter((s) => !(s.id === binds[0] && s.feed_id === binds[1]));
         }
         return { success: true };
       },
@@ -281,6 +281,26 @@ async function callWith(env: FeedsEnv, store: Store, user: { id: string } | null
   return { status: res.status, json };
 }
 
+describe('items access control', () => {
+  it('blocks non-owner and unauthenticated callers from a private feed /items, then allows after making it public', async () => {
+    const store = emptyStore();
+    const owner = { id: 'owner' };
+    const feed = await call(store, owner, 'POST', '/api/feeds', { name: 'Private F' });
+    const id = feed.json.feed.id as string;
+
+    // Non-owner gets 404
+    expect((await call(store, { id: 'other' }, 'GET', `/api/feeds/${id}/items`)).status).toBe(404);
+    // Unauthenticated gets 404
+    expect((await call(store, null, 'GET', `/api/feeds/${id}/items`)).status).toBe(404);
+
+    // Owner makes the feed public
+    await call(store, owner, 'PATCH', `/api/feeds/${id}`, { is_public: true });
+
+    // Non-owner can now access /items
+    expect((await call(store, { id: 'other' }, 'GET', `/api/feeds/${id}/items`)).status).toBe(200);
+  });
+});
+
 describe('feed items assembly', () => {
   function ytItem(id: string, publishedAt: number) {
     return {
@@ -320,10 +340,10 @@ describe('feed items assembly', () => {
     const id = feed.json.feed.id as string;
     await call(store, user, 'POST', `/api/feeds/${id}/sources`, { kind: 'youtube_search', ref: 'breaks' });
 
-    const { env } = makeApp(store, user);
-    // No cache seeded + search uses real fetch → produce path throws → error result,
-    // but the endpoint must still return 200 with a per-source error flag.
-    // Force the failure deterministically by stubbing fetch to reject.
+    // Build the env with YOUTUBE_API_KEY so ytFetch proceeds past the config
+    // guard and actually calls globalThis.fetch — which we stub to throw, forcing
+    // a genuine network-failure degradation path.
+    const env: FeedsEnv = { DB: fakeDB(store), CACHE: fakeKV(), YOUTUBE_API_KEY: 'k' };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => { throw new Error('network down'); }) as typeof fetch;
     try {

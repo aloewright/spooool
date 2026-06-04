@@ -24,7 +24,13 @@ export function isTikTokVideoUrl(input: string): boolean {
     return false;
   }
   const host = url.hostname.replace(/^www\./, '');
-  return host === 'tiktok.com' || host === 'vm.tiktok.com' || host === 'm.tiktok.com';
+  // Short-link hosts (vm.tiktok.com, m.tiktok.com) use opaque slugs — any path
+  // is a valid video link.
+  if (host === 'vm.tiktok.com' || host === 'm.tiktok.com') return true;
+  // Canonical host: only accept URLs that contain /video/ or /photo/ in the
+  // path so that profile pages like https://www.tiktok.com/@user are rejected.
+  if (host === 'tiktok.com') return /\/(video|photo)\//.test(url.pathname);
+  return false;
 }
 
 // Extract the numeric video id from a canonical URL; fall back to a slug of the

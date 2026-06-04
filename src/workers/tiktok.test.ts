@@ -23,6 +23,9 @@ describe('isTikTokVideoUrl', () => {
     expect(isTikTokVideoUrl('https://youtube.com/watch?v=x')).toBe(false);
     expect(isTikTokVideoUrl('not a url')).toBe(false);
   });
+  it('rejects a TikTok profile URL (no /video/ or /photo/ segment)', () => {
+    expect(isTikTokVideoUrl('https://www.tiktok.com/@someuser')).toBe(false);
+  });
 });
 
 describe('getTikTokItem', () => {

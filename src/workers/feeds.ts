@@ -156,10 +156,9 @@ async function resolveSource(
   if (kind === 'youtube_channel') {
     const parsed = parseChannelInput(ref);
     if (!parsed) throw new Error('Could not parse YouTube channel');
-    // If we already have a channelId, store it directly to avoid an API call
-    // for title resolution when YOUTUBE_API_KEY is absent (e.g., in tests or
-    // at add-time before the key is configured). Title enrichment happens lazily
-    // via the items endpoint which reads from the KV cache.
+    // Bare channelId: store as-is without a network call. Label is the channel
+    // ID itself (we don't have the title without an API call); a user who wants
+    // the channel's title can re-add it via its @handle or URL.
     if (parsed.by === 'id') {
       return { ref: parsed.channelId, label: parsed.channelId };
     }

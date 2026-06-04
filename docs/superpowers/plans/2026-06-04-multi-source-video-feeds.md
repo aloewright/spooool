@@ -18,7 +18,7 @@
 - KV: `c.env.CACHE.get/put(key, val, { expirationTtl }) /delete`.
 - Auth in routes: `const user = c.get('user'); if (!user) return c.json({ error: 'Unauthorized' }, 401);`.
 - SQLite `CURRENT_TIMESTAMP` is `"YYYY-MM-DD HH:MM:SS"` (no `T`/`Z`) — normalize before `Date.parse` (see `Subscriptions.tsx:timeSince`).
-- Migrations are numbered with **no gaps**; `migrations.test.ts` asserts `Number(prefix) === index+1`. Latest is `0021`, so the new file MUST be `0022`.
+- Migrations are numbered with **no gaps**; `migrations.test.ts` asserts `Number(prefix) === index+1`. Latest is `0022` (`0022_studio_assets.sql`), so the new file MUST be `0023`.
 - Frontend DOM tests: `// @vitest-environment happy-dom`, raw `ReactDOM.createRoot` + `act`, `globalThis.fetch = vi.fn()` (see `Subscriptions.dom.test.tsx`).
 
 **Run a single test file:** `npx vitest run src/workers/feed-item.test.ts`
@@ -30,17 +30,17 @@
 ## Task 1: Database migration + schema mirror
 
 **Files:**
-- Create: `src/db/migrations/0022_custom_feeds.sql`
+- Create: `src/db/migrations/0023_custom_feeds.sql`
 - Modify: `src/db/schema.sql` (append the two tables + indexes to keep the consolidated reference in sync)
 - Test: `src/db/migrations.test.ts` (add one `it` block)
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Add this block inside the `describe('D1 migrations', …)` in `src/db/migrations.test.ts`, after the last existing `it(...)`:
 
 ```ts
-  it('0022_custom_feeds adds feeds + feed_sources tables and indexes', () => {
-    const sql = readFileSync(join(MIGRATIONS_DIR, '0022_custom_feeds.sql'), 'utf8');
+  it('0023_custom_feeds adds feeds + feed_sources tables and indexes', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0023_custom_feeds.sql'), 'utf8');
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS feeds/);
     expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS feed_sources/);
     expect(sql).toMatch(/kind TEXT NOT NULL/);
@@ -48,21 +48,21 @@ Add this block inside the `describe('D1 migrations', …)` in `src/db/migrations
     expect(sql).toMatch(/idx_feed_sources_feed/);
   });
 
-  it('schema.sql mirrors the feeds tables from 0022', () => {
+  it('schema.sql mirrors the feeds tables from 0023', () => {
     const schema = readFileSync(SCHEMA_PATH, 'utf8');
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feeds');
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feed_sources');
   });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run src/db/migrations.test.ts`
-Expected: FAIL — first the numeric-order test passes for existing files, the new tests fail with `ENOENT … 0022_custom_feeds.sql`.
+Expected: FAIL — first the numeric-order test passes for existing files, the new tests fail with `ENOENT … 0023_custom_feeds.sql`.
 
-- [ ] **Step 3: Create the migration**
+- [x] **Step 3: Create the migration**
 
-Create `src/db/migrations/0022_custom_feeds.sql`:
+Create `src/db/migrations/0023_custom_feeds.sql`:
 
 ```sql
 -- Multi-source custom video feeds (Phase 1).
@@ -135,16 +135,16 @@ CREATE INDEX IF NOT EXISTS idx_feeds_last_viewed ON feeds(last_viewed_at);
 CREATE INDEX IF NOT EXISTS idx_feed_sources_feed ON feed_sources(feed_id);
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run src/db/migrations.test.ts`
-Expected: PASS (all blocks, including the numeric-order check now seeing `0022` at index 21).
+Expected: PASS (all blocks, including the numeric-order check now seeing `0023` at index 22).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src/db/migrations/0022_custom_feeds.sql src/db/schema.sql src/db/migrations.test.ts
-git commit -m "feat(feeds): add feeds + feed_sources D1 schema (0022)"
+git add src/db/migrations/0023_custom_feeds.sql src/db/schema.sql src/db/migrations.test.ts
+git commit -m "feat(feeds): add feeds + feed_sources D1 schema (0023)"
 ```
 
 ---

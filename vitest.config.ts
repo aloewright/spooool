@@ -1,8 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import path from 'path';
 import { fileURLToPath } from 'url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Vitest's default `include` glob is too broad — it would pick up
 // tests/e2e/*.spec.ts and try to run Playwright tests inside the unit
@@ -27,9 +24,8 @@ export default defineConfig({
     // cloudflare:workers is a Cloudflare-runtime-only module; stub it out so
     // unit tests that transitively import @cloudflare/containers can still run.
     alias: {
-      'cloudflare:workers': path.resolve(
-        __dirname,
-        'src/__mocks__/cloudflare-workers.ts',
+      'cloudflare:workers': fileURLToPath(
+        new URL('./src/__mocks__/cloudflare-workers.ts', import.meta.url),
       ),
     },
   },

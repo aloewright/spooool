@@ -305,6 +305,57 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   });
 });
 
+// HLS proxy for the R2+FFmpeg fallback path (ALO-136). The encoder stores
+// playlists and segments under hls/{videoId}/ in R2. Relative URLs inside
+// the playlists resolve correctly through this proxy because the browser
+// resolves them against the response URL (e.g. master.m3u8 → 1080p.m3u8
+// → /api/videos/:id/hls/1080p.m3u8, then 1080p_seg000.ts resolves too).
+videoRoutes.get('/api/videos/:id/hls/*', async (c) => {
+  const id = c.req.param('id');
+  const rest = c.req.path.slice(`/api/videos/${id}/hls/`.length);
+
+  // HLS players fire one request per segment; hitting D1 on every one would
+  // exhaust the database under load. The auth row is tiny and changes rarely,
+  // so cache it in KV for 60s (matches the playlist's max-age=60 freshness).
+  type HlsAuthRow = {
+    status: string;
+    stream_video_id: string | null;
+    hidden_at: string | null;
+    dmca_status: string | null;
+    user_id: string;
+  };
+  const authKey = `hls-auth:${id}`;
+  let video = await c.env.CACHE.get<HlsAuthRow>(authKey, 'json');
+  if (!video) {
+    video = await c.env.DB.prepare(
+      `SELECT status, stream_video_id, hidden_at, dmca_status, user_id
+       FROM videos WHERE id = ? AND deleted_at IS NULL`,
+    ).bind(id).first<HlsAuthRow>();
+    if (video) {
+      await c.env.CACHE.put(authKey, JSON.stringify(video), { expirationTtl: 60 });
+    }
+  }
+
+  if (!video) return c.json({ error: 'Video not found' }, 404);
+  if (video.dmca_status === 'disabled') return c.json({ error: 'Unavailable for legal reasons', dmca: true }, 451);
+  const user = c.get('user');
+  if (video.hidden_at && video.user_id !== user?.id) return c.json({ error: 'Video not found' }, 404);
+  if (video.status !== 'ready' || video.stream_video_id) return c.json({ error: 'HLS not available' }, 404);
+
+  const r2Key = `hls/${id}/${rest}`;
+  const object = await c.env.VIDEOS.get(r2Key);
+  if (!object) return c.json({ error: 'Segment not found' }, 404);
+
+  const isPlaylist = rest.endsWith('.m3u8');
+  const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/MP2T';
+  return new Response(object.body, {
+    headers: {
+      'Content-Type': contentType,
+      'Cache-Control': isPlaylist ? 'public, max-age=60' : 'public, max-age=31536000, immutable',
+    },
+  });
+});
+
 type VideoRoutesContext = Context<{
   Bindings: VideoRoutesEnv;
   Variables: VideoRoutesVariables;

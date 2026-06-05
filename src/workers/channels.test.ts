@@ -20,6 +20,7 @@ interface ChannelRow {
   bannerUrl: string | null;
   subscriberCount: number;
   videoCount: number;
+  totalViewCount: number;
 }
 
 interface VideoRow {
@@ -97,6 +98,7 @@ describe('GET /api/channels/:username', () => {
           bannerUrl: null,
           subscriberCount: 3,
           videoCount: 5,
+          totalViewCount: 42,
         },
       }),
     );
@@ -121,6 +123,7 @@ describe('GET /api/channels/:username', () => {
           // D1 returns counts as strings in some drivers; coerce should handle both.
           subscriberCount: '12' as unknown as number,
           videoCount: '4' as unknown as number,
+          totalViewCount: '99' as unknown as number,
         },
       }),
     );
@@ -128,6 +131,7 @@ describe('GET /api/channels/:username', () => {
     const body = (await res.json()) as Record<string, unknown>;
     expect(body.subscriberCount).toBe(12);
     expect(body.videoCount).toBe(4);
+    expect(body.totalViewCount).toBe(99);
     expect(body).not.toHaveProperty('email');
   });
 });

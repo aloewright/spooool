@@ -25,6 +25,7 @@ import {
   saveStoredPosition,
   shouldResumeAt,
 } from '../lib/watch-position';
+import { formatCount } from '../lib/format';
 
 // Persist tick frequency. Pause/visibility/pagehide also force a save.
 const POSITION_SAVE_INTERVAL_MS = 5000;
@@ -597,7 +598,7 @@ export function Watch(): JSX.Element {
       <div className="stack-sm">
         <h1 className="ds-h2">{video.title}</h1>
         <div className="row">
-          <span className="badge">{video.view_count} views</span>
+          <span className="badge">{formatCount(video.view_count)} views</span>
           <span className="badge">{video.channel_name ?? 'Unknown channel'}</span>
         </div>
       </div>
@@ -748,7 +749,7 @@ export function Watch(): JSX.Element {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 600 }}>{v.title}</div>
                     <div className="ds-meta" style={{ marginTop: 2 }}>
-                      {v.channel_name ?? 'Unknown channel'} · {v.view_count} views
+                      {v.channel_name ?? 'Unknown channel'} · {formatCount(v.view_count)} views
                     </div>
                   </div>
                 </Link>

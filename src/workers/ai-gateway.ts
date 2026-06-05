@@ -57,7 +57,7 @@ export interface AiGatewayEnv {
 // Default model ids — concrete @cf/* ids per CLAUDE.md "Inside a Worker" constraint.
 // Dynamic route slugs (dynamic/text_gen etc.) cannot be used here.
 export const DEFAULT_CHAT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
-export const DEFAULT_IMAGE_MODEL = '@cf/stabilityai/stable-diffusion-xl-base-1.0';
+export const DEFAULT_IMAGE_MODEL = '@cf/black-forest-labs/flux-1-schnell';
 export const DEFAULT_TTS_MODEL = '@cf/deepgram/aura-2-en';
 export const DEFAULT_STT_MODEL = '@cf/openai/whisper-large-v3-turbo';
 export const DEFAULT_SUMMARIZE_MODEL = '@cf/facebook/bart-large-cnn';
@@ -220,7 +220,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
         yield { type: 'RUN_ERROR', runId, model, timestamp, message: message || 'Unknown error' } as StreamChunk;
         return;
       }
-      const text = await narrowChatText(raw);
+      const text = narrowChatText(raw);
       // Mirror WorkersAiTextAdapter's non-streaming branch event sequence.
       yield { type: 'RUN_STARTED', runId, model, timestamp } as StreamChunk;
       yield { type: 'TEXT_MESSAGE_START', messageId, model, timestamp, role: 'assistant' } as StreamChunk;
@@ -237,7 +237,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
         { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages), max_tokens: 800 },
         { gateway: { id: GATEWAY_ID } },
       );
-      const rawText = await narrowChatText(raw);
+      const rawText = narrowChatText(raw);
       let data: unknown = rawText;
       try {
         data = JSON.parse(rawText);

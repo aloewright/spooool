@@ -24,6 +24,11 @@ const passwordUpdateSchema = z.object({
   newPassword: z.string().min(8).max(200),
 });
 
+const notificationPrefsSchema = z.object({
+  notifyEmailNewUpload: z.boolean(),
+  notifyEmailComments: z.boolean(),
+});
+
 export const accountRoutes = new Hono<{
   Bindings: AccountEnv;
   Variables: AccountVariables;
@@ -35,7 +40,8 @@ accountRoutes.get('/api/account', async (c) => {
 
   const [row, storage] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
+      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for,
+              notify_email_new_upload, notify_email_comments
        FROM user WHERE id = ?`,
     )
       .bind(user.id)
@@ -45,6 +51,8 @@ accountRoutes.get('/api/account', async (c) => {
         name: string;
         deletion_requested_at: number | null;
         deletion_scheduled_for: number | null;
+        notify_email_new_upload: number;
+        notify_email_comments: number;
       }>(),
     // ALO-139: surface the user's quota + current usage so the account
     // settings page (and any future creator dashboard) can render a
@@ -59,6 +67,8 @@ accountRoutes.get('/api/account', async (c) => {
     name: row.name,
     deletionRequestedAt: row.deletion_requested_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    notifyEmailNewUpload: row.notify_email_new_upload !== 0,
+    notifyEmailComments: row.notify_email_comments !== 0,
     storage,
   });
 });
@@ -111,6 +121,35 @@ accountRoutes.put('/api/account/password', async (c) => {
   return c.json({ ok: true });
 });
 
+accountRoutes.put('/api/account/notifications', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const json = await c.req.json().catch(() => null);
+  const parsed = notificationPrefsSchema.safeParse(json);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid preferences', details: parsed.error.flatten() }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE user
+     SET notify_email_new_upload = ?, notify_email_comments = ?, updatedAt = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      parsed.data.notifyEmailNewUpload ? 1 : 0,
+      parsed.data.notifyEmailComments ? 1 : 0,
+      Date.now(),
+      user.id,
+    )
+    .run();
+
+  return c.json({
+    notifyEmailNewUpload: parsed.data.notifyEmailNewUpload,
+    notifyEmailComments: parsed.data.notifyEmailComments,
+  });
+});
+
 accountRoutes.post('/api/account/delete', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -140,6 +179,32 @@ accountRoutes.post('/api/account/delete', async (c) => {
     deletionRequestedAt: now,
     deletionScheduledFor: scheduledFor,
     graceDays: DELETION_GRACE_DAYS,
+  });
+});
+
+// GET /api/account/earnings — returns the creator's payout summary for the
+// current calendar year.  Numbers are null until the Polar payout webhook
+// integration lands (ALO-partner-tax gap): Polar is MoR for sales-tax/VAT but
+// does not yet issue 1099-K / 1099-MISC for US creator partners.  The
+// `taxDocStatus` field drives the gap banner in AccountSettings.
+accountRoutes.get('/api/account/earnings', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  // ALO-TODO: replace with real Polar payout webhook aggregation once the
+  // partner-payout integration is live.  Until then we return the correct
+  // shape with null values so the UI can render the gap banner.
+  const year = new Date().getUTCFullYear();
+  return c.json({
+    year,
+    currency: 'USD',
+    // Gross earnings before Spooool's 10% platform fee and Polar processing fees.
+    grossEarningsUsd: null as number | null,
+    // Net creator payout — what Polar actually transfers to the creator's bank.
+    netPayoutsUsd: null as number | null,
+    // 'polar-pending' = Polar has not yet issued 1099 forms for creator partners.
+    // Update to 'polar-issues' once Polar confirms 1099-K / 1099-MISC delivery.
+    taxDocStatus: 'polar-pending' as 'polar-pending' | 'polar-issues',
   });
 });
 

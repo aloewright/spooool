@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
+import { SocialAuthButtons } from '../components/SocialAuthButtons';
 
 export function Login(): JSX.Element {
   const location = useLocation();
@@ -51,6 +52,8 @@ export function Login(): JSX.Element {
         <span className="ds-label">Welcome back</span>
         <h1 className="ds-h2">Sign in</h1>
       </div>
+
+      <SocialAuthButtons callbackURL={next} onError={setError} />
 
       <form onSubmit={(event) => void onSubmit(event)} className="card stack">
         <div className="field">

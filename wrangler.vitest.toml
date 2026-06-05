@@ -80,8 +80,9 @@ EMAIL_FROM_NAME = "Spooool"
 AI_GATEWAY_MODE = "run-gateway"
 CF_STREAM_WEBHOOK_SECRET = "vitest-webhook-secret"
 
-[ai]
-binding = "AI"
+# No [ai] binding here on purpose: AI bindings have no local implementation, so
+# the vitest-pool-workers harness would open a remote proxy session and require
+# wrangler auth (fails in CI). The integration tests don't exercise AI routes.
 
 [assets]
 directory = "./dist"

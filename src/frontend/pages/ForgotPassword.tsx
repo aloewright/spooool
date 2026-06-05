@@ -13,7 +13,7 @@ export function ForgotPassword(): JSX.Element {
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
 
-    if (!captchaToken) {
+    if (import.meta.env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
       setError('Please complete the captcha');
       return;
     }

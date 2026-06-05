@@ -181,7 +181,7 @@ inviteRoutes.post('/api/invite/redeem', async (c) => {
   const now = Date.now();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `UPDATE invite_codes SET used_count = used_count + 1 WHERE code = ? AND used_count < max_uses`,
+      `UPDATE invite_codes SET used_count = used_count + 1 WHERE code = ?`
     ).bind(code),
     c.env.DB.prepare(
       `UPDATE user SET invite_code = ?, beta_access = 1, updatedAt = ? WHERE id = ?`,

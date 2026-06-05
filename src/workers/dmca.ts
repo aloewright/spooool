@@ -5,6 +5,7 @@
 // tracked in follow-up issues.
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { type EmailEnv, sendDmcaUploaderNotifyEmail } from './email';
 
 // Counter-notice waiting period per 17 U.S.C. § 512(g)(2)(C). We use 14
 // business days converted to a flat 14 calendar days for cron simplicity;
@@ -14,7 +15,7 @@ export const COUNTER_NOTICE_WAIT_MS = COUNTER_NOTICE_WAIT_DAYS * 24 * 60 * 60 * 
 
 export const DMCA_NOTICE_EMAIL = 'dmca@spooool.com';
 
-export interface DmcaEnv {
+export interface DmcaEnv extends EmailEnv {
   DB: D1Database;
   CACHE: KVNamespace;
 }
@@ -190,10 +191,14 @@ dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
     return c.json({ error: 'Invalid decision', details: parsed.error.flatten() }, 400);
   }
   const claim = await c.env.DB.prepare(
-    'SELECT id, video_id, status FROM dmca_claims WHERE id = ?',
+    `SELECT c.id, c.video_id, c.status, u.email AS uploader_email
+     FROM dmca_claims c
+     JOIN videos v ON v.id = c.video_id
+     JOIN user u ON u.id = v.user_id
+     WHERE c.id = ?`,
   )
     .bind(claimId)
-    .first<{ id: string; video_id: string; status: string }>();
+    .first<{ id: string; video_id: string; status: string; uploader_email: string }>();
   if (!claim) return c.json({ error: 'Claim not found' }, 404);
 
   const now = Date.now();
@@ -210,13 +215,14 @@ dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
       .run();
     await c.env.CACHE.delete(`video:v1:${claim.video_id}`);
 
-    // LEGAL-REVIEW: replace placeholder uploader-notification email body
-    // with counsel-approved text before launch.
-    console.log('[dmca-uploader-notify]', {
+    // LEGAL-REVIEW: email copy is a placeholder (ALO-170) — counsel must
+    // approve before launch. Fail-open: a flaky EMAIL binding must not block
+    // the admin response.
+    await sendDmcaUploaderNotifyEmail(c.env, {
+      to: claim.uploader_email,
       claimId,
       videoId: claim.video_id,
-      template: 'dmca-uploader-notify',
-      placeholder: true,
+      counterUrl: `https://spooool.com/legal/dmca/counter?claim=${encodeURIComponent(claimId)}`,
     });
   } else {
     await c.env.DB.prepare(

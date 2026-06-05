@@ -95,9 +95,10 @@ function fakeDB(store: FakeStore): D1Database {
             uploader_user_id: video.user_id,
           } as T;
         }
-        if (trimmed.startsWith('SELECT id, video_id, status FROM dmca_claims')) {
+        if (trimmed.startsWith('SELECT c.id, c.video_id, c.status, u.email AS uploader_email')) {
           const c = store.claims.get(bound[0] as string);
-          return (c ?? null) as T | null;
+          if (!c) return null;
+          return { ...c, uploader_email: 'uploader@example.com' } as unknown as T;
         }
         return null;
       },

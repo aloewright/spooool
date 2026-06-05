@@ -56,9 +56,13 @@
     "@sentry/react": "^10.50.0",
     "@tanstack/ai": "^0.26.1",
     "@tanstack/ai-react": "^0.15.1",
+    "@types/whatwg-mimetype": "^5.0.0",
+    "@types/ws": "^8.18.1",
     "better-auth": "^1.6.9",
+    "buffer-image-size": "^0.6.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "entities": "^7.0.1",
     "hono": "^4.12.18",
     "jose": "^6.2.2",
     "lottie-react": "^2.4.1",
@@ -72,6 +76,7 @@
     "stripe": "^14.7.0",
     "tailwind-merge": "^1.14.0",
     "web-vitals": "^5.2.0",
+    "whatwg-mimetype": "^5.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

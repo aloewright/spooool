@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 // ALO-283: keep Comments (459 LoC) + ReportButton + VideoTags out of the
@@ -80,6 +80,8 @@ export function Watch(): JSX.Element {
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [tipOpen, setTipOpen] = useState(false);
+  const [tipSuccess, setTipSuccess] = useState(() => searchParams.get('tip') === 'success');
   // ALO-213: surface stored resume position so the viewer can override it.
   // null = nothing to resume; number = seconds we'd resume at.
   const [resumeOffer, setResumeOffer] = useState<number | null>(null);
@@ -641,6 +643,13 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
+        <button
+          type="button"
+          className="btn btn--ghost"
+          onClick={() => setTipOpen(true)}
+        >
+          Tip
+        </button>
         {id ? (
           <Suspense fallback={null}>
             <ReportButton targetType="video" targetId={id} />
@@ -685,6 +694,31 @@ export function Watch(): JSX.Element {
       </div>
       {likeError ? <p className="status-error">{likeError}</p> : null}
       {subError ? <p className="status-error">{subError}</p> : null}
+      {tipSuccess && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="row"
+          style={{
+            gap: 'var(--space-2)',
+            padding: 'var(--space-2) var(--space-3)',
+            border: '1px solid color-mix(in oklch, var(--accent), transparent 40%)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'color-mix(in oklch, var(--accent), transparent 92%)',
+          }}
+        >
+          <span style={{ flex: 1 }}>Tip sent — thank you!</span>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => setTipSuccess(false)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+      {tipOpen && id && (
+        <TipModal
+          videoId={id}
+          onClose={() => setTipOpen(false)}
+        />
+      )}
       <p className="ds-meta">
         Shortcuts: space/k play · j/l ±10s · ←/→ ±5s · 0–9 jump · f fullscreen · m mute
       </p>
@@ -760,6 +794,150 @@ export function Watch(): JSX.Element {
       ) : null}
       {id ? <CommentsSection videoId={id} /> : null}
     </main>
+  );
+}
+
+const TIP_PRESETS = [
+  { label: '$1', cents: 100 },
+  { label: '$2', cents: 200 },
+  { label: '$5', cents: 500 },
+  { label: '$10', cents: 1000 },
+  { label: '$20', cents: 2000 },
+];
+
+function TipModal({ videoId, onClose }: { videoId: string; onClose: () => void }): JSX.Element {
+  const [selectedCents, setSelectedCents] = useState<number | null>(500);
+  const [customDollars, setCustomDollars] = useState('');
+  const [useCustom, setUseCustom] = useState(false);
+  const [message, setMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const amountCents = useCustom
+    ? Math.round(parseFloat(customDollars || '0') * 100)
+    : (selectedCents ?? 0);
+
+  async function onSubmit(e: FormEvent): Promise<void> {
+    e.preventDefault();
+    if (isNaN(amountCents) || amountCents < 100) {
+      setError('Minimum tip is $1.');
+      return;
+    }
+    if (amountCents > 100000) {
+      setError('Maximum tip is $1,000.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/videos/${encodeURIComponent(videoId)}/tip/checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountCents, message: message.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to start checkout');
+      }
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Send a tip"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 100,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0,0,0,0.6)',
+        padding: 'var(--space-4)',
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form
+        onSubmit={(e) => void onSubmit(e)}
+        className="card stack"
+        style={{ minWidth: 300, maxWidth: 400, width: '100%' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="ds-h3" style={{ margin: 0 }}>Send a tip</h2>
+          <button type="button" className="btn btn--ghost btn--sm" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+
+        <div className="stack-sm">
+          <span className="ds-label">Amount</span>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--space-1)' }}>
+            {TIP_PRESETS.map(({ label, cents }) => (
+              <button
+                key={cents}
+                type="button"
+                className={!useCustom && selectedCents === cents ? 'btn btn--sm' : 'btn btn--secondary btn--sm'}
+                onClick={() => { setUseCustom(false); setSelectedCents(cents); }}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className={useCustom ? 'btn btn--sm' : 'btn btn--secondary btn--sm'}
+              onClick={() => setUseCustom(true)}
+            >
+              Custom
+            </button>
+          </div>
+          {useCustom && (
+            <div className="field">
+              <input
+                className="input"
+                type="number"
+                min="1"
+                max="1000"
+                step="0.01"
+                placeholder="Amount in USD"
+                value={customDollars}
+                onChange={(e) => setCustomDollars(e.target.value)}
+                autoFocus
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor="tip-message">
+            Message <span className="ds-meta">(optional)</span>
+          </label>
+          <textarea
+            id="tip-message"
+            className="input"
+            rows={3}
+            maxLength={500}
+            placeholder="Say something nice…"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+        </div>
+
+        {error ? <p className="status-error">{error}</p> : null}
+
+        <button type="submit" className="btn" disabled={loading || isNaN(amountCents) || amountCents < 100 || amountCents > 100000}>
+          {loading ? 'Redirecting…' : 'Tip ' + (!isNaN(amountCents) && amountCents >= 100 ? '$' + (amountCents / 100).toFixed(2) : '')}
+        </button>
+        <p className="ds-meta" style={{ textAlign: 'center' }}>
+          Processed securely by Stripe. No account required.
+        </p>
+      </form>
+    </div>
   );
 }
 

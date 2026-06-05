@@ -4,17 +4,17 @@ import { ImagePanel } from './ImagePanel';
 
 export function StudioRoot({ videoId }: { videoId?: string } = {}): JSX.Element {
   return (
-    <div className="stack-lg">
-      <section className="stack-sm">
-        <h2 className="ds-h3">Animated video</h2>
+    <div className="stack stack-xl">
+      <section className="stack stack-sm">
+        <h2 className="ds-h3" style={{ margin: 0 }}>Animated video</h2>
         <AnimationPanel />
       </section>
-      <section className="stack-sm">
-        <h2 className="ds-h3">Chat</h2>
+      <section className="stack stack-sm">
+        <h2 className="ds-h3" style={{ margin: 0 }}>Chat</h2>
         <AIStudio />
       </section>
-      <section className="stack-sm">
-        <h2 className="ds-h3">Image generation</h2>
+      <section className="stack stack-sm">
+        <h2 className="ds-h3" style={{ margin: 0 }}>Image generation</h2>
         <ImagePanel videoId={videoId} />
       </section>
     </div>

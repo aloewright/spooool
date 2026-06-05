@@ -925,8 +925,8 @@ function TipModal({ videoId, onClose }: { videoId: string; onClose: () => void }
 
         {error ? <p className="status-error">{error}</p> : null}
 
-        <button type="submit" className="btn" disabled={loading || amountCents < 100}>
-          {loading ? 'Redirecting…' : `Tip ${amountCents >= 100 ? `$${(amountCents / 100).toFixed(2)}` : ''}`}
+        <button type="submit" className="btn" disabled={loading || isNaN(amountCents) || amountCents < 100 || amountCents > 100000}>
+          {loading ? 'Redirecting…' : 'Tip ' + (!isNaN(amountCents) && amountCents >= 100 ? '$' + (amountCents / 100).toFixed(2) : '')}
         </button>
         <p className="ds-meta" style={{ textAlign: 'center' }}>
           Processed securely by Stripe. No account required.

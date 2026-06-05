@@ -166,7 +166,6 @@ new_sqlite_classes = ["RenderContainer"]
 [[migrations]]
 tag = "do_v4"
 new_sqlite_classes = ["ComposerAgent"]
-
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
 # The */5 cron runs the render-job timeout sweep — marks any render_job
@@ -174,6 +173,15 @@ new_sqlite_classes = ["ComposerAgent"]
 [triggers]
 crons = ["0 2 * * *", "*/5 * * * *"]
 
+[env.staging]
+vars = { ALLOWED_ORIGINS = "" }
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "spooool-staging"
+database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
+migrations_dir = "src/db/migrations"
+
+[vars]
 # YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:
 #   wrangler secret put YOUTUBE_API_KEY            (prod)
 #   wrangler secret put YOUTUBE_API_KEY --env staging

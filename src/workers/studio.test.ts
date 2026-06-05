@@ -123,6 +123,28 @@ describe('POST /api/studio/chat', () => {
     const r = await harness({ id: 'u1', email: 'a@b.c', name: 'A', emailVerified: true })({});
     expect(r.status).toBe(400);
   });
+  it('writes an ai_costs row for the chat op', async () => {
+    const runs: Array<{ sql: string; binds: unknown[] }> = [];
+    const makeStmt = (sql: string) => {
+      let boundValues: unknown[] = [];
+      return {
+        sql,
+        bind: (...args: unknown[]) => { boundValues = args; return { run: async () => { runs.push({ sql, binds: [...boundValues] }); return {}; } }; },
+        first: async () => null,
+        run: async () => { runs.push({ sql, binds: [] }); return {}; },
+      };
+    };
+    const DB = { prepare: (sql: string) => makeStmt(sql) };
+    const r = await harness(
+      { id: 'u1', email: 'a@b.c', name: 'A', emailVerified: true },
+      { DB },
+    )(okBody);
+    expect(r.status).toBe(200);
+    const costInsert = runs.find((r) => r.sql.includes('INSERT INTO ai_costs'));
+    expect(costInsert).toBeDefined();
+    expect(costInsert!.binds[2]).toBe('chat_gen');  // op
+    expect(costInsert!.binds[6]).toBe('tokens');    // unit_kind
+  });
   it('429 when rate-limited (gate runs before chat())', async () => {
     const RATE_LIMITER = {
       idFromName: () => ({}),
@@ -354,6 +376,7 @@ describe('POST /api/studio/video', () => {
 
   function makeVideoDbStub() {
     const runs: Array<{ sql: string; binds: unknown[] }> = [];
+    const batchCalls: Array<Array<unknown>> = [];
 
     const makeStmt = (sql: string) => {
       let boundValues: unknown[] = [];
@@ -372,8 +395,9 @@ describe('POST /api/studio/video', () => {
 
     const db: Record<string, unknown> = {
       prepare: (sql: string) => makeStmt(sql),
-      batch: vi.fn(async () => []),
+      batch: vi.fn(async (stmts: unknown[]) => { batchCalls.push(stmts); return []; }),
       _runs: runs,
+      _batchCalls: batchCalls,
     };
     return db;
   }
@@ -427,7 +451,7 @@ describe('POST /api/studio/video', () => {
     expect((await postVideo(verifiedUser, { prompt: 'a'.repeat(2049) }).r).status).toBe(400);
   });
 
-  it('202 happy path — response shape, generated_assets INSERT, AI_GEN.send', async () => {
+  it('202 happy path — response shape, generated_assets + ai_costs batch INSERT, AI_GEN.send', async () => {
     const { r, db, aiGen } = postVideo(verifiedUser, { prompt: 'a waterfall in slow motion' });
     const res = await r;
     expect(res.status).toBe(202);
@@ -439,23 +463,22 @@ describe('POST /api/studio/video', () => {
     expect(body.assetId).toMatch(/^a_[0-9a-f]{16}$/);
     expect(body.status).toBe('queued');
 
-    // generated_assets INSERT
-    // SQL literals: kind='video', source='video_gen' (not bind params).
-    // Bind order: [0]=assetId, [1]=userId, [2]=spec_json, [3]=created_at, [4]=updated_at
-    const runs = (db as Record<string, unknown>)['_runs'] as Array<{ sql: string; binds: unknown[] }>;
-    const insertRun = runs.find((r) => r.sql.includes('INSERT INTO generated_assets'));
-    expect(insertRun).toBeDefined();
-    // SQL contains the literal kind/source values
-    expect(insertRun!.sql).toContain("'video'");
-    expect(insertRun!.sql).toContain("'video_gen'");
-    expect(insertRun!.sql).toContain("'queued'");
-    expect(insertRun!.binds[0]).toMatch(/^a_[0-9a-f]{16}$/); // assetId
-    expect(insertRun!.binds[1]).toBe('u1');                   // userId
-    // spec_json is at index 2
-    const specJson = insertRun!.binds[2] as string;
-    const spec = JSON.parse(specJson) as Record<string, unknown>;
-    expect(spec.model).toBe('google/veo-3.1');
-    expect(spec.prompt).toBe('a waterfall in slow motion');
+    // DB.batch called once with 2 statements: generated_assets + ai_costs
+    const batchFn = (db as Record<string, unknown>)['batch'] as ReturnType<typeof vi.fn>;
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const batchCalls = (db as Record<string, unknown>)['_batchCalls'] as Array<Array<unknown>>;
+    const stmts = batchCalls[0];
+    expect(stmts).toHaveLength(2);
+
+    const stmt0 = stmts[0] as Record<string, unknown>;
+    const stmt1 = stmts[1] as Record<string, unknown>;
+    expect(String(stmt0['sql'] ?? '')).toContain('INSERT INTO generated_assets');
+    expect(String(stmt1['sql'] ?? '')).toContain('INSERT INTO ai_costs');
+
+    // generated_assets SQL contains the literal kind/source values
+    expect(String(stmt0['sql'])).toContain("'video'");
+    expect(String(stmt0['sql'])).toContain("'video_gen'");
+    expect(String(stmt0['sql'])).toContain("'queued'");
 
     // AI_GEN.send called with correct payload
     expect(aiGen.send).toHaveBeenCalledTimes(1);

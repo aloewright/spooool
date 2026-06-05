@@ -3,9 +3,12 @@
 // then asynchronously: render via injected renderer, upload the MP4 to R2,
 // and POST back to the worker's /complete (or /fail on error) endpoint.
 //
-// In-memory queue (max 3 pending) keeps each container instance from being
-// hammered. Since the worker dispatches one instance per user, this also
-// bounds how many simultaneous renders one user can run.
+// Also serves POST /encode for the R2+FFmpeg HLS fallback path (ALO-136).
+// Encode jobs use a separate queue so they don't compete with render slots.
+//
+// In-memory queue (max 3 pending per type) keeps each container instance from
+// being hammered. Since the worker dispatches one instance per user (render)
+// or pool slot (encode), this bounds concurrent work per instance.
 
 import { Hono } from 'hono';
 import { RenderQueue } from './queue';
@@ -18,6 +21,7 @@ export interface ServerDeps {
     onProgress: (pct: number) => void;
   }) => Promise<{ outputPath: string }>;
   uploadToR2: (jobId: string, localPath: string) => Promise<string>;
+  encodeToHls: (opts: { videoId: string; r2Key: string }) => Promise<string>;
   callbackToWorker: (path: string, body: unknown) => Promise<void>;
   queueMax: number;
 }
@@ -65,6 +69,39 @@ export function createServer(deps: ServerDeps) {
     }
   }
 
+  // Separate encode queue so encode jobs don't consume render slots.
+  const encodeQueue = new RenderQueue({ maxPending: deps.queueMax });
+  let encodeActiveCount = 0;
+  let encodeDraining = false;
+
+  async function drainEncode(): Promise<void> {
+    if (encodeDraining) return;
+    encodeDraining = true;
+    try {
+      let job = encodeQueue.next();
+      while (job) {
+        const current = job;
+        encodeActiveCount++;
+        try {
+          const masterKey = await deps.encodeToHls({
+            videoId: current.jobId,   // jobId is videoId for encode jobs
+            r2Key: current.takeKeys?.[0] ?? '',
+          });
+          await deps.callbackToWorker(`/api/webhooks/encode/${current.jobId}/complete`, { masterKey });
+        } catch (err) {
+          await deps.callbackToWorker(`/api/webhooks/encode/${current.jobId}/fail`, {
+            error: err instanceof Error ? err.message : String(err),
+          }).catch(() => {});
+        } finally {
+          encodeActiveCount--;
+        }
+        job = encodeQueue.next();
+      }
+    } finally {
+      encodeDraining = false;
+    }
+  }
+
   const app = new Hono();
 
   app.get('/health', (c) => c.json({ ok: true }));
@@ -88,6 +125,23 @@ export function createServer(deps: ServerDeps) {
       compositionProps: body.compositionProps,
     });
     void drain();
+    return c.json({ ok: true });
+  });
+
+  app.post('/encode', async (c) => {
+    const body = await c.req.json().catch(() => null) as {
+      videoId?: string;
+      r2Key?: string;
+    } | null;
+    if (!body?.videoId || !body.r2Key) {
+      return c.json({ error: 'videoId and r2Key required' }, 400);
+    }
+    if (encodeQueue.size + encodeActiveCount >= deps.queueMax) {
+      return c.json({ error: 'encode queue full', retryAfterSeconds: 60 }, 429);
+    }
+    // Reuse RenderQueue; store r2Key in takeKeys[0] for simplicity.
+    encodeQueue.enqueue({ jobId: body.videoId, takeKeys: [body.r2Key] });
+    void drainEncode();
     return c.json({ ok: true });
   });
 
@@ -127,6 +181,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   };
 
   const { renderJob } = await import('./render.js');
+  const { encodeToHls } = await import('./encode.js');
 
   const app = createServer({
     renderJob: (input) => renderJob(input, {
@@ -151,6 +206,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }));
       return key;
     },
+    encodeToHls: (opts) => encodeToHls({ ...opts, s3, bucket }),
     callbackToWorker: async (callbackPath, body) => {
       const res = await fetch(`${workerBase}${callbackPath}`, {
         method: 'POST',

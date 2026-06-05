@@ -117,4 +117,11 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feeds');
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feed_sources');
   });
+
+  it('0024_polar_ledger adds polar_ledger with polar_user_id and no user FK', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0024_polar_ledger.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS polar_ledger/);
+    expect(sql).toMatch(/polar_user_id TEXT/);
+    expect(sql).not.toMatch(/FOREIGN KEY \(user_id\) REFERENCES user\(id\)/);
+  });
 });

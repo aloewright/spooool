@@ -10,6 +10,8 @@ export interface AccountEnv extends AuthEnv {
   DB: D1Database;
   CACHE: KVNamespace;
   VIDEOS: R2Bucket;
+  POLAR_CLIENT_ID?: string;
+  POLAR_CLIENT_SECRET?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string } | null;
@@ -24,6 +26,11 @@ const passwordUpdateSchema = z.object({
   newPassword: z.string().min(8).max(200),
 });
 
+const notificationPrefsSchema = z.object({
+  notifyEmailNewUpload: z.boolean(),
+  notifyEmailComments: z.boolean(),
+});
+
 export const accountRoutes = new Hono<{
   Bindings: AccountEnv;
   Variables: AccountVariables;
@@ -35,7 +42,8 @@ accountRoutes.get('/api/account', async (c) => {
 
   const [row, storage] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for
+      `SELECT id, email, name, deletion_requested_at, deletion_scheduled_for,
+              notify_email_new_upload, notify_email_comments
        FROM user WHERE id = ?`,
     )
       .bind(user.id)
@@ -45,6 +53,8 @@ accountRoutes.get('/api/account', async (c) => {
         name: string;
         deletion_requested_at: number | null;
         deletion_scheduled_for: number | null;
+        notify_email_new_upload: number;
+        notify_email_comments: number;
       }>(),
     // ALO-139: surface the user's quota + current usage so the account
     // settings page (and any future creator dashboard) can render a
@@ -59,6 +69,8 @@ accountRoutes.get('/api/account', async (c) => {
     name: row.name,
     deletionRequestedAt: row.deletion_requested_at,
     deletionScheduledFor: row.deletion_scheduled_for,
+    notifyEmailNewUpload: row.notify_email_new_upload !== 0,
+    notifyEmailComments: row.notify_email_comments !== 0,
     storage,
   });
 });
@@ -111,6 +123,35 @@ accountRoutes.put('/api/account/password', async (c) => {
   return c.json({ ok: true });
 });
 
+accountRoutes.put('/api/account/notifications', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const json = await c.req.json().catch(() => null);
+  const parsed = notificationPrefsSchema.safeParse(json);
+  if (!parsed.success) {
+    return c.json({ error: 'Invalid preferences', details: parsed.error.flatten() }, 400);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE user
+     SET notify_email_new_upload = ?, notify_email_comments = ?, updatedAt = ?
+     WHERE id = ?`,
+  )
+    .bind(
+      parsed.data.notifyEmailNewUpload ? 1 : 0,
+      parsed.data.notifyEmailComments ? 1 : 0,
+      Date.now(),
+      user.id,
+    )
+    .run();
+
+  return c.json({
+    notifyEmailNewUpload: parsed.data.notifyEmailNewUpload,
+    notifyEmailComments: parsed.data.notifyEmailComments,
+  });
+});
+
 accountRoutes.post('/api/account/delete', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
@@ -140,6 +181,207 @@ accountRoutes.post('/api/account/delete', async (c) => {
     deletionRequestedAt: now,
     deletionScheduledFor: scheduledFor,
     graceDays: DELETION_GRACE_DAYS,
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Polar partner onboarding — OAuth connect flow + payout status
+// ---------------------------------------------------------------------------
+
+const POLAR_API_BASE = 'https://api.polar.sh';
+const POLAR_OAUTH_BASE = 'https://polar.sh';
+
+type PolarAccountStatus = 'not_connected' | 'pending' | 'active' | 'under_review';
+
+interface PolarOrganization {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+interface PolarPayoutAccount {
+  id: string;
+  account_type: string;
+  status: 'created' | 'onboarding_started' | 'onboarding_succeeded' | 'active' | 'under_review' | 'suspended';
+}
+
+async function resolvePolarAccountStatus(accessToken: string): Promise<PolarAccountStatus> {
+  try {
+    const res = await fetch(`${POLAR_API_BASE}/v1/accounts`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return 'pending';
+    const data = await res.json() as { items?: PolarPayoutAccount[] };
+    const accounts = data.items ?? [];
+    if (accounts.some((a) => a.status === 'active')) return 'active';
+    if (accounts.some((a) => a.status === 'under_review')) return 'under_review';
+    return 'pending';
+  } catch {
+    return 'pending';
+  }
+}
+
+// Initiates the Polar OAuth connect flow for the logged-in creator. Stores a
+// short-lived state token in KV to guard against CSRF on the callback.
+accountRoutes.get('/api/account/polar/connect', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const clientId = c.env.POLAR_CLIENT_ID;
+  if (!clientId) return c.json({ error: 'Polar OAuth not configured' }, 503);
+
+  const stateToken = crypto.randomUUID();
+  await c.env.CACHE.put(`polar:oauth:${stateToken}`, user.id, { expirationTtl: 600 });
+
+  const origin = new URL(c.req.url).origin;
+  const redirectUri = `${origin}/api/account/polar/callback`;
+
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    scope: 'openid organizations:read accounts:read',
+    state: stateToken,
+  });
+
+  return c.redirect(`${POLAR_OAUTH_BASE}/oauth2/authorize?${params}`);
+});
+
+// Handles the OAuth callback: exchanges the code, fetches the creator's Polar
+// org ID and payout account status, and persists both on the user row.
+accountRoutes.get('/api/account/polar/callback', async (c) => {
+  const code = c.req.query('code');
+  const state = c.req.query('state');
+  const oauthError = c.req.query('error');
+
+  if (oauthError) {
+    console.warn('[polar-partner] oauth denied', { oauthError });
+    return c.redirect(`/settings?polar_error=${encodeURIComponent(oauthError)}`);
+  }
+  if (!code || !state) {
+    return c.redirect('/settings?polar_error=missing_params');
+  }
+
+  const userId = await c.env.CACHE.get(`polar:oauth:${state}`);
+  if (!userId) {
+    return c.redirect('/settings?polar_error=invalid_state');
+  }
+  await c.env.CACHE.delete(`polar:oauth:${state}`);
+
+  const clientId = c.env.POLAR_CLIENT_ID;
+  const clientSecret = c.env.POLAR_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    return c.redirect('/settings?polar_error=not_configured');
+  }
+
+  const origin = new URL(c.req.url).origin;
+  const redirectUri = `${origin}/api/account/polar/callback`;
+
+  // Exchange authorization code for access token.
+  const tokenRes = await fetch(`${POLAR_API_BASE}/v1/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+
+  if (!tokenRes.ok) {
+    console.error('[polar-partner] token exchange failed', { status: tokenRes.status });
+    return c.redirect('/settings?polar_error=token_exchange_failed');
+  }
+
+  const { access_token: accessToken } = await tokenRes.json() as { access_token: string };
+
+  // Fetch the creator's Polar organization (first org = the creator's own).
+  const orgsRes = await fetch(`${POLAR_API_BASE}/v1/organizations`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!orgsRes.ok) {
+    console.error('[polar-partner] orgs fetch failed', { status: orgsRes.status });
+    return c.redirect('/settings?polar_error=orgs_fetch_failed');
+  }
+
+  const orgsData = await orgsRes.json() as { items?: PolarOrganization[] };
+  const org = orgsData.items?.[0];
+  if (!org) {
+    return c.redirect('/settings?polar_error=no_organization');
+  }
+
+  const accountStatus = await resolvePolarAccountStatus(accessToken);
+
+  await c.env.DB.prepare(
+    `UPDATE user SET polar_organization_id = ?, polar_account_status = ?, updatedAt = ? WHERE id = ?`,
+  )
+    .bind(org.id, accountStatus, Date.now(), userId)
+    .run();
+
+  console.log('[polar-partner] connected', { userId, orgId: org.id, accountStatus });
+
+  return c.redirect('/settings?polar_connected=1');
+});
+
+// Returns the current Polar partner status for the logged-in creator.
+accountRoutes.get('/api/account/polar/status', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const row = await c.env.DB.prepare(
+    `SELECT polar_organization_id, polar_account_status FROM user WHERE id = ?`,
+  )
+    .bind(user.id)
+    .first<{ polar_organization_id: string | null; polar_account_status: string }>();
+
+  if (!row) return c.json({ error: 'User not found' }, 404);
+
+  const status = (row.polar_account_status ?? 'not_connected') as PolarAccountStatus;
+  return c.json({
+    organizationId: row.polar_organization_id,
+    status,
+    needsOnboarding: status !== 'active',
+  });
+});
+
+// GET /api/account/earnings — returns the creator's payout summary for the
+// current calendar year.  Numbers are null until the Polar payout webhook
+// integration lands (ALO-partner-tax gap): Polar is MoR for sales-tax/VAT but
+// does not yet issue 1099-K / 1099-MISC for US creator partners.  The
+// `taxDocStatus` field drives the gap banner in AccountSettings.
+accountRoutes.get('/api/account/earnings', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const row = await c.env.DB.prepare(
+    `SELECT polar_organization_id, polar_account_status FROM user WHERE id = ?`,
+  )
+    .bind(user.id)
+    .first<{ polar_organization_id: string | null; polar_account_status: string }>();
+
+  const polarStatus = (row?.polar_account_status ?? 'not_connected') as PolarAccountStatus;
+
+  // ALO-TODO: replace grossEarningsUsd / netPayoutsUsd with real Polar payout
+  // webhook aggregation once the partner-payout integration is live.
+  const year = new Date().getUTCFullYear();
+  return c.json({
+    year,
+    currency: 'USD',
+    // Gross earnings before Spooool's 10% platform fee and Polar processing fees.
+    grossEarningsUsd: null as number | null,
+    // Net creator payout — what Polar actually transfers to the creator's bank.
+    netPayoutsUsd: null as number | null,
+    // 'polar-pending' = Polar has not yet issued 1099 forms for creator partners.
+    // Update to 'polar-issues' once Polar confirms 1099-K / 1099-MISC delivery.
+    taxDocStatus: 'polar-pending' as 'polar-pending' | 'polar-issues',
+    polar: {
+      organizationId: row?.polar_organization_id ?? null,
+      accountStatus: polarStatus,
+      needsOnboarding: polarStatus !== 'active',
+    },
   });
 });
 

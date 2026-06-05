@@ -145,7 +145,7 @@ class_name = "RateLimiterDO"
 # Dockerfile / container source change before deploying.
 [[containers]]
 class_name = "RenderContainer"
-image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.4"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
 max_instances = 50
 instance_type = "standard-4"
 
@@ -154,6 +154,21 @@ instance_type = "standard-4"
 [[durable_objects.bindings]]
 name = "RENDER_CONTAINER"
 class_name = "RenderContainer"
+
+# R2+FFmpeg HLS encoding fallback (ALO-136). Same image as RenderContainer
+# (server.ts now handles both /render and /encode), separate DO class so
+# encode slots are independent of render slots. Pool of ≤20 instances
+# distributes encode jobs by videoId hash (see encoder-container.ts).
+# Bump image version whenever container/render source changes.
+[[containers]]
+class_name = "EncoderContainer"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
+max_instances = 20
+instance_type = "standard-4"
+
+[[durable_objects.bindings]]
+name = "ENCODE_CONTAINER"
+class_name = "EncoderContainer"
 
 # ComposerAgent DO — per-session state for guided prompt-to-video flow.
 [[durable_objects.bindings]]
@@ -175,6 +190,10 @@ new_sqlite_classes = ["RenderContainer"]
 [[migrations]]
 tag = "do_v4"
 new_sqlite_classes = ["ComposerAgent"]
+
+[[migrations]]
+tag = "do_v5"
+new_sqlite_classes = ["EncoderContainer"]
 
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
@@ -230,12 +249,20 @@ migrations_dir = "src/db/migrations"
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)
+# GOOGLE_CLIENT_ID        (OAuth — from console.cloud.google.com → Credentials)
+# GOOGLE_CLIENT_SECRET    (OAuth — paired with GOOGLE_CLIENT_ID)
+# GITHUB_CLIENT_ID        (OAuth — from github.com → Settings → Developer settings → OAuth Apps)
+# GITHUB_CLIENT_SECRET    (OAuth — paired with GITHUB_CLIENT_ID)
 # CLOUDFLARE_ACCOUNT_ID
 # CF_STREAM_API_TOKEN
 # CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)
 # STREAM_ENABLED          (set to "true" to route uploads through Cloudflare Stream)
 # POLAR_ACCESS_TOKEN      (Polar API token — sandbox or production)
 # POLAR_WEBHOOK_SECRET    (HMAC secret to verify Polar webhook signatures)
+# STRIPE_SECRET_KEY       (sk_live_... or sk_test_... for Stripe Connect tipping)
+# STRIPE_WEBHOOK_SECRET   (whsec_... from Stripe dashboard → Webhooks for /api/webhooks/stripe)
+# POLAR_CLIENT_ID         (Polar OAuth app client ID — for creator partner onboarding)
+# POLAR_CLIENT_SECRET     (Polar OAuth app client secret — paired with POLAR_CLIENT_ID)
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
 # RENDER_CALLBACK_SECRET    (recorder render — random 32+ byte hex, shared with the container service)
 # CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL)

@@ -126,10 +126,39 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   const videoId = c.req.param('id');
-  const body = await c.req.json().catch(() => null) as { masterKey?: string } | null;
+  const body = await c.req.json().catch(() => null) as {
+    masterKey?: string;
+    thumbnailKey?: string | null;
+  } | null;
   if (!body?.masterKey) return c.json({ error: 'masterKey required' }, 400);
-  await transitionVideoStatus(c.env.DB, videoId, 'ready');
-  console.log('[encode] complete', { videoId, masterKey: body.masterKey });
+
+  // Derive the public proxy URL for this video's HLS master playlist.
+  const playbackHlsUrl = `/api/videos/${videoId}/hls/master.m3u8`;
+
+  // Build the thumbnail URL from the R2 key so the watch page has something
+  // to show immediately after encoding. thumbnailKey may be null if extraction
+  // failed (non-fatal — the video is still watchable without a thumbnail).
+  // Key format: "thumbnails/{userId}/{videoId}/auto.jpg"
+  // Route format: /api/thumbnails/:userId/:videoId/:objectName
+  const thumbnailUrl = body.thumbnailKey
+    ? `/api/${body.thumbnailKey}`
+    : null;
+  const thumbnailCandidates = thumbnailUrl ? JSON.stringify([thumbnailUrl]) : null;
+
+  // Use the same predecessor set as transitionVideoStatus('ready'):
+  // canTransition(from, 'ready') is true only for 'encoding' and same-state 'ready'.
+  await c.env.DB.prepare(
+    `UPDATE videos
+       SET status = 'ready',
+           playback_hls_url = ?,
+           thumbnail_url = COALESCE(?, thumbnail_url),
+           thumbnail_candidates = COALESCE(?, thumbnail_candidates),
+           updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('encoding', 'ready')`,
+  )
+    .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
+    .run();
+
   return c.json({ ok: true });
 });
 

@@ -17,6 +17,7 @@ const VideoTags = lazy(() =>
 import { loadAutoAdvance, saveAutoAdvance } from '../lib/auto-advance';
 import { keyToPlayerAction } from '../lib/player-keys';
 import { StreamPlayer, type Player } from '../lib/stream-player';
+import { HlsPlayer } from '../lib/hls-player';
 import {
   clearStoredPosition,
   formatTimeParam,
@@ -541,6 +542,12 @@ export function Watch(): JSX.Element {
             startTime={startAt ?? undefined}
             onReady={handlePlayerReady}
             onTeardown={handlePlayerTeardown}
+          />
+        ) : !video.stream_video_id && video.status === 'ready' ? (
+          <HlsPlayer
+            src={`/api/videos/${video.id}/hls/master.m3u8`}
+            startTime={startAt ?? undefined}
+            onReady={handlePlayerReady}
           />
         ) : (
           <div

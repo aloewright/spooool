@@ -21,7 +21,7 @@ export interface ServerDeps {
     onProgress: (pct: number) => void;
   }) => Promise<{ outputPath: string }>;
   uploadToR2: (jobId: string, localPath: string) => Promise<string>;
-  encodeToHls: (opts: { videoId: string; r2Key: string }) => Promise<string>;
+  encodeToHls: (opts: { videoId: string; r2Key: string }) => Promise<{ masterKey: string; thumbnailKey: string | null }>;
   callbackToWorker: (path: string, body: unknown) => Promise<void>;
   queueMax: number;
 }
@@ -83,11 +83,14 @@ export function createServer(deps: ServerDeps) {
         const current = job;
         encodeActiveCount++;
         try {
-          const masterKey = await deps.encodeToHls({
+          const result = await deps.encodeToHls({
             videoId: current.jobId,   // jobId is videoId for encode jobs
             r2Key: current.takeKeys?.[0] ?? '',
           });
-          await deps.callbackToWorker(`/api/webhooks/encode/${current.jobId}/complete`, { masterKey });
+          await deps.callbackToWorker(`/api/webhooks/encode/${current.jobId}/complete`, {
+            masterKey: result.masterKey,
+            thumbnailKey: result.thumbnailKey,
+          });
         } catch (err) {
           await deps.callbackToWorker(`/api/webhooks/encode/${current.jobId}/fail`, {
             error: err instanceof Error ? err.message : String(err),

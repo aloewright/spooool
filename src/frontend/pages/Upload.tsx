@@ -1,22 +1,11 @@
 import { FormEvent, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
-const ALLOWED_EXTENSIONS = new Set([
-  'mp4',
-  'm4v',
-  'webm',
-  'mov',
-  'mkv',
-  'avi',
-  'mpeg',
-  'mpg',
-  'ogv',
-  '3gp',
-  'flv',
-  'ts',
-]);
+// Must match server-side ALLOWED_EXTENSIONS in upload-validation.ts.
+const ALLOWED_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'mov', 'mkv']);
 
 function isAcceptedVideo(file: File): boolean {
   if (file.type && file.type.startsWith('video/')) return true;
@@ -31,7 +20,7 @@ async function uploadInChunks(
   description: string,
   onProgress: (value: number) => void,
   captchaToken?: string | null,
-): Promise<Response> {
+): Promise<{ videoId: string | null }> {
   const result = await runChunkedUpload({
     file,
     endpoint: '/api/videos/upload',
@@ -40,7 +29,7 @@ async function uploadInChunks(
     headers: captchaToken ? { 'x-captcha-response': captchaToken } : undefined,
     onProgress: (fraction) => onProgress(Math.round(fraction * 100)),
   });
-  return result.lastResponse;
+  return { videoId: result.videoId };
 }
 
 // Maps the chunk-upload error message back to a low-cardinality bucket so
@@ -90,7 +79,7 @@ export function Upload(): JSX.Element {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  const [uploadedVideoId, setUploadedVideoId] = useState<string | null>(null);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
 
   const isEmailVerified = session?.user?.emailVerified !== false;
@@ -104,7 +93,7 @@ export function Upload(): JSX.Element {
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setError(null);
-    setStatus(null);
+    setUploadedVideoId(null);
 
     if (!file) {
       setError('Please choose a file');
@@ -141,8 +130,8 @@ export function Upload(): JSX.Element {
     });
 
     try {
-      await uploadInChunks(file, title, description, setProgress, captchaToken);
-      setStatus('Upload complete');
+      const result = await uploadInChunks(file, title, description, setProgress, captchaToken);
+      if (result.videoId) setUploadedVideoId(result.videoId);
       dispatch('upload_completed', { size_mb: sizeMb });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed';
@@ -230,7 +219,7 @@ export function Upload(): JSX.Element {
             onChange={(event) => setFile(event.target.files?.[0] ?? null)}
             required
           />
-          <span className="ds-meta">MP4, MOV, MKV, WebM, AVI, MPEG, M4V, 3GP, FLV, OGV, or TS. 30GB max.</span>
+          <span className="ds-meta">MP4, MOV, MKV, WebM, or M4V. 30GB max.</span>
         </div>
 
         <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
@@ -259,7 +248,12 @@ export function Upload(): JSX.Element {
       </form>
 
       {error ? <p className="status-error">{error}</p> : null}
-      {status ? <p className="status-ok">{status}</p> : null}
+      {uploadedVideoId ? (
+        <p className="status-ok">
+          Upload complete.{' '}
+          <Link to={`/watch/${uploadedVideoId}`}>Watch your video</Link>
+        </p>
+      ) : null}
     </main>
   );
 }

@@ -18,5 +18,13 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
     },
+    // cloudflare:workers is a Cloudflare-runtime-only module; stub it out so
+    // unit tests that transitively import @cloudflare/containers can still run.
+    alias: {
+      'cloudflare:workers': new URL(
+        './src/__mocks__/cloudflare-workers.ts',
+        import.meta.url,
+      ).pathname,
+    },
   },
 });

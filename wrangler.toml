@@ -79,6 +79,15 @@ id = "0b560dd1327445bd8b5eb6efca3e82e0"
 binding = "VIDEO_ENCODING"
 queue = "video-encoding"
 
+# Queue - AI Generative Video (ALO-647)
+# Consumer must be registered server-side (not declared here — wrangler errors on
+# re-declaration at deploy time). Register once with:
+#   npx wrangler queues consumer add ai-gen spooool
+# or via the Cloudflare dashboard, mirroring the video-encoding consumer setup.
+[[queues.producers]]
+binding = "AI_GEN"
+queue = "ai-gen"
+
 # Consumer is registered server-side; wrangler errors if re-declared on deploy.
 # To change batch size / DLQ, edit via the Cloudflare dashboard or `wrangler queues consumer`.
 
@@ -136,7 +145,7 @@ class_name = "RateLimiterDO"
 # Dockerfile / container source change before deploying.
 [[containers]]
 class_name = "RenderContainer"
-image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.4"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
 max_instances = 50
 instance_type = "standard-4"
 
@@ -145,6 +154,21 @@ instance_type = "standard-4"
 [[durable_objects.bindings]]
 name = "RENDER_CONTAINER"
 class_name = "RenderContainer"
+
+# R2+FFmpeg HLS encoding fallback (ALO-136). Same image as RenderContainer
+# (server.ts now handles both /render and /encode), separate DO class so
+# encode slots are independent of render slots. Pool of ≤20 instances
+# distributes encode jobs by videoId hash (see encoder-container.ts).
+# Bump image version whenever container/render source changes.
+[[containers]]
+class_name = "EncoderContainer"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
+max_instances = 20
+instance_type = "standard-4"
+
+[[durable_objects.bindings]]
+name = "ENCODE_CONTAINER"
+class_name = "EncoderContainer"
 
 # ComposerAgent DO — per-session state for guided prompt-to-video flow.
 [[durable_objects.bindings]]
@@ -166,6 +190,11 @@ new_sqlite_classes = ["RenderContainer"]
 [[migrations]]
 tag = "do_v4"
 new_sqlite_classes = ["ComposerAgent"]
+
+[[migrations]]
+tag = "do_v5"
+new_sqlite_classes = ["EncoderContainer"]
+
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
 # The */5 cron runs the render-job timeout sweep — marks any render_job
@@ -217,6 +246,10 @@ AI_GATEWAY_MODE = "run-gateway"
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)
+# GOOGLE_CLIENT_ID        (OAuth — from console.cloud.google.com → Credentials)
+# GOOGLE_CLIENT_SECRET    (OAuth — paired with GOOGLE_CLIENT_ID)
+# GITHUB_CLIENT_ID        (OAuth — from github.com → Settings → Developer settings → OAuth Apps)
+# GITHUB_CLIENT_SECRET    (OAuth — paired with GITHUB_CLIENT_ID)
 # CLOUDFLARE_ACCOUNT_ID
 # CF_STREAM_API_TOKEN
 # CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)

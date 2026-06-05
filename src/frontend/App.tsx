@@ -50,6 +50,11 @@ const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Stu
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
+const Payouts = lazy(() => import('./pages/Payouts').then((m) => ({ default: m.Payouts })));
+const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
+const AdminStatus = lazy(() =>
+  import('./pages/AdminStatus').then((m) => ({ default: m.AdminStatus })),
+);
 const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 
@@ -229,6 +234,9 @@ function HeaderNav(): JSX.Element {
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
       </Link>
+      <Link to="/payouts">
+        <button type="button" className="btn btn--ghost btn--sm">Payouts</button>
+      </Link>
       <Link to="/feeds">
         <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
       </Link>
@@ -236,6 +244,7 @@ function HeaderNav(): JSX.Element {
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
       </Link>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
+
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
@@ -650,6 +659,7 @@ export function SiteFooter(): JSX.Element {
       <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
+      <Link to="/status">Status</Link>
     </footer>
   );
 }
@@ -806,6 +816,23 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Onboarding />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/payouts"
+            element={
+              <RequireAuth>
+                <Payouts />
+              </RequireAuth>
+            }
+          />
+          <Route path="/status" element={<Status />} />
+          <Route
+            path="/admin/status"
+            element={
+              <RequireAuth>
+                <AdminStatus />
               </RequireAuth>
             }
           />

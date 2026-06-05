@@ -54,6 +54,7 @@ describe('SiteFooter', () => {
       '/legal/privacy',
       '/pricing',
       '/legal/dmca',
+      '/status',
     ]);
   });
 
@@ -65,7 +66,7 @@ describe('SiteFooter', () => {
           <SiteFooter />
         </MemoryRouter>,
       );
-      expect(footerLinkHrefs()).toHaveLength(4);
+      expect(footerLinkHrefs()).toHaveLength(5);
     },
   );
 });

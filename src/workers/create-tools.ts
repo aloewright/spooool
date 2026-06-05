@@ -4,15 +4,19 @@
 // providers directly" rule. Pure of side effects beyond the explicit
 // network / R2 calls so unit tests can mock fetch.
 
+import { chat, generateSpeech } from '@tanstack/ai';
+import { z } from 'zod';
 import type { StoryTemplate, VoiceProfile } from './create/templates/types';
 import { submitRenderJob as defaultSubmitRenderJob, type RenderEnv, type SubmitRenderJobInput } from './render';
+import { gatewayChat, gatewayTts, type AiGatewayEnv } from './ai-gateway';
 
 /**
  * Kept for backward-compat with downstream env intersections
  * (`CreateEnv`, `ComposerAgentEnv`, `CMAEnv` all extend it). The fields
  * are no longer consumed by `chatComplete` — text gen routes through
- * the Workers AI binding instead — but other code paths may still
- * reference these worker secrets, so we keep the type around.
+ * `gatewayChat` (either gateway-binding or run-gateway mode) — but other
+ * code paths may still reference these worker secrets, so we keep the
+ * type around.
  */
 export interface AIGatewayEnv {
   CF_ACCOUNT_ID: string;
@@ -29,77 +33,88 @@ export interface SceneSpec {
 
 const MAX_SCRIPT_CHARS = 1500;
 const MAX_SCENES = 20;
-const TEXT_GATEWAY_SLUG = 'x';
-// The fallback model on gateway x's dynamic/text_gen route. Using this
-// directly via env.AI.run({ gateway: { id: 'x' } }) per the CLAUDE.md
-// "Working pattern from a Worker today" — it's the only invocation
-// shape confirmed working end-to-end from inside a Worker. The
-// alternatives all fail:
-//   - env.AI.run("dynamic/text_gen", ...) → 404 (binding treats arg as
-//     literal Workers AI model id; doesn't resolve dynamic routes)
-//   - env.AI.gateway('x').run({ provider:'compat', endpoint:'chat/
-//     completions', query:{model:'dynamic/text_gen',...} }) → returns
-//     empty {} (compat proxy doesn't translate to underlying provider)
-//   - ai-gateway-provider + Vercel AI SDK generateText() → 400 anyOf
-//     at '/' not met (Universal endpoint validates body against each
-//     route node's schema directly with no compat translation)
-//   - fetch() to /compat/chat/completions from worker → 2019 per
-//     CLAUDE.md (Compatibility... rejected pre-route)
-const TEXT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
-interface ChatCompletionResponse {
-  // OpenAI-compat shape (when @cf/* models route through compat)
-  choices?: Array<{ message?: { content?: string } }>;
-  // Workers AI native shape (text-generation models)
-  response?: string;
-}
+/**
+ * Zod schema for the LLM-returned scene plan. Matches SceneSpec exactly so
+ * the inferred type is structurally compatible and no assertion is needed.
+ */
+const sceneSchema = z.object({
+  scenes: z.array(z.object({
+    type: z.enum(['title', 'beat', 'outro']),
+    durationFrames: z.number(),
+    text: z.string(),
+    subtitle: z.string().optional(),
+  })),
+});
 
+/**
+ * Shared text-gen helper. Routes through @tanstack/ai `chat()` via the
+ * `gatewayChat` adapter (run-gateway mode → env.AI.run('@cf/google/gemma-4-26b-a4b-it',
+ * { messages, max_tokens: 800 }, { gateway: { id: 'x' } }) per CLAUDE.md
+ * "Working pattern from a Worker today").
+ *
+ * No retries here — callers own their own retry / re-prompt logic:
+ * draftScript's loop retries up to 3×; planScenes relies on chat({outputSchema})
+ * which validates internally and throws on malformed output without retrying.
+ * One call = one env.AI.run invocation.
+ *
+ * Why we iterate the stream instead of using stream:false: when env.AI.run
+ * throws, runGatewayChat converts the error into a RUN_ERROR chunk rather than
+ * re-throwing. With stream:false, chat() would return '' (no TEXT_MESSAGE_CONTENT
+ * chunks). By iterating manually we can detect RUN_ERROR and re-throw so callers'
+ * retry loops work correctly.
+ *
+ * Why `env as unknown as AiGatewayEnv`: the real Worker `Ai` binding structurally
+ * satisfies BOTH `AIGatewayBinding` and ai-gateway.ts's `CloudflareAiGateway` shapes
+ * at runtime. The only mismatch is a tsc-level `Promise<unknown>` vs `Promise<Response>`
+ * divergence on the gateway `run` return type — `AIGatewayBinding.run` returns
+ * `Promise<unknown>` while `AiGatewayEnv`'s `CloudflareAiGateway.run` returns
+ * `Promise<Response>`. The cast bridges that divergence without editing either consumer.
+ * Note: in gateway-binding mode (the production default), `gatewayChat` DOES call
+ * `env.AI.gateway('x')` via `createWorkersAiChat`; the cast is safe because the real
+ * binding satisfies both shapes. See CLAUDE.md "Inside a Worker" for the full breakdown.
+ * TODO: remove cast when `CloudflareAiGateway.run` is widened to `Promise<unknown>`
+ * upstream without breaking createWorkersAi* factory calls in ai-gateway.ts.
+ */
 async function chatComplete(
   args: {
-    /** Reserved for future model swap; currently unused — we go straight
-     *  to the gemma-4-26b model below. */
     route: 'dynamic/text_gen';
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>;
     env: AIBindingEnv;
   },
-  retries: number,
 ): Promise<string> {
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const raw = await args.env.AI.run(
-        TEXT_MODEL,
-        { messages: args.messages, max_tokens: 800 },
-        { gateway: { id: TEXT_GATEWAY_SLUG } },
-      );
-      let body: ChatCompletionResponse | undefined;
-      if (raw && typeof raw === 'object' && 'json' in raw && typeof (raw as Response).json === 'function') {
-        body = await (raw as Response).json() as ChatCompletionResponse;
-      } else if (typeof raw === 'string') {
-        try { body = JSON.parse(raw) as ChatCompletionResponse; } catch { /* fall through */ }
-      } else {
-        body = raw as ChatCompletionResponse;
-      }
-      // Workers AI returns `{ response: "..." }` for chat-completions on
-      // @cf/google/gemma-*; OpenAI-compat would return choices[0].message.content.
-      const content = body?.response ?? body?.choices?.[0]?.message?.content;
-      if (typeof content === 'string' && content.length > 0) return content;
-      const shape = raw == null ? String(raw) : typeof raw === 'object'
-        ? `object keys=${Object.keys(raw as unknown as Record<string, unknown>).join(',')}`
-        : `${typeof raw}=${String(raw).slice(0, 200)}`;
-      const preview = (() => {
-        try { return JSON.stringify(raw)?.slice(0, 500); } catch { return '<unstringifiable>'; }
-      })();
-      console.warn('[create-tools] chatComplete: no content', { shape, preview });
-      lastErr = new Error('AI Gateway returned no message content');
-    } catch (err) {
-      lastErr = err instanceof Error ? err : new Error(String(err));
-      const msg = lastErr instanceof Error ? lastErr.message : '';
-      if (/\b4\d\d\b/.test(msg) || /invalid|bad request|not found/i.test(msg)) break;
+  const systemMessages = args.messages.filter((m) => m.role === 'system');
+  const conversationMessages = args.messages.filter(
+    (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system',
+  );
+  // Cast required: AIBindingEnv.AI.gateway returns AIGatewayBinding (run → Promise<unknown>)
+  // while AiGatewayEnv.AI.gateway returns CloudflareAiGateway (run → Promise<Response>).
+  // Safe at runtime: the real Ai binding satisfies both shapes; only the tsc return-type
+  // divergence on gateway().run requires the cast. See doc comment above for full context.
+  const stream = chat({
+    adapter: gatewayChat(args.env as unknown as AiGatewayEnv),
+    systemPrompts: systemMessages.map((m) => m.content),
+    messages: conversationMessages,
+  });
+  let text = '';
+  for await (const chunk of stream) {
+    if (chunk.type === 'RUN_ERROR') {
+      // RUN_ERROR carries the provider message differently per mode: run-gateway
+      // sets a flat `message`; the @cloudflare gateway-binding adapter nests it as
+      // `error.message` — and @tanstack/ai's strip-to-spec middleware may remove the
+      // nested `error` before this consumer sees it, in which case only the generic
+      // string is available. For full provider diagnostics, run in run-gateway mode.
+      const c = chunk as { message?: unknown; error?: { message?: unknown } };
+      const msg = (typeof c.message === 'string' && c.message)
+        || (typeof c.error?.message === 'string' && c.error.message)
+        || 'AI Gateway call failed';
+      throw new Error(msg);
     }
-    if (attempt < retries) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+    if (chunk.type === 'TEXT_MESSAGE_CONTENT' && 'delta' in chunk && typeof chunk.delta === 'string') {
+      text += chunk.delta;
+    }
   }
-  throw lastErr instanceof Error ? lastErr : new Error('AI Gateway call failed');
+  return text;
 }
 
 export async function draftScript(args: {
@@ -117,14 +132,24 @@ export async function draftScript(args: {
     },
     { role: 'user' as const, content: answersBlock || 'No answers provided; invent plausible details consistent with the template.' },
   ];
-  let content: string;
-  try {
-    content = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 2);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Script generation failed: ${msg}`);
+  // Retry loop: up to 3 total attempts (initial + 2 retries). chatComplete()
+  // calls chat() once per invocation — one env.AI.run per attempt.
+  const MAX_ATTEMPTS = 3;
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const content = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env });
+      return { script: content.slice(0, MAX_SCRIPT_CHARS) };
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      // Don't retry on hard client errors (4xx / invalid request).
+      if (/\b4\d\d\b/.test(msg) || /invalid|bad request|not found/i.test(msg)) break;
+    }
+    if (attempt < MAX_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
   }
-  return { script: content.slice(0, MAX_SCRIPT_CHARS) };
+  const msg = lastErr instanceof Error ? lastErr.message : String(lastErr);
+  throw new Error(`Script generation failed: ${msg}`);
 }
 
 export async function planScenes(args: {
@@ -132,46 +157,31 @@ export async function planScenes(args: {
   template: StoryTemplate;
   env: AIBindingEnv;
 }): Promise<{ scenes: SceneSpec[] }> {
-  const messages = [
-    {
-      role: 'system' as const,
-      content: `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`,
-    },
-    { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` },
-  ];
+  const systemPrompt = `${args.template.systemPromptFragment}\nReturn ONLY a JSON object of shape { "scenes": [{ "type": "title"|"beat"|"outro", "durationFrames": number, "text": string, "subtitle"?: string }] }. Use 30fps; the sum of durationFrames must be 1800-2700 (60-90 seconds). Do NOT include any commentary outside the JSON.`;
+  const userMessage = { role: 'user' as const, content: `Script:\n${args.script}\n\nTemplate scene plan hints:\n${JSON.stringify(args.template.scenePlan)}` };
 
-  const parseOrThrow = (raw: string): SceneSpec[] => {
-    const parsed = JSON.parse(raw) as { scenes?: unknown };
-    if (!parsed || !Array.isArray(parsed.scenes)) throw new Error('missing scenes array');
-    return parsed.scenes.slice(0, MAX_SCENES).map((s) => {
-      const obj = s as { type?: unknown; durationFrames?: unknown; text?: unknown; subtitle?: unknown };
-      if (obj.type !== 'title' && obj.type !== 'beat' && obj.type !== 'outro') throw new Error('bad scene type');
-      if (typeof obj.durationFrames !== 'number' || !Number.isFinite(obj.durationFrames)) throw new Error('bad durationFrames');
-      if (typeof obj.text !== 'string') throw new Error('bad text');
-      return {
-        type: obj.type,
-        durationFrames: Math.max(1, Math.floor(obj.durationFrames)),
-        text: obj.text,
-        subtitle: typeof obj.subtitle === 'string' ? obj.subtitle : undefined,
-      };
-    });
-  };
-
-  const tryOnce = async (): Promise<SceneSpec[]> => {
-    const raw = await chatComplete({ route: 'dynamic/text_gen', messages, env: args.env }, 0);
-    return parseOrThrow(raw);
-  };
-
+  // Use chat({ outputSchema }) to get structured output in one env.AI.run call.
+  // On malformed or schema-invalid output, @tanstack/ai throws internally —
+  // we catch and re-wrap with a stable "Scene plan invalid:" prefix.
+  // Cast mirrors chatComplete's cast: see doc comment on chatComplete above for
+  // the AIBindingEnv → AiGatewayEnv divergence explanation.
+  // TODO: remove cast when CloudflareAiGateway.run is widened to Promise<unknown>.
+  let parsed: z.infer<typeof sceneSchema>;
   try {
-    return { scenes: await tryOnce() };
-  } catch {
-    try {
-      return { scenes: await tryOnce() };
-    } catch (secondErr) {
-      const msg = secondErr instanceof Error ? secondErr.message : String(secondErr);
-      throw new Error(`Scene plan invalid: ${msg}`);
-    }
+    parsed = await chat({
+      adapter: gatewayChat(args.env as unknown as AiGatewayEnv),
+      systemPrompts: [systemPrompt],
+      messages: [userMessage],
+      outputSchema: sceneSchema,
+    });
+  } catch (err) {
+    throw new Error(`Scene plan invalid: ${err instanceof Error ? err.message : String(err)}`);
   }
+  const scenes = parsed.scenes.slice(0, MAX_SCENES).map((s) => ({
+    ...s,
+    durationFrames: Math.max(1, Math.floor(s.durationFrames)),
+  }));
+  return { scenes };
 }
 
 // Re-export VoiceProfile for downstream tools / tests.
@@ -201,10 +211,11 @@ export interface R2BindingEnv {
  */
 /**
  * Shape of `env.AI.gateway(slug).run({...})` — the Workers-AI-binding
- * call that invokes a Cloudflare AI Gateway dynamic route from inside a
- * Worker. We use this for draft_script + plan_scenes (text gen via the
- * `dynamic/text` route on the `spooool` gateway). Auth is handled by the
- * binding itself; no CF_AIG_TOKEN required.
+ * call that invokes a Cloudflare AI Gateway route from inside a Worker.
+ * Retained for backward-compat typing of `AIBindingEnv`; the gateway-binding
+ * transport is used by `chatComplete` in production (gateway-binding mode)
+ * via `gatewayChat` → `createWorkersAiChat({ binding: env.AI.gateway('x') })`.
+ * Auth is handled by the binding itself; no CF_AIG_TOKEN required.
  */
 interface AIGatewayBinding {
   run: (body: {
@@ -231,10 +242,6 @@ export interface AIBindingEnv {
 }
 
 const MAX_TTS_CHARS = 2000;
-const TTS_MODEL = '@cf/deepgram/aura-2-en';
-// Route observability for TTS calls through gateway 'x' so the dynamic
-// /text_gen + /audio_gen calls land in the same dashboard.
-const TTS_GATEWAY_ID = 'x';
 
 /**
  * Voice profile → Deepgram Aura speaker. Aura ships ~40 named voices; we
@@ -259,13 +266,22 @@ export async function synthesizeTts(args: {
 }): Promise<{ r2Key: string; durationMs: number }> {
   if (args.script.length > MAX_TTS_CHARS) throw new Error('script too long for TTS');
 
-  let raw: ArrayBuffer | Uint8Array | Response;
+  // Route through @tanstack/ai generateSpeech() + gatewayTts adapter.
+  // In run-gateway mode (tests + production fallback), gatewayTts selects
+  // runGatewayTts which calls env.AI.run('@cf/deepgram/aura-2-en', ...,
+  // { gateway: { id: 'x' } }) and base64-encodes the result into TTSResult.audio.
+  // Cast required: AIBindingEnv.AI diverges from AiGatewayEnv.AI on
+  // gateway().run return type (Promise<unknown> vs Promise<Response>).
+  // Safe at runtime — see chatComplete doc comment for the full explanation.
+  // TODO: remove cast when CloudflareAiGateway.run is widened to Promise<unknown>.
+  let result: { audio: string };
   try {
-    raw = await args.env.AI.run(
-      TTS_MODEL,
-      { text: args.script, speaker: auraSpeaker(args.voice.profile), encoding: 'mp3' },
-      { gateway: { id: TTS_GATEWAY_ID } },
-    );
+    result = await generateSpeech({
+      adapter: gatewayTts(args.env as unknown as AiGatewayEnv),
+      text: args.script,
+      voice: auraSpeaker(args.voice.profile),
+      format: 'mp3',
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (isContentPolicyMsg(msg)) {
@@ -275,19 +291,12 @@ export async function synthesizeTts(args: {
     throw new Error(`TTS synthesis failed: ${msg.slice(0, 200)}`);
   }
 
-  // Aura returns audio as a Uint8Array; future SDK revs may wrap in a
-  // Response — handle both.
-  let audioBytes: ArrayBuffer;
-  if (raw instanceof Response) {
-    audioBytes = await raw.arrayBuffer();
-  } else if (raw instanceof Uint8Array) {
-    audioBytes = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength) as ArrayBuffer;
-  } else {
-    audioBytes = raw;
-  }
-  if (!audioBytes || audioBytes.byteLength === 0) {
-    throw new Error('TTS synthesis returned empty audio');
-  }
+  // runGatewayTts returns base64-encoded audio in TTSResult.audio; decode it
+  // to raw bytes before writing to R2.
+  const bin = atob(result.audio);
+  const audioBytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) audioBytes[i] = bin.charCodeAt(i);
+  if (audioBytes.byteLength === 0) throw new Error('TTS synthesis returned empty audio');
 
   const r2Key = `recorder/tts/${args.jobId}.mp3`;
   let putErr: unknown = null;

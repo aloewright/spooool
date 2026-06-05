@@ -11,6 +11,7 @@ interface AccountInfo {
   deletionScheduledFor: number | null;
   notifyEmailNewUpload: boolean;
   notifyEmailComments: boolean;
+  storage: { used: number; quota: number; remaining: number };
 }
 
 interface EarningsSummary {
@@ -26,6 +27,48 @@ interface EarningsSummary {
   };
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function StorageBar({ used, quota }: { used: number; quota: number }): JSX.Element {
+  const pct = quota > 0 ? Math.min(100, (used / quota) * 100) : 0;
+  const warn = pct >= 90;
+  return (
+    <div className="stack-sm">
+      <div
+        role="progressbar"
+        aria-valuenow={Math.round(pct)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label="Storage used"
+        style={{
+          height: 6,
+          borderRadius: 3,
+          background: 'var(--color-border, #e0e0e0)',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${pct}%`,
+            background: warn ? 'var(--color-error, #d00)' : 'var(--color-primary, #555)',
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      <p className="ds-meta">
+        {formatBytes(used)} of {formatBytes(quota)} used
+        {warn && <strong> — storage nearly full</strong>}
+      </p>
+    </div>
+  );
+}
+
 export function AccountSettings(): JSX.Element {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
@@ -33,16 +76,26 @@ export function AccountSettings(): JSX.Element {
 
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
   const [emailDraft, setEmailDraft] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailInfo, setEmailInfo] = useState<string | null>(null);
+
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordInfo, setPasswordInfo] = useState<string | null>(null);
+
   const [notifyNewUpload, setNotifyNewUpload] = useState(true);
   const [notifyComments, setNotifyComments] = useState(true);
+  const [notifyError, setNotifyError] = useState<string | null>(null);
+  const [notifyInfo, setNotifyInfo] = useState<string | null>(null);
+
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [polarError, setPolarError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -67,7 +120,7 @@ export function AccountSettings(): JSX.Element {
         setEarnings(earningsData);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Unknown error');
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Unknown error');
       });
     return () => {
       cancelled = true;
@@ -106,8 +159,8 @@ export function AccountSettings(): JSX.Element {
 
   const updateEmail = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    setError(null);
-    setInfo(null);
+    setEmailError(null);
+    setEmailInfo(null);
     setBusy(true);
     try {
       const r = await fetch('/api/account/email', {
@@ -117,10 +170,10 @@ export function AccountSettings(): JSX.Element {
         body: JSON.stringify({ email: emailDraft }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setInfo('Email updated.');
+      setEmailInfo('Email updated.');
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setEmailError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setBusy(false);
     }
@@ -128,8 +181,8 @@ export function AccountSettings(): JSX.Element {
 
   const updatePassword = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    setError(null);
-    setInfo(null);
+    setPasswordError(null);
+    setPasswordInfo(null);
     setBusy(true);
     try {
       const r = await fetch('/api/account/password', {
@@ -139,11 +192,11 @@ export function AccountSettings(): JSX.Element {
         body: JSON.stringify({ currentPassword, newPassword }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setInfo('Password updated.');
+      setPasswordInfo('Password updated.');
       setCurrentPassword('');
       setNewPassword('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setPasswordError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setBusy(false);
     }
@@ -151,8 +204,8 @@ export function AccountSettings(): JSX.Element {
 
   const updateNotifications = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
-    setError(null);
-    setInfo(null);
+    setNotifyError(null);
+    setNotifyInfo(null);
     setBusy(true);
     try {
       const r = await fetch('/api/account/notifications', {
@@ -162,17 +215,16 @@ export function AccountSettings(): JSX.Element {
         body: JSON.stringify({ notifyEmailNewUpload: notifyNewUpload, notifyEmailComments: notifyComments }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setInfo('Notification preferences saved.');
+      setNotifyInfo('Notification preferences saved.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setNotifyError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setBusy(false);
     }
   };
 
   const requestDelete = async (): Promise<void> => {
-    setError(null);
-    setInfo(null);
+    setDeleteError(null);
     setBusy(true);
     try {
       const r = await fetch('/api/account/delete', {
@@ -180,19 +232,17 @@ export function AccountSettings(): JSX.Element {
         credentials: 'include',
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setInfo('Deletion scheduled.');
       setConfirmDelete(false);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setDeleteError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setBusy(false);
     }
   };
 
   const cancelDelete = async (): Promise<void> => {
-    setError(null);
-    setInfo(null);
+    setDeleteError(null);
     setBusy(true);
     try {
       const r = await fetch('/api/account/delete/cancel', {
@@ -200,10 +250,9 @@ export function AccountSettings(): JSX.Element {
         credentials: 'include',
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setInfo('Deletion cancelled.');
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed');
+      setDeleteError(err instanceof Error ? err.message : 'Failed');
     } finally {
       setBusy(false);
     }
@@ -236,16 +285,16 @@ export function AccountSettings(): JSX.Element {
         </p>
       </header>
 
-      {error && <p className="status-error">{error}</p>}
-      {info && <p className="ds-meta">{info}</p>}
+      {loadError && <p className="status-error">{loadError}</p>}
 
       {scheduledDate && (
         <section className="stack-sm" aria-label="Deletion scheduled">
           <p className="status-error">
-              Your account is scheduled for permanent deletion on{' '}
+            Your account is scheduled for permanent deletion on{' '}
             <strong>{scheduledDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.
             {' '}To cancel, sign back in before that date and click the button below.
           </p>
+          {deleteError && <p className="status-error">{deleteError}</p>}
           <button type="button" className="btn btn--secondary" onClick={() => void cancelDelete()} disabled={busy}>
             Cancel deletion
           </button>
@@ -262,6 +311,8 @@ export function AccountSettings(): JSX.Element {
             onChange={(e) => setEmailDraft(e.target.value)}
             required
           />
+          {emailError && <p className="status-error">{emailError}</p>}
+          {emailInfo && <p className="ds-meta">{emailInfo}</p>}
           <button type="submit" className="btn btn--secondary btn--sm" disabled={busy}>
             Save email
           </button>
@@ -288,6 +339,8 @@ export function AccountSettings(): JSX.Element {
             required
             minLength={8}
           />
+          {passwordError && <p className="status-error">{passwordError}</p>}
+          {passwordInfo && <p className="ds-meta">{passwordInfo}</p>}
           <button type="submit" className="btn btn--secondary btn--sm" disabled={busy}>
             Change password
           </button>
@@ -313,11 +366,20 @@ export function AccountSettings(): JSX.Element {
             />
             Comments on your videos
           </label>
+          {notifyError && <p className="status-error">{notifyError}</p>}
+          {notifyInfo && <p className="ds-meta">{notifyInfo}</p>}
           <button type="submit" className="btn btn--secondary btn--sm" disabled={busy}>
             Save preferences
           </button>
         </form>
       </section>
+
+      {account?.storage && (
+        <section className="stack-sm" aria-label="Storage">
+          <span className="ds-label">Storage</span>
+          <StorageBar used={account.storage.used} quota={account.storage.quota} />
+        </section>
+      )}
 
       <ActiveSessions />
 
@@ -479,6 +541,7 @@ export function AccountSettings(): JSX.Element {
             After 30 days, your videos, profile, and account credentials are permanently deleted.
             Comments you posted remain on the platform but are anonymized — your name and account information are removed from them.
           </p>
+          {deleteError && <p className="status-error">{deleteError}</p>}
           {!confirmDelete ? (
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmDelete(true)}>
               Delete my account…

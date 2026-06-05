@@ -11,6 +11,7 @@ type CallbackArgs = {
 
 type CapturedOptions = {
   appName?: string;
+  plugins?: unknown[];
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
@@ -23,6 +24,8 @@ type CapturedOptions = {
     autoSignInAfterVerification?: boolean;
     sendVerificationEmail?: (args: CallbackArgs) => Promise<void>;
   };
+  socialProviders?: Record<string, unknown>;
+  account?: { accountLinking?: { enabled?: boolean; trustedProviders?: string[] } };
 };
 
 const captured: { options?: CapturedOptions } = {};
@@ -33,6 +36,18 @@ const betterAuthSpy = vi.fn((options: CapturedOptions) => {
 
 vi.mock('better-auth', () => ({
   betterAuth: (options: CapturedOptions) => betterAuthSpy(options),
+}));
+
+// Capture captcha plugin configuration
+type CaptchaOptions = { provider?: string; secretKey?: string };
+const capturedCaptcha: { options?: CaptchaOptions } = {};
+const captchaSpy = vi.fn((options: CaptchaOptions) => {
+  capturedCaptcha.options = options;
+  return { id: 'captcha', __mock: true };
+});
+
+vi.mock('better-auth/plugins', () => ({
+  captcha: (options: CaptchaOptions) => captchaSpy(options),
 }));
 
 const sendPasswordResetEmailSpy = vi.fn(
@@ -64,7 +79,9 @@ describe('createAuth', () => {
     sendVerificationEmailSpy.mockClear();
     sendPasswordResetConfirmationEmailSpy.mockClear();
     betterAuthSpy.mockClear();
+    captchaSpy.mockClear();
     captured.options = undefined;
+    capturedCaptcha.options = undefined;
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -152,5 +169,68 @@ describe('createAuth', () => {
       expect.objectContaining({ EMAIL: fakeBinding }),
       { to: 'a@b.com', url: 'https://x/verify?token=tok' },
     );
+  });
+
+  // ── Captcha plugin (Cloudflare Turnstile) ──────────────────────────────────
+
+  it('registers the cloudflare-turnstile captcha plugin', () => {
+    createAuth({ DB: {} as D1Database, TURNSTILE_SECRET_KEY: 'ts_secret' });
+    expect(captchaSpy).toHaveBeenCalledTimes(1);
+    expect(capturedCaptcha.options?.provider).toBe('cloudflare-turnstile');
+  });
+
+  it('passes TURNSTILE_SECRET_KEY to the captcha plugin', () => {
+    createAuth({ DB: {} as D1Database, TURNSTILE_SECRET_KEY: 'my_turnstile_key' });
+    expect(capturedCaptcha.options?.secretKey).toBe('my_turnstile_key');
+  });
+
+  it('passes empty string to captcha plugin when TURNSTILE_SECRET_KEY is absent', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(capturedCaptcha.options?.secretKey).toBe('');
+  });
+
+  it('includes the captcha plugin in the plugins array passed to betterAuth', () => {
+    createAuth({ DB: {} as D1Database, TURNSTILE_SECRET_KEY: 'ts_key' });
+    const plugins = captured.options?.plugins;
+    expect(Array.isArray(plugins)).toBe(true);
+    expect(plugins?.length).toBeGreaterThanOrEqual(1);
+    // The plugin object returned by captchaSpy should be in the array
+    const captchaPlugin = plugins?.find(
+      (p) => (p as { id?: string }).id === 'captcha',
+    );
+    expect(captchaPlugin).toBeDefined();
+  });
+
+  // ── Social providers removed ───────────────────────────────────────────────
+
+  it('does not configure google social provider', () => {
+    createAuth({
+      DB: {} as D1Database,
+      // Even if GOOGLE env vars were somehow present, they should not be wired
+    });
+    expect(captured.options?.socialProviders?.google).toBeUndefined();
+  });
+
+  it('does not configure github social provider', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(captured.options?.socialProviders?.github).toBeUndefined();
+  });
+
+  it('does not configure account linking', () => {
+    createAuth({ DB: {} as D1Database });
+    expect(captured.options?.account).toBeUndefined();
+  });
+
+  it('AuthEnv no longer requires GOOGLE_CLIENT_ID or GITHUB_CLIENT_ID', () => {
+    // Type-level: this must not throw at runtime because those fields are gone.
+    // Also: TURNSTILE_SECRET_KEY is the new field; it should be accepted.
+    expect(() =>
+      createAuth({
+        DB: {} as D1Database,
+        TURNSTILE_SECRET_KEY: 'test',
+        BETTER_AUTH_SECRET: 'secret',
+        BETTER_AUTH_URL: 'https://example.com',
+      }),
+    ).not.toThrow();
   });
 });

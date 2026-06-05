@@ -102,4 +102,49 @@ describe('container HTTP server', () => {
     expect(failCalls).toHaveLength(1);
     expect(failCalls[0][1]).toMatchObject({ error: 'boom' });
   });
+
+  // Regression: /encode endpoint was removed when the HLS fallback path was
+  // dropped. Ensure the container no longer exposes an /encode route.
+  it('POST /encode returns 404 (endpoint removed with HLS fallback)', async () => {
+    const app = buildApp();
+    const res = await app.request('/encode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ videoId: 'v1', r2Key: 'raw/v1.mp4' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /encode returns 404', async () => {
+    const app = buildApp();
+    const res = await app.request('/encode');
+    expect(res.status).toBe(404);
+  });
+
+  // Verify ServerDeps no longer requires encodeToHls — createServer must
+  // compile and run without it (TypeScript verifies the shape at build time;
+  // this test guards the runtime contract).
+  it('createServer does not require encodeToHls in its deps', () => {
+    const deps = {
+      renderJob: noopRender,
+      uploadToR2: noopUpload,
+      callbackToWorker: noopCallback,
+      queueMax: 3,
+    };
+    // Should not throw when encodeToHls is absent
+    expect(() => createServer(deps)).not.toThrow();
+  });
+
+  it('POST /render still works normally after /encode removal', async () => {
+    noopRender.mockClear(); noopCallback.mockClear();
+    const app = buildApp();
+    const res = await app.request('/render', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId: 'j_post_encode', takeKeys: [], compositionProps: {} }),
+    });
+    expect(res.status).toBe(200);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(noopRender).toHaveBeenCalledTimes(1);
+  });
 });

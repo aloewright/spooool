@@ -102,7 +102,6 @@ describe('D1 migrations', () => {
     expect(sql).toMatch(/idx_generated_assets_user_kind\s+ON\s+generated_assets\(user_id,\s*kind\)/i);
     expect(sql).toMatch(/idx_ai_costs_user_created\s+ON\s+ai_costs\(user_id,\s*created_at\)/i);
   });
-<<<<<<< HEAD
 
   it('0023_custom_feeds adds feeds + feed_sources tables and indexes', () => {
     const sql = readFileSync(join(MIGRATIONS_DIR, '0023_custom_feeds.sql'), 'utf8');
@@ -118,6 +117,11 @@ describe('D1 migrations', () => {
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feeds');
     expect(schema).toContain('CREATE TABLE IF NOT EXISTS feed_sources');
   });
-=======
->>>>>>> origin/main
+
+  it('0024_polar_ledger adds polar_ledger with polar_user_id and no user FK', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0024_polar_ledger.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS polar_ledger/);
+    expect(sql).toMatch(/polar_user_id TEXT/);
+    expect(sql).not.toMatch(/FOREIGN KEY \(user_id\) REFERENCES user\(id\)/);
+  });
 });

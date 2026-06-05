@@ -31,17 +31,15 @@ import { searchRoutes } from './search';
 import { seoRoutes } from './seo';
 import { tagRoutes } from './tags';
 import { handleStreamWebhook } from './stream-webhook';
+import { handlePolarWebhook } from './polar-webhook';
 import { subscriptionRoutes } from './subscriptions';
 import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
-<<<<<<< HEAD
 import { studioRoutes, type StudioEnv } from './studio';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { warmFeedCaches } from './feed-warm';
-=======
->>>>>>> origin/main
 import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
@@ -58,6 +56,7 @@ type SessionUser = {
 type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
+  POLAR_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
@@ -75,13 +74,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv 
   // 'run-gateway' uses the env.AI.run('@cf/..', .., { gateway: { id: 'x' } })
   // custom adapter. Never plain { binding: env.AI } (drops observability).
   AI_GATEWAY_MODE?: AiGatewayMode;
-<<<<<<< HEAD
   // YouTube Data API v3 key for custom feeds (src/workers/youtube.ts). A
   // Cloudflare *secret* (Doppler-synced), NOT a [vars] entry. Optional so the
   // worker still boots without it; YouTube sources just return an error result.
   YOUTUBE_API_KEY?: string;
-=======
->>>>>>> origin/main
 };
 
 type Variables = {
@@ -105,6 +101,7 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+app.post('/api/webhooks/polar', handlePolarWebhook());
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).

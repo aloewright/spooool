@@ -13,6 +13,8 @@ export interface UploadOptions {
   target: UploadTarget;
   /** Extra form fields merged into every chunk request. */
   fields?: Record<string, string>;
+  /** Extra headers sent with every chunk request (e.g. captcha token). */
+  headers?: Record<string, string>;
   onProgress: (fraction: number) => void;
   /** Optional file name; defaults to `'chunk'`. Only used for FormData. */
   filename?: string;
@@ -44,7 +46,7 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     fd.set('file', chunk, opts.filename ?? (opts.file as File).name ?? 'chunk');
     if (uploadId) fd.set('uploadId', uploadId);
 
-    const res = await fetch(opts.endpoint, { method: 'POST', body: fd });
+    const res = await fetch(opts.endpoint, { method: 'POST', body: fd, headers: opts.headers });
     lastResponse = res;
     if (!res.ok) {
       const text = await res.text().catch(() => '');

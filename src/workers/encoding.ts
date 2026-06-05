@@ -10,12 +10,17 @@ interface Env {
   ENCODE_CONTAINER: DurableObjectNamespace;
 }
 
+// sendToStream only needs the Stream API credentials, not the full encoding Env.
+// Narrowing the param lets other workers (e.g. the AI-gen consumer, which has no
+// ENCODE_CONTAINER binding) reuse it for Stream ingest.
+type StreamCredentials = Pick<Env, 'CLOUDFLARE_ACCOUNT_ID' | 'CF_STREAM_API_TOKEN'>;
+
 const queueMessageSchema = z.object({
   videoId: z.string().min(1),
   r2Key: z.string().min(1),
 });
 
-export async function sendToStream(env: Env, r2Key: string): Promise<string> {
+export async function sendToStream(env: StreamCredentials, r2Key: string): Promise<string> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CF_STREAM_API_TOKEN;
   if (!accountId || !apiToken) {

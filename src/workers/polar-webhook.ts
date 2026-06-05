@@ -12,7 +12,7 @@ export const POLAR_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 // Signature verification
 // ---------------------------------------------------------------------------
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   try {
     // Normalise base64url (-, _) to base64 and restore padding so atob accepts
     // unpadded secrets (Polar's polar_whs_ key is 32 bytes → 43 unpadded chars).

@@ -33,11 +33,7 @@ export function Signup(): JSX.Element {
     setSubmitting(true);
     const { data, error: signUpError } = await signUp.email(
       { email, password, name },
-      {
-        headers: {
-          'x-captcha-response': captchaToken,
-        },
-      }
+      captchaToken ? { headers: { 'x-captcha-response': captchaToken } } : undefined,
     );
     setSubmitting(false);
     if (signUpError) {

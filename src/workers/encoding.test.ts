@@ -48,6 +48,10 @@ function fakeDB(initialStatus: VideoStatus = 'queued'): FakeDB {
 
 const ORIGINAL_FETCH = globalThis.fetch;
 
+// Encoding Env now requires ENCODE_CONTAINER; the Stream-path tests below don't
+// exercise the container fallback, so a stub satisfies the type without being used.
+const FAKE_ENCODE_CONTAINER = {} as unknown as DurableObjectNamespace;
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -60,7 +64,7 @@ describe('handleEncodingMessage', () => {
   it('returns silently on a malformed message (no DB writes)', async () => {
     const db = fakeDB();
     await handleEncodingMessage(
-      { DB: db as unknown as D1Database, STREAM_ENABLED: 'true' },
+      { DB: db as unknown as D1Database, STREAM_ENABLED: 'true', ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER },
       { not: 'valid' },
     );
     expect(db.runs).toHaveLength(0);
@@ -92,7 +96,7 @@ describe('handleEncodingMessage', () => {
     expect(updates[0].bound[0]).toBe('encoding');
     // Should have dispatched to the encoder container.
     expect(containerFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = containerFetch.mock.calls[0] as [string, RequestInit];
+    const [url, init] = containerFetch.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('https://encoder-container/encode');
     expect(JSON.parse(init.body as string)).toEqual({ videoId: 'v1', r2Key: 'k' });
   });
@@ -110,6 +114,7 @@ describe('handleEncodingMessage', () => {
         STREAM_ENABLED: 'true',
         CLOUDFLARE_ACCOUNT_ID: 'acct',
         CF_STREAM_API_TOKEN: 'tok',
+        ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER,
       },
       { videoId: 'v1', r2Key: 'videos/v1.mp4' },
     );
@@ -134,7 +139,7 @@ describe('handleEncodingMessage', () => {
     const db = fakeDB('queued');
     await expect(
       handleEncodingMessage(
-        { DB: db as unknown as D1Database, STREAM_ENABLED: 'true' },
+        { DB: db as unknown as D1Database, STREAM_ENABLED: 'true', ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER },
         { videoId: 'v1', r2Key: 'k' },
       ),
     ).rejects.toThrow(/Encoding failed/);
@@ -159,6 +164,7 @@ describe('handleEncodingMessage', () => {
           STREAM_ENABLED: 'true',
           CLOUDFLARE_ACCOUNT_ID: 'acct',
           CF_STREAM_API_TOKEN: 'tok',
+          ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER,
         },
         { videoId: 'v1', r2Key: 'k' },
       ),
@@ -182,6 +188,7 @@ describe('handleEncodingMessage', () => {
           STREAM_ENABLED: 'true',
           CLOUDFLARE_ACCOUNT_ID: 'acct',
           CF_STREAM_API_TOKEN: 'tok',
+          ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER,
         },
         { videoId: 'v1', r2Key: 'k' },
       ),

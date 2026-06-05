@@ -61,9 +61,9 @@ function WaitlistPanel(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [sendingWave, setSendingWave] = useState(1);
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     setLoading(true);
@@ -78,7 +78,7 @@ function WaitlistPanel(): JSX.Element {
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'Error'))
       .finally(() => setLoading(false));
-  }, [statusFilter]);
+  }, [statusFilter, refreshKey]);
 
   function toggleAll(): void {
     if (selected.size === entries.length) {

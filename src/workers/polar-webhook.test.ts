@@ -108,6 +108,15 @@ describe('verifyPolarSignature', () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it('accepts a Polar "polar_whs_" prefixed secret', async () => {
+    const body = '{}';
+    const sig = await signBody(WH_ID, NOW, body);
+    const result = await verifyPolarSignature(
+      body, WH_ID, String(NOW), `v1,${sig}`, `polar_whs_${SECRET_B64}`, NOW,
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
   it('accepts one matching sig among multiple (key rotation)', async () => {
     const body = '{}';
     const sig = await signBody(WH_ID, NOW, body);

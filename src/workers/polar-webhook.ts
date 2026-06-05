@@ -14,7 +14,12 @@ export const POLAR_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 
 function base64ToBytes(b64: string): Uint8Array {
   try {
-    const bin = atob(b64);
+    // Normalise base64url (-, _) to base64 and restore padding so atob accepts
+    // unpadded secrets (Polar's polar_whs_ key is 32 bytes → 43 unpadded chars).
+    let s = b64.replace(/-/g, '+').replace(/_/g, '/');
+    const pad = s.length % 4;
+    if (pad) s += '='.repeat(4 - pad);
+    const bin = atob(s);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
@@ -51,8 +56,14 @@ export async function verifyPolarSignature(
     return { ok: false, reason: 'stale_timestamp' };
   }
 
-  // Strip optional "whsec_" prefix and decode the raw key bytes.
-  const b64Secret = secret.startsWith('whsec_') ? secret.slice(6) : secret;
+  // Strip the secret prefix and decode the raw key bytes. Polar issues secrets
+  // as "polar_whs_<base64>"; the Standard Webhooks spec uses "whsec_<base64>".
+  // Either way the bytes after the prefix are the base64-encoded HMAC key.
+  const b64Secret = secret.startsWith('polar_whs_')
+    ? secret.slice('polar_whs_'.length)
+    : secret.startsWith('whsec_')
+      ? secret.slice('whsec_'.length)
+      : secret;
   const keyBytes = base64ToBytes(b64Secret);
   if (keyBytes.length === 0) return { ok: false, reason: 'malformed_secret' };
 

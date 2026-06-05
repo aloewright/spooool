@@ -58,7 +58,7 @@
     "better-auth": "^1.6.11",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "hono": "^4.12.18",
+    "hono": "^4.12.21",
     "jose": "^6.2.2",
     "lottie-react": "^2.4.1",
     "lucide-react": "^1.14.0",

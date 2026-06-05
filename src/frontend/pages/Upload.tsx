@@ -30,7 +30,7 @@ async function uploadInChunks(
   title: string,
   description: string,
   onProgress: (value: number) => void,
-  captchaToken?: string,
+  captchaToken?: string | null,
 ): Promise<Response> {
   const result = await runChunkedUpload({
     file,

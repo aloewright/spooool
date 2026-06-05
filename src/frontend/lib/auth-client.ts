@@ -28,7 +28,7 @@ export async function requestPasswordReset(args: {
 export async function resetPassword(args: {
   token: string;
   newPassword: string;
-  captchaToken?: string;
+  captchaToken?: string | null;
 }): Promise<AuthResponse> {
   const { captchaToken, ...body } = args;
   return postAuth('/api/auth/reset-password', body, captchaToken);

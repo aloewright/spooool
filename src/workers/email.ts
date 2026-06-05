@@ -202,3 +202,43 @@ export async function sendCostAlertEmail(
 ): Promise<EmailResult> {
   return send(env, { to: args.to, ...buildCostAlertEmail(args.props) });
 }
+
+export function buildWaitlistConfirmEmail(): { subject: string; html: string; text: string } {
+  return {
+    subject: "You're on the Spooool waitlist",
+    text:
+      `Thanks for signing up for the Spooool beta waitlist!\n\n` +
+      `We'll email you as soon as your invite is ready. No action needed.`,
+    html:
+      `<p>Thanks for signing up for the Spooool beta waitlist!</p>` +
+      `<p>We'll email you as soon as your invite is ready. No action needed.</p>`,
+  };
+}
+
+export function buildBetaInviteEmail(inviteUrl: string): { subject: string; html: string; text: string } {
+  return {
+    subject: "Your Spooool beta invite is here",
+    text:
+      `You're in! Your Spooool beta invite is ready.\n\n` +
+      `Open this link to create your account:\n${inviteUrl}\n\n` +
+      `This link is single-use — keep it to yourself.`,
+    html:
+      `<p>You're in! Your Spooool beta invite is ready.</p>` +
+      `<p><a href="${inviteUrl}">Claim your invite</a></p>` +
+      `<p>This link is single-use — keep it to yourself.</p>`,
+  };
+}
+
+export async function sendWaitlistConfirmEmail(
+  env: EmailEnv,
+  args: { to: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildWaitlistConfirmEmail() });
+}
+
+export async function sendBetaInviteEmail(
+  env: EmailEnv,
+  args: { to: string; inviteUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildBetaInviteEmail(args.inviteUrl) });
+}

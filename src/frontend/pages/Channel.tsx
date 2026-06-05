@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { VideoPlaceholderIcon } from '../components/Icons';
+import { formatCount } from '../lib/format';
 
 interface ChannelHeader {
   id: string;
@@ -12,6 +13,7 @@ interface ChannelHeader {
   bannerUrl: string | null;
   subscriberCount: number;
   videoCount: number;
+  totalViewCount: number;
 }
 
 interface ChannelVideo {
@@ -209,7 +211,7 @@ export function Channel(): JSX.Element {
             <span className="ds-meta">@{header.username}</span>
           ) : null}
           <span className="ds-meta">
-            {sub?.subscriberCount ?? header.subscriberCount} subscribers · {header.videoCount} videos
+            {formatCount(sub?.subscriberCount ?? header.subscriberCount)} subscribers · {header.videoCount} videos · {formatCount(header.totalViewCount)} views
           </span>
         </div>
         {isOwner ? (
@@ -269,7 +271,7 @@ export function Channel(): JSX.Element {
                 )}
                 <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{video.title}</div>
                 <div className="ds-meta" style={{ marginTop: 4 }}>
-                  {video.view_count} views
+                  {formatCount(video.view_count)} views
                 </div>
               </Link>
             ))}

@@ -55,7 +55,7 @@
     "@rolldown/binding-linux-x64-gnu": "^1.1.0",
     "@sentry/cloudflare": "^10.50.0",
     "@sentry/react": "^10.50.0",
-    "@tanstack/ai": "^0.26.1",
+    "@tanstack/ai": "^0.28.0",
     "@tanstack/ai-react": "^0.15.1",
     "better-auth": "^1.6.11",
     "buffer-image-size": "^0.6.4",

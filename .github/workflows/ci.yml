@@ -31,11 +31,17 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Lint no direct AI providers
+        run: npm run lint:no-providers
+
       - name: Type check
         run: npm run type-check
 
-      - name: Test
-        run: npm test -- --run
+      - name: Test (unit)
+        run: npx vitest --passWithNoTests --run
 
       - name: Build
         run: npm run build
+
+      - name: Test (workers)
+        run: npx vitest --config vitest.workers.config.ts --passWithNoTests --run

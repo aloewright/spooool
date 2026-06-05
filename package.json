@@ -11,7 +11,8 @@
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
     "deploy:prod": "vite build && wrangler deploy --env production",
-    "test": "vitest --passWithNoTests",
+    "test": "vitest --passWithNoTests && vitest --config vitest.workers.config.ts --passWithNoTests",
+    "test:workers": "vitest --config vitest.workers.config.ts --passWithNoTests",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest --coverage",
     "lint": "oxlint src && npm run lint:no-providers && npm run lint:remotion-animation",
@@ -83,6 +84,7 @@
     "@rolldown/binding-linux-x64-gnu": "file:rolldown-binding-linux-x64-gnu-1.0.0-rc.17.tgz"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.16.13",
     "@playwright/test": "^1.59.1",
     "@types/node": "^20.10.6",
     "@types/react": "^18.2.45",

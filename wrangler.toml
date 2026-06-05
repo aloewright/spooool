@@ -200,7 +200,7 @@ new_sqlite_classes = ["EncoderContainer"]
 # The */5 cron runs the render-job timeout sweep — marks any render_job
 # stuck in `rendering` for >15min as `failed`. See src/workers/render.ts.
 [triggers]
-crons = ["0 2 * * *", "*/5 * * * *"]
+crons = ["0 2 * * *", "0 8 * * *", "*/5 * * * *"]
 
 [vars]
 # YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:

@@ -49,11 +49,11 @@ export function AccountSettings(): JSX.Element {
     if (!session) return;
     let cancelled = false;
     void Promise.all([
-      fetch('/api/account', { credentials: 'include' }).then(async (r) => {
+      fetch('/api/account', { credentials: 'same-origin' }).then(async (r) => {
         if (!r.ok) throw new Error(`Account fetch failed: ${r.status}`);
         return (await r.json()) as AccountInfo;
       }),
-      fetch('/api/account/earnings', { credentials: 'include' }).then(async (r) => {
+      fetch('/api/account/earnings', { credentials: 'same-origin' }).then(async (r) => {
         if (!r.ok) return null;
         return (await r.json()) as EarningsSummary;
       }),
@@ -82,7 +82,7 @@ export function AccountSettings(): JSX.Element {
       if (err) setPolarError(`Polar connection failed: ${err.replace(/_/g, ' ')}`);
       if (connected) {
         // Refresh earnings to show the updated Polar status.
-        fetch('/api/account/earnings', { credentials: 'include' })
+        fetch('/api/account/earnings', { credentials: 'same-origin' })
           .then((r) => (r.ok ? r.json() : null))
           .then((data) => { if (data) setEarnings(data as EarningsSummary); })
           .catch(() => {});
@@ -95,7 +95,7 @@ export function AccountSettings(): JSX.Element {
   }, [searchParams, setSearchParams]);
 
   const reload = async (): Promise<void> => {
-    const r = await fetch('/api/account', { credentials: 'include' });
+    const r = await fetch('/api/account', { credentials: 'same-origin' });
     if (r.ok) {
       const data = (await r.json()) as AccountInfo;
       setAccount(data);
@@ -112,7 +112,7 @@ export function AccountSettings(): JSX.Element {
     try {
       const r = await fetch('/api/account/email', {
         method: 'PUT',
-        credentials: 'include',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ email: emailDraft }),
       });
@@ -134,7 +134,7 @@ export function AccountSettings(): JSX.Element {
     try {
       const r = await fetch('/api/account/password', {
         method: 'PUT',
-        credentials: 'include',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ currentPassword, newPassword }),
       });
@@ -157,7 +157,7 @@ export function AccountSettings(): JSX.Element {
     try {
       const r = await fetch('/api/account/notifications', {
         method: 'PUT',
-        credentials: 'include',
+        credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ notifyEmailNewUpload: notifyNewUpload, notifyEmailComments: notifyComments }),
       });
@@ -177,7 +177,7 @@ export function AccountSettings(): JSX.Element {
     try {
       const r = await fetch('/api/account/delete', {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'same-origin',
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
       setInfo('Deletion scheduled.');
@@ -197,7 +197,7 @@ export function AccountSettings(): JSX.Element {
     try {
       const r = await fetch('/api/account/delete/cancel', {
         method: 'POST',
-        credentials: 'include',
+        credentials: 'same-origin',
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
       setInfo('Deletion cancelled.');

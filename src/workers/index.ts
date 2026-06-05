@@ -43,6 +43,7 @@ import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './creat
 import { studioRoutes, type StudioEnv } from './studio';
 import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
+import { runEmailDigestSweep } from './notification-email';
 import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
 import type { TurnstileEnv } from './turnstile';
@@ -270,6 +271,11 @@ const workerHandlers = {
             // ALO-feeds: warm cheap YouTube source caches for recently-viewed feeds.
             const warmed = await warmFeedCaches(env);
             if (warmed > 0) console.log('[feed-warm]', { cron: controller.cron, warmed });
+            return;
+          }
+          if (controller.cron === '0 8 * * *') {
+            const digest = await runEmailDigestSweep(env);
+            console.log('[email-digest]', { cron: controller.cron, ...digest });
             return;
           }
           if (controller.cron !== '0 2 * * *') {

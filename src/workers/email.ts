@@ -54,7 +54,7 @@ function fromAddress(env: EmailEnv): { email: string; name?: string } {
   };
 }
 
-async function send(
+export async function send(
   env: EmailEnv,
   message: {
     to: string;

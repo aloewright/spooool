@@ -818,8 +818,12 @@ function TipModal({ videoId, onClose }: { videoId: string; onClose: () => void }
 
   async function onSubmit(e: FormEvent): Promise<void> {
     e.preventDefault();
-    if (amountCents < 100) {
+    if (isNaN(amountCents) || amountCents < 100) {
       setError('Minimum tip is $1.');
+      return;
+    }
+    if (amountCents > 100000) {
+      setError('Maximum tip is $1,000.');
       return;
     }
     setLoading(true);

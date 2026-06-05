@@ -71,12 +71,22 @@ tipsRoutes.get('/api/users/me/stripe/connect', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const row = await c.env.DB.prepare(
-    'SELECT stripe_account_id, charges_enabled FROM stripe_connect_accounts WHERE user_id = ?',
+    'SELECT stripe_account_id, charges_enabled, payouts_enabled FROM stripe_connect_accounts WHERE user_id = ?',
   )
     .bind(user.id)
-    .first<{ stripe_account_id: string; charges_enabled: number }>();
+    .first<{ stripe_account_id: string; charges_enabled: number; payouts_enabled: number }>();
 
   if (!row) return c.json({ connected: false, chargesEnabled: false });
+
+  // Onboarding status is stable once completed, so trust the DB and skip the
+  // blocking Stripe call. Only sync from Stripe while charges are not yet enabled.
+  if (row.charges_enabled) {
+    return c.json({
+      connected: true,
+      chargesEnabled: true,
+      payoutsEnabled: row.payouts_enabled === 1,
+    });
+  }
 
   // Sync latest state from Stripe so the UI reflects onboarding completion.
   const stripe = createStripe(c.env);

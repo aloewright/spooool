@@ -234,9 +234,10 @@ EMAIL_FROM_NAME = "Spooool"
 # adapter once it's smoke-verified on this account (see E11 AI Studio spec, App. B).
 AI_GATEWAY_MODE = "run-gateway"
 
-# Staging environment. MUST come after the top-level [vars] table: TOML treats
-# [env.*] sections as terminal, so any top-level table declared after the first
-# [env.*] section triggers "trying to redefine an already defined table".
+# Staging environment. Defined after the top-level [vars] table because TOML
+# treats [env.*] tables as terminal — any top-level table (like [vars]) must be
+# declared before the first [env.*] section or wrangler errors with
+# "trying to redefine an already defined table".
 [env.staging]
 vars = { ALLOWED_ORIGINS = "" }
 [[env.staging.d1_databases]]

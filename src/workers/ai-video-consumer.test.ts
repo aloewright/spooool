@@ -20,7 +20,7 @@ function makeDbStub() {
       },
       run: vi.fn(async () => {
         runs.push({ sql, binds: [...boundValues] });
-        return {};
+        return { meta: { changes: 1 } };
       }),
       first: vi.fn(async () => null),
     };
@@ -121,6 +121,41 @@ describe('handleAiGenMessage', () => {
     expect(runs).toHaveLength(0);
   });
 
+  it('idempotency: does not call AI.run / VIDEOS.put / ai_costs insert when asset already claimed (changes=0)', async () => {
+    const { env, fetchMock } = makeEnv();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    // Override the DB so the claim UPDATE returns changes=0 (already processed).
+    const db = env._db as ReturnType<typeof makeDbStub>;
+    const origPrepare = db['prepare'] as (sql: string) => Record<string, unknown>;
+    (db['prepare'] as unknown) = (sql: string) => {
+      const stmt = origPrepare(sql);
+      if (sql.includes("status='processing'")) {
+        return {
+          bind: (..._args: unknown[]) => ({
+            run: vi.fn(async () => ({ meta: { changes: 0 } })),
+          }),
+        };
+      }
+      return stmt;
+    };
+
+    await handleAiGenMessage(env, { assetId: 'a_dup01', userId: 'u1', prompt: 'duplicate' });
+
+    // Must not call AI model
+    expect(env._aiRun).not.toHaveBeenCalled();
+    // Must not write to R2
+    const puts = (env._videos as ReturnType<typeof makeVideosStub>)._puts;
+    expect(puts).toHaveLength(0);
+    // Must not insert ai_costs
+    const runs = db['_runs'] as Array<{ sql: string }>;
+    expect(runs.find((r) => r.sql.includes('ai_costs'))).toBeUndefined();
+    // Must resolve without throwing
+    await expect(
+      handleAiGenMessage(env, { assetId: 'a_dup01', userId: 'u1', prompt: 'duplicate' }),
+    ).resolves.toBeUndefined();
+  });
+
   describe('happy path', () => {
     it('calls env.AI.run with google/veo-3.1 and correct input params + gateway option', async () => {
       const { env, fetchMock } = makeEnv();
@@ -181,8 +216,13 @@ describe('handleAiGenMessage', () => {
       const costRun = runs.find((r) => r.sql.includes('INSERT INTO ai_costs'));
       expect(costRun).toBeDefined();
       expect(costRun!.sql).toContain("unit_kind");
-      expect(costRun!.sql).toContain("'seconds'");
-      expect(costRun!.binds[1]).toBe('u1'); // userId
+      // Bind order from aiCostStatement: id(0), userId(1), op(2), route(3), model(4),
+      //                                  units(5), unitKind(6), estUsd(7), projectId(8), createdAt(9)
+      expect(costRun!.binds[1]).toBe('u1');              // userId
+      expect(costRun!.binds[4]).toBe('google/veo-3.1'); // model
+      expect(costRun!.binds[5]).toBe(8);                 // units (8 seconds per Veo clip)
+      expect(costRun!.binds[6]).toBe('seconds');         // unitKind
+      expect(costRun!.binds[7]).toBe(0.40);              // estUsd (EST_USD_PER_VIDEO)
     });
   });
 

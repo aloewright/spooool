@@ -44,6 +44,7 @@ import { studioRoutes, type StudioEnv } from './studio';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
+import type { TurnstileEnv } from './turnstile';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { tipsRoutes, handleStripeWebhook, type TipsEnv } from './tips';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
@@ -58,7 +59,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & TipsEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & TipsEnv & TurnstileEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;

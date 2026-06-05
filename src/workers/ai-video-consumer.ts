@@ -20,6 +20,7 @@
 
 import { z } from 'zod';
 import { sendToStream } from './encoding';
+import { writeAiCost } from './ai-costs';
 
 // Order-of-magnitude cost placeholder (Workers AI Neurons → USD).
 // Veo 3.1 pricing: ~$0.40 per 8 s clip at 720p (update when CF publishes exact rate).
@@ -48,6 +49,17 @@ export async function handleAiGenMessage(env: AiGenEnv, body: unknown): Promise<
   }
 
   const { assetId, userId, prompt } = parsed.data;
+
+  // At-least-once queue delivery: claim the asset so a redelivered message can't
+  // re-generate (and re-bill) an already-processed asset. Only a row still in
+  // 'queued' is claimable; if 0 rows change, another delivery already handled it.
+  const claim = await env.DB.prepare(
+    `UPDATE generated_assets SET status='processing', updated_at=? WHERE id=? AND user_id=? AND status='queued'`,
+  ).bind(Date.now(), assetId, userId).run();
+  if (!claim.meta || claim.meta.changes === 0) {
+    console.warn('[ai-gen] asset not claimable (already processed/missing)', { assetId });
+    return; // no-op: do NOT call Veo, do NOT bill
+  }
 
   try {
     // ── 1. Generate video via Veo ────────────────────────────────────────────
@@ -95,12 +107,7 @@ export async function handleAiGenMessage(env: AiGenEnv, body: unknown): Promise<
       .run();
 
     // ── 6. Record AI cost ─────────────────────────────────────────────────────
-    const costId = `c_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
-    await env.DB.prepare(
-      "INSERT INTO ai_costs (id, user_id, op, route, model, units, unit_kind, est_usd, project_id, created_at) VALUES (?,?, 'video_gen','dynamic/video_gen','google/veo-3.1', 8, 'seconds', ?, NULL, ?)",
-    )
-      .bind(costId, userId, EST_USD_PER_VIDEO, Date.now())
-      .run();
+    await writeAiCost(env.DB, { userId, op: 'video_gen', route: 'dynamic/video_gen', model: 'google/veo-3.1', units: 8, unitKind: 'seconds', estUsd: EST_USD_PER_VIDEO });
   } catch (err) {
     // On any failure: mark asset failed and return normally (do NOT rethrow).
     // Rethrowing would cause the queue handler to retry the message, which

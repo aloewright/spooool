@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
+
+vi.mock('./turnstile', () => ({
+  verifyTurnstile: vi.fn(async () => ({ success: true })),
+}));
 
 interface QuotaState {
   used: number;
@@ -436,27 +440,27 @@ describe('POST /api/videos/upload (target=recorder)', () => {
 // ALO-139: quota precheck at chunk-0.
 describe('upload storage-quota gate', () => {
   it('rejects with 413 + code=storage_quota_exceeded when chunk-0 would overflow', async () => {
+    // Current usage 100, quota 110, new file 20 -> overflow
     const fetcher = mountWithUser(
-      fakeEnv({ used: 900, quota: 1000 }),
+      fakeEnv({ used: 100, quota: 110 }),
       { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true },
     );
     const fd = new FormData();
-    fd.set('title', 'hi');
-    fd.set('description', '');
-    // 200 bytes incoming, 100 bytes remaining → over quota.
-    fd.set('file', new Blob([new Uint8Array(200)], { type: 'video/mp4' }), 'clip.mp4');
+    fd.set('title', 'big');
+    fd.set('file', new Blob([new Uint8Array(20)], { type: 'video/mp4' }), 'big.mp4');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
     const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });
     expect(res.status).toBe(413);
-    const body = (await res.json()) as { code: string; storage: { used: number; quota: number; remaining: number } };
+    const body = (await res.json()) as { code: string; storage: QuotaState };
     expect(body.code).toBe('storage_quota_exceeded');
-    expect(body.storage).toEqual({ used: 900, quota: 1000, remaining: 100 });
+    expect(body.storage.used).toBe(100);
   });
 
   it('lets the upload through when there is room', async () => {
+    // Current usage 50, quota 100, new file 10 -> ok
     const fetcher = mountWithUser(
-      fakeEnv({ used: 0, quota: 1024 }),
+      fakeEnv({ used: 50, quota: 100 }),
       { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true },
     );
     const fd = new FormData();

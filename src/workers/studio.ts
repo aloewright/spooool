@@ -12,6 +12,7 @@ import { gatewayChat, gatewayImage, DEFAULT_IMAGE_MODEL, type AiGatewayEnv, type
 import type { AIBindingEnv } from './create-tools';
 import { STUDIO_GEN_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
+import { aiCostStatement } from './ai-costs';
 
 export interface StudioEnv extends AIBindingEnv {
   RATE_LIMITER?: DurableObjectNamespace;
@@ -108,14 +109,11 @@ studioRoutes.post('/api/studio/image', async (c) => {
   await c.env.VIDEOS.put(r2Key, decoded, { httpMetadata: { contentType: IMAGE_CONTENT_TYPE } });
 
   const now = Date.now();
-  const costId = `c_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
   await c.env.DB.batch([
     c.env.DB.prepare(
       `INSERT INTO generated_assets (id, user_id, kind, source, r2_key, stream_video_id, bytes, status, spec_json, error_message, project_id, created_at, updated_at) VALUES (?, ?, 'image', 'image_gen', ?, NULL, ?, 'ready', ?, NULL, NULL, ?, ?)`
     ).bind(assetId, user.id, r2Key, bytes, JSON.stringify({ model: IMAGE_MODEL, prompt: parsed.data.prompt }), now, now),
-    c.env.DB.prepare(
-      `INSERT INTO ai_costs (id, user_id, op, route, model, units, unit_kind, est_usd, project_id, created_at) VALUES (?, ?, 'image_gen', 'dynamic/image_gen', ?, 1, 'images', ?, NULL, ?)`
-    ).bind(costId, user.id, IMAGE_MODEL, EST_USD_PER_IMAGE, now),
+    aiCostStatement(c.env.DB, { userId: user.id, op: 'image_gen', route: 'dynamic/image_gen', model: IMAGE_MODEL, units: 1, unitKind: 'images', estUsd: EST_USD_PER_IMAGE }),
   ]);
 
   // dataUrl lets the panel preview immediately (studio/images/* has no public GET route).
@@ -126,6 +124,8 @@ studioRoutes.post('/api/studio/video', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
+
+  if (!c.env.AI_GEN) return c.json({ error: 'Video generation is unavailable.' }, 503);
 
   const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
   if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
@@ -143,7 +143,13 @@ studioRoutes.post('/api/studio/video', async (c) => {
     .bind(assetId, user.id, JSON.stringify({ model: 'google/veo-3.1', prompt: parsed.data.prompt }), now, now)
     .run();
 
-  await c.env.AI_GEN!.send({ assetId, userId: user.id, prompt: parsed.data.prompt });
+  try {
+    await c.env.AI_GEN.send({ assetId, userId: user.id, prompt: parsed.data.prompt });
+  } catch (err) {
+    await c.env.DB.prepare(`UPDATE generated_assets SET status='failed', error_message=?, updated_at=? WHERE id=? AND user_id=?`)
+      .bind('Failed to enqueue generation', Date.now(), assetId, user.id).run();
+    return c.json({ error: 'Failed to enqueue video generation. Try again.' }, 503);
+  }
 
   return c.json({ assetId, status: 'queued' }, 202);
 });

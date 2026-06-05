@@ -1,4 +1,5 @@
 import { betterAuth } from 'better-auth';
+import { captcha } from 'better-auth/plugins';
 import {
   sendPasswordResetConfirmationEmail,
   sendPasswordResetEmail,
@@ -11,6 +12,7 @@ export type AuthEnv = EmailEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  TURNSTILE_SECRET_KEY?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GITHUB_CLIENT_ID?: string;
@@ -36,6 +38,12 @@ export function createAuth(env: AuthEnv) {
     database: env.DB,
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
+    plugins: [
+      captcha({
+        provider: 'cloudflare-turnstile',
+        secretKey: env.TURNSTILE_SECRET_KEY || '',
+      }),
+    ],
     emailAndPassword: {
       enabled: true,
       autoSignIn: true,

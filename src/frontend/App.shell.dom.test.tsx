@@ -96,6 +96,7 @@ describe('App shell', () => {
       '/legal/privacy',
       '/pricing',
       '/legal/dmca',
+      '/status',
     ]);
   });
 
@@ -104,7 +105,7 @@ describe('App shell', () => {
     expect(container!.querySelector('h1')?.textContent).toBe('Page not found');
     // Footer must still be in the DOM — 404 is inside the shell, not a
     // bare error page.
-    expect(footerLinkHrefs()).toHaveLength(4);
+    expect(footerLinkHrefs()).toHaveLength(5);
     // Crawler signal: the SPA fallback serves index.html with HTTP 200 for
     // unknown paths, so the only client-side noindex hint is the meta tag.
     const robots = document.head.querySelector('meta[name="robots"]');

@@ -26,7 +26,7 @@ interface FakeLedgerRow {
   event_type: string;
   polar_object_id: string | null;
   polar_customer_id: string | null;
-  user_id: string | null;
+  polar_user_id: string | null;
   amount_cents: number | null;
   currency: string | null;
   status: string;

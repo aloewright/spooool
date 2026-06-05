@@ -9,6 +9,8 @@ interface AccountInfo {
   name: string;
   deletionRequestedAt: number | null;
   deletionScheduledFor: number | null;
+  notifyEmailNewUpload: boolean;
+  notifyEmailComments: boolean;
 }
 
 interface EarningsSummary {
@@ -33,6 +35,8 @@ export function AccountSettings(): JSX.Element {
   const [newPassword, setNewPassword] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [notifyNewUpload, setNotifyNewUpload] = useState(true);
+  const [notifyComments, setNotifyComments] = useState(true);
 
   useEffect(() => {
     if (!session) return;
@@ -51,6 +55,8 @@ export function AccountSettings(): JSX.Element {
         if (cancelled) return;
         setAccount(accountData);
         setEmailDraft(accountData.email);
+        setNotifyNewUpload(accountData.notifyEmailNewUpload);
+        setNotifyComments(accountData.notifyEmailComments);
         setEarnings(earningsData);
       })
       .catch((err: unknown) => {
@@ -63,7 +69,12 @@ export function AccountSettings(): JSX.Element {
 
   const reload = async (): Promise<void> => {
     const r = await fetch('/api/account', { credentials: 'include' });
-    if (r.ok) setAccount((await r.json()) as AccountInfo);
+    if (r.ok) {
+      const data = (await r.json()) as AccountInfo;
+      setAccount(data);
+      setNotifyNewUpload(data.notifyEmailNewUpload);
+      setNotifyComments(data.notifyEmailComments);
+    }
   };
 
   const updateEmail = async (e: React.FormEvent): Promise<void> => {
@@ -104,6 +115,27 @@ export function AccountSettings(): JSX.Element {
       setInfo('Password updated.');
       setCurrentPassword('');
       setNewPassword('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateNotifications = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+    setBusy(true);
+    try {
+      const r = await fetch('/api/account/notifications', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ notifyEmailNewUpload: notifyNewUpload, notifyEmailComments: notifyComments }),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
+      setInfo('Notification preferences saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed');
     } finally {
@@ -174,7 +206,7 @@ export function AccountSettings(): JSX.Element {
         <h1 className="ds-h2">Account settings</h1>
         <p className="ds-lede">
           {/* LEGAL-REVIEW: confirm GDPR-compliant copy for the description and the delete confirm dialog. */}
-          Manage your email, password, and account status.
+          Manage your email, password, notifications, and account status.
         </p>
       </header>
 
@@ -232,6 +264,31 @@ export function AccountSettings(): JSX.Element {
           />
           <button type="submit" className="btn btn--secondary btn--sm" disabled={busy}>
             Change password
+          </button>
+        </form>
+      </section>
+
+      <section className="stack-sm" aria-label="Notifications">
+        <span className="ds-label">Email notifications</span>
+        <form className="stack-sm" onSubmit={(e) => void updateNotifications(e)}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <input
+              type="checkbox"
+              checked={notifyNewUpload}
+              onChange={(e) => setNotifyNewUpload(e.target.checked)}
+            />
+            New uploads from channels you follow
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+            <input
+              type="checkbox"
+              checked={notifyComments}
+              onChange={(e) => setNotifyComments(e.target.checked)}
+            />
+            Comments on your videos
+          </label>
+          <button type="submit" className="btn btn--secondary btn--sm" disabled={busy}>
+            Save preferences
           </button>
         </form>
       </section>

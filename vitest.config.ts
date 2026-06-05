@@ -10,10 +10,16 @@ import { defineConfig } from 'vitest/config';
 // Everything else stays on the default node environment so the suite is
 // fast.
 export default defineConfig({
+  define: {
+    // Ensure React loads its development/test build even when the shell
+    // environment has NODE_ENV=production (e.g. CI deploy environments).
+    'process.env.NODE_ENV': '"test"',
+  },
   test: {
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'scripts/**/*.test.{js,mjs,ts}',
     ],
+    env: { NODE_ENV: 'test' },
   },
 });

@@ -172,6 +172,7 @@ accountRoutes.post('/api/account/delete', async (c) => {
     year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
   });
   const origin = new URL(c.req.url).origin;
+  console.log('[account-delete] queued deletion confirmation email', { userId: user.id, placeholder: true });
   const emailResult = await sendAccountDeletionEmail(c.env, {
     to: user.email,
     name: user.name,

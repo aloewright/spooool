@@ -24,6 +24,9 @@ export interface CostsEnv extends EmailEnv {
   // Soft threshold in bytes; cost summary is mailed once a day once total
   // storage exceeds this. Defaults to 100 GiB.
   COST_STORAGE_ALERT_BYTES?: string;
+  // Soft threshold in USD for cumulative AI spend (SUM(est_usd) in ai_costs).
+  // Defaults to $50.
+  COST_AI_SPEND_ALERT_USD?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string } | null;
@@ -38,6 +41,11 @@ export const PRICE_R2_PER_GB_MONTH = 0.015;
 export const PRICE_D1_PER_GB_MONTH = 0.75;
 export const PRICE_WORKER_PER_M_REQUESTS = 0.15;
 
+// AI unit prices logged into ai_costs (est_usd column). These are the same
+// placeholders used at write time; kept here so costs.ts owns all pricing context.
+export const PRICE_AI_IMAGE_USD = 0.0013;      // flux-1-schnell per image (Workers AI Neurons → USD)
+export const PRICE_AI_VIDEO_SEC_USD = 0.05;    // Veo 3.1 per second at 720p
+
 export interface CostSnapshot {
   generated_at: string;
   storage: {
@@ -45,6 +53,10 @@ export interface CostSnapshot {
     used_gib: number;
     /** $/month, rounded to 4 decimals so 1 GiB → $0.015. */
     estimated_monthly_usd: number;
+  };
+  ai_spend: {
+    /** SUM(est_usd) across all ai_costs rows. Order-of-magnitude; not authoritative billing. */
+    total_usd: number;
   };
   videos: {
     total: number;
@@ -63,6 +75,10 @@ export interface CostSnapshot {
 
 interface SumRow {
   used: number | null;
+}
+
+interface AiSpendRow {
+  total: number | null;
 }
 
 interface CountRow {
@@ -85,6 +101,7 @@ export async function getCostSnapshot(env: CostsEnv): Promise<CostSnapshot> {
     usersRow,
     users30dRow,
     commentsRow,
+    aiSpendRow,
   ] = await Promise.all([
     env.DB.prepare('SELECT COALESCE(SUM(bytes), 0) AS used FROM videos').first<SumRow>(),
     env.DB.prepare('SELECT COUNT(*) AS n FROM videos WHERE deleted_at IS NULL').first<CountRow>(),
@@ -97,6 +114,7 @@ export async function getCostSnapshot(env: CostsEnv): Promise<CostSnapshot> {
       .bind(thirtyDaysAgoMs)
       .first<CountRow>(),
     env.DB.prepare('SELECT COUNT(*) AS n FROM comments WHERE deleted_at IS NULL').first<CountRow>(),
+    env.DB.prepare('SELECT COALESCE(SUM(est_usd), 0) AS total FROM ai_costs').first<AiSpendRow>(),
   ]);
 
   const usedBytes = Number(storageRow?.used ?? 0);
@@ -106,6 +124,9 @@ export async function getCostSnapshot(env: CostsEnv): Promise<CostSnapshot> {
       used_bytes: usedBytes,
       used_gib: usedBytes / (1024 * 1024 * 1024),
       estimated_monthly_usd: roundCents((usedBytes / (1024 * 1024 * 1024)) * PRICE_R2_PER_GB_MONTH),
+    },
+    ai_spend: {
+      total_usd: roundCents(Number(aiSpendRow?.total ?? 0)),
     },
     videos: {
       total: Number(videosRow?.n ?? 0),
@@ -126,15 +147,14 @@ function roundCents(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
-export interface CostAlert {
-  reason: 'storage_threshold';
-  threshold_bytes: number;
-  observed_bytes: number;
-}
+export type CostAlert =
+  | { reason: 'storage_threshold'; threshold_bytes: number; observed_bytes: number }
+  | { reason: 'ai_spend_threshold'; threshold_usd: number; observed_usd: number };
 
 export function evaluateAlerts(
   snapshot: CostSnapshot,
   thresholdBytes: number,
+  aiSpendThresholdUsd?: number,
 ): CostAlert[] {
   const alerts: CostAlert[] = [];
   if (snapshot.storage.used_bytes >= thresholdBytes) {
@@ -144,7 +164,23 @@ export function evaluateAlerts(
       observed_bytes: snapshot.storage.used_bytes,
     });
   }
+  if (aiSpendThresholdUsd !== undefined && snapshot.ai_spend.total_usd >= aiSpendThresholdUsd) {
+    alerts.push({
+      reason: 'ai_spend_threshold',
+      threshold_usd: aiSpendThresholdUsd,
+      observed_usd: snapshot.ai_spend.total_usd,
+    });
+  }
   return alerts;
+}
+
+const DEFAULT_AI_SPEND_ALERT_USD = 50;
+
+export function parseAiSpendThreshold(raw: string | undefined): number {
+  if (!raw) return DEFAULT_AI_SPEND_ALERT_USD;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return DEFAULT_AI_SPEND_ALERT_USD;
+  return n;
 }
 
 export function parseThresholdBytes(raw: string | undefined): number {
@@ -168,8 +204,14 @@ export function buildCostAlertProps(
   const gib = snapshot.storage.used_gib.toFixed(2);
   const usd = snapshot.storage.estimated_monthly_usd.toFixed(2);
   const reasons = alerts.map((a) => a.reason).join(',');
-  const thresholdGib = alerts.length
-    ? (alerts[0].threshold_bytes / (1024 * 1024 * 1024)).toFixed(2)
+  const storageAlert = alerts.find(
+    (a): a is Extract<CostAlert, { reason: 'storage_threshold' }> => a.reason === 'storage_threshold',
+  );
+  const aiSpendAlert = alerts.find(
+    (a): a is Extract<CostAlert, { reason: 'ai_spend_threshold' }> => a.reason === 'ai_spend_threshold',
+  );
+  const thresholdGib = storageAlert
+    ? (storageAlert.threshold_bytes / (1024 * 1024 * 1024)).toFixed(2)
     : '';
   return {
     generated_at: snapshot.generated_at,
@@ -177,6 +219,8 @@ export function buildCostAlertProps(
     storage_usd_per_month: usd,
     threshold_gib: thresholdGib,
     alert_reasons: reasons,
+    ai_spend_usd: snapshot.ai_spend.total_usd.toFixed(4),
+    ai_spend_threshold_usd: aiSpendAlert ? aiSpendAlert.threshold_usd.toFixed(2) : '',
     videos_total: snapshot.videos.total,
     videos_last_30d: snapshot.videos.last_30d,
     videos_soft_deleted: snapshot.videos.soft_deleted,
@@ -195,7 +239,8 @@ export interface SweepResult {
 export async function runCostMonitorSweep(env: CostsEnv): Promise<SweepResult> {
   const snapshot = await getCostSnapshot(env);
   const threshold = parseThresholdBytes(env.COST_STORAGE_ALERT_BYTES);
-  const alerts = evaluateAlerts(snapshot, threshold);
+  const aiSpendThreshold = parseAiSpendThreshold(env.COST_AI_SPEND_ALERT_USD);
+  const alerts = evaluateAlerts(snapshot, threshold, aiSpendThreshold);
   if (alerts.length === 0) {
     return { alerts, sent: false, reason: 'no_alerts' };
   }
@@ -232,10 +277,12 @@ costsRoutes.get('/api/admin/costs', async (c) => {
     return c.json({ error: 'Forbidden' }, 403);
   }
   const snapshot = await getCostSnapshot(c.env);
-  const threshold = parseThresholdBytes(c.env.COST_STORAGE_ALERT_BYTES);
+  const storageThreshold = parseThresholdBytes(c.env.COST_STORAGE_ALERT_BYTES);
+  const aiSpendThreshold = parseAiSpendThreshold(c.env.COST_AI_SPEND_ALERT_USD);
   return c.json({
     snapshot,
-    threshold_bytes: threshold,
-    alerts: evaluateAlerts(snapshot, threshold),
+    threshold_bytes: storageThreshold,
+    ai_spend_threshold_usd: aiSpendThreshold,
+    alerts: evaluateAlerts(snapshot, storageThreshold, aiSpendThreshold),
   });
 });

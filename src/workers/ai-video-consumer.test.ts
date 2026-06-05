@@ -180,9 +180,10 @@ describe('handleAiGenMessage', () => {
       const runs = (env._db as ReturnType<typeof makeDbStub>)['_runs'] as Array<{ sql: string; binds: unknown[] }>;
       const costRun = runs.find((r) => r.sql.includes('INSERT INTO ai_costs'));
       expect(costRun).toBeDefined();
-      expect(costRun!.sql).toContain("unit_kind");
-      expect(costRun!.sql).toContain("'seconds'");
-      expect(costRun!.binds[1]).toBe('u1'); // userId
+      expect(costRun!.sql).toContain('unit_kind');
+      // unit_kind is a bind param in the shared writeAiCost helper (not a SQL literal)
+      expect(costRun!.binds).toContain('seconds');
+      expect(costRun!.binds[1]).toBe('u1'); // userId at index 1
     });
   });
 

@@ -84,7 +84,10 @@ export async function buildHealthReport(env: HealthEnv, now: number = Date.now()
   };
 }
 
-export async function storeHealthSnapshot(db: D1Database, report: HealthReport): Promise<void> {
+export async function storeHealthSnapshot(db: D1Database | undefined, report: HealthReport): Promise<void> {
+  // The DB binding can be absent in non-production/preview deployments; skip the
+  // snapshot rather than throwing inside the scheduled handler.
+  if (!db) return;
   await db
     .prepare(
       `INSERT INTO health_snapshots

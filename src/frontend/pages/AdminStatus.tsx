@@ -125,14 +125,19 @@ export function AdminStatus(): JSX.Element {
     if (!msg) return;
     setUpdateBusy((prev) => ({ ...prev, [incidentId]: true }));
     try {
-      await fetch(`/api/admin/status/incidents/${incidentId}/updates`, {
+      const res = await fetch(`/api/admin/status/incidents/${incidentId}/updates`, {
         method: 'POST',
         credentials: 'include',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ message: msg, status: st }),
       });
+      // Only clear the typed message once the update is persisted — otherwise a
+      // failed request silently discards what the admin wrote.
+      if (!res.ok) throw new Error(`Status ${res.status}`);
       setUpdateMsg((prev) => ({ ...prev, [incidentId]: '' }));
       await loadIncidents();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to post update');
     } finally {
       setUpdateBusy((prev) => ({ ...prev, [incidentId]: false }));
     }

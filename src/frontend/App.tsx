@@ -46,6 +46,7 @@ const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.P
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
 const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -53,6 +54,8 @@ const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Sta
 const AdminStatus = lazy(() =>
   import('./pages/AdminStatus').then((m) => ({ default: m.AdminStatus })),
 );
+const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
+const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -230,10 +233,16 @@ function HeaderNav(): JSX.Element {
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
       </Link>
-      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user.email}`} style={iconBtn}>
+      <Link to="/feeds">
+        <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
+      </Link>
+      <Link to="/studio">
+        <button type="button" className="btn btn--ghost btn--sm">Studio</button>
+      </Link>
+      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user.email}`} style={iconBtn}>
+      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
@@ -725,6 +734,14 @@ export default function App(): JSX.Element {
             }
           />
           <Route
+            path="/studio"
+            element={
+              <RequireAuth>
+                <Studio />
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/profile"
             element={
               <RequireAuth>
@@ -780,6 +797,15 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route
+            path="/feeds"
+            element={
+              <RequireAuth>
+                <Feeds />
+              </RequireAuth>
+            }
+          />
+          <Route path="/feeds/:id" element={<FeedView />} />
           <Route
             path="/onboarding"
             element={

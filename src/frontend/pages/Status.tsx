@@ -155,7 +155,10 @@ function IncidentTimeline({ id }: { id: string }): JSX.Element {
     if (!open || detail) return;
     void fetch(`/api/status/incidents/${id}`)
       .then((r) => r.json() as Promise<IncidentDetail>)
-      .then(setDetail);
+      .then(setDetail)
+      .catch(() => {
+        /* timeline is supplementary — a fetch failure shouldn't crash the page */
+      });
   }, [open, id, detail]);
 
   return (

@@ -15,7 +15,7 @@ const createIncidentSchema = z.object({
   title:      z.string().min(1).max(200),
   impact:     z.enum(['none', 'minor', 'major', 'critical']),
   message:    z.string().min(1).max(2000),
-  started_at: z.string().optional(),
+  started_at: z.string().datetime().optional(),
 });
 
 const updateIncidentSchema = z.object({
@@ -32,17 +32,24 @@ const addUpdateSchema = z.object({
 const createMaintenanceSchema = z.object({
   title:           z.string().min(1).max(200),
   description:     z.string().max(2000).optional().default(''),
-  scheduled_start: z.string(),
-  scheduled_end:   z.string(),
+  scheduled_start: z.string().datetime(),
+  scheduled_end:   z.string().datetime(),
+}).refine((m) => Date.parse(m.scheduled_end) > Date.parse(m.scheduled_start), {
+  message: 'scheduled_end must be after scheduled_start',
+  path: ['scheduled_end'],
 });
 
 const updateMaintenanceSchema = z.object({
   title:           z.string().min(1).max(200).optional(),
   description:     z.string().max(2000).optional(),
-  scheduled_start: z.string().optional(),
-  scheduled_end:   z.string().optional(),
+  scheduled_start: z.string().datetime().optional(),
+  scheduled_end:   z.string().datetime().optional(),
   status:          z.enum(['scheduled', 'in_progress', 'completed', 'cancelled']).optional(),
-});
+}).refine(
+  (m) => m.scheduled_start === undefined || m.scheduled_end === undefined
+    || Date.parse(m.scheduled_end) > Date.parse(m.scheduled_start),
+  { message: 'scheduled_end must be after scheduled_start', path: ['scheduled_end'] },
+);
 
 const incidentsQuerySchema = z.object({
   resolved: z.enum(['true', 'false', 'all']).default('false'),

@@ -1,11 +1,13 @@
 import { z } from 'zod';
 import { transitionVideoStatus } from './video-status';
+import { getEncoderStub } from './encoder-container';
 
 interface Env {
   DB: D1Database;
   STREAM_ENABLED?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CF_STREAM_API_TOKEN?: string;
+  ENCODE_CONTAINER: DurableObjectNamespace;
 }
 
 const queueMessageSchema = z.object({
@@ -13,7 +15,7 @@ const queueMessageSchema = z.object({
   r2Key: z.string().min(1),
 });
 
-async function sendToStream(env: Env, r2Key: string): Promise<string> {
+export async function sendToStream(env: Env, r2Key: string): Promise<string> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CF_STREAM_API_TOKEN;
   if (!accountId || !apiToken) {
@@ -67,7 +69,18 @@ export async function handleEncodingMessage(env: Env, body: unknown): Promise<vo
       return;
     }
 
-    // No Stream — leave queued for the R2+FFmpeg fallback path (ALO-136).
+    // R2+FFmpeg fallback: dispatch to EncoderContainer pool (ALO-136).
+    await transitionVideoStatus(env.DB, videoId, 'encoding');
+    const stub = getEncoderStub(env.ENCODE_CONTAINER, videoId);
+    const res = await stub.fetch('https://encoder-container/encode', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ videoId, r2Key }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '<unreadable>');
+      throw new Error(`Encoder container responded ${res.status}: ${text.slice(0, 200)}`);
+    }
   } catch (error) {
     await transitionVideoStatus(env.DB, videoId, 'failed');
     const message = error instanceof Error ? error.message : String(error);

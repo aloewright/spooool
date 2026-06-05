@@ -16,3 +16,4 @@
 - Strand stack utilities require the base `stack` class for flex layout; size classes like `stack-sm` / `stack-xl` only control gap
 - Feature specs live in `docs/superpowers/specs/`; executable plans in `docs/superpowers/plans/`
 - CI runs `lint:remotion-animation` to block forbidden CSS/Tailwind animation patterns in Remotion code
+- `package-lock.json` must be Linux-canonical (CI verifies via `npm install --package-lock-only`); on macOS run `npm run lockfile:linux` after dep changes, never revert vendored `file:*.tgz` deps or move `@rolldown/binding-linux-x64-gnu` out of `optionalDependencies`

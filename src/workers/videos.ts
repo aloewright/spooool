@@ -523,12 +523,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       return c.json({ error: initialError.message, code: initialError.code }, 400);
     }
 
-    const headerBytes = new Uint8Array(await rawFile.slice(0, 12).arrayBuffer());
-    const magicError = validateMagicBytes(headerBytes);
-    if (magicError) {
-      return c.json({ error: magicError.message, code: magicError.code }, 400);
-    }
-
     // ALO-139: precheck the user's storage quota before we pay for the
     // first R2 write or open a multipart upload. We only know the chunk-0
     // size at this point — for multipart, completion does the final
@@ -543,6 +537,12 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         },
         413,
       );
+    }
+
+    const headerBytes = new Uint8Array(await rawFile.slice(0, 12).arrayBuffer());
+    const magicError = validateMagicBytes(headerBytes);
+    if (magicError) {
+      return c.json({ error: magicError.message, code: magicError.code }, 400);
     }
   }
 

@@ -12,7 +12,8 @@ import { createAuth, type AuthEnv } from '../auth';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
-import { healthRoutes } from './health';
+import { buildHealthReport, healthRoutes, storeHealthSnapshot } from './health';
+import { statusRoutes } from './status';
 import { lifecycleRoutes } from './lifecycle';
 import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
@@ -216,6 +217,7 @@ app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
+app.route('/', statusRoutes);
 app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
@@ -257,6 +259,9 @@ const workerHandlers = {
             // Frequent sweep: render-job timeout cleanup + abandoned create_sessions
             await runStuckJobSweep(env.DB);
             await runAbandonedSessionsSweep(env.DB);
+            // Store a health snapshot so /api/status/uptime has data to plot.
+            const healthReport = await buildHealthReport(env);
+            await storeHealthSnapshot(env.DB, healthReport);
             // ALO-feeds: warm cheap YouTube source caches for recently-viewed feeds.
             const warmed = await warmFeedCaches(env);
             if (warmed > 0) console.log('[feed-warm]', { cron: controller.cron, warmed });

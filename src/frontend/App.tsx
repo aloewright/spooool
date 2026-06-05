@@ -50,6 +50,10 @@ const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Stu
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
+const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
+const AdminStatus = lazy(() =>
+  import('./pages/AdminStatus').then((m) => ({ default: m.AdminStatus })),
+);
 const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 
@@ -650,6 +654,7 @@ export function SiteFooter(): JSX.Element {
       <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
+      <Link to="/status">Status</Link>
     </footer>
   );
 }
@@ -806,6 +811,15 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Onboarding />
+              </RequireAuth>
+            }
+          />
+          <Route path="/status" element={<Status />} />
+          <Route
+            path="/admin/status"
+            element={
+              <RequireAuth>
+                <AdminStatus />
               </RequireAuth>
             }
           />

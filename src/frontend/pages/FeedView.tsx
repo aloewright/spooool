@@ -155,7 +155,7 @@ export function FeedView(): JSX.Element {
       ) : null}
 
       {data !== null && data.items.length > 0 ? (
-        <div className="feed-size-controls row" role="group" aria-label="Video size" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="feed-size-controls row" role="group" aria-label="Video size" style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', alignItems: 'center', margin: 'var(--space-3) 0' }}>
           <span className="ds-meta">Size:</span>
           {FEED_SIZES.map((s) => (
             <button

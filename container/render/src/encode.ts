@@ -99,7 +99,7 @@ function runFfmpeg(inputPath: string, hlsDir: string): Promise<void> {
   });
 }
 
-function buildMasterPlaylist(): string {
+export function buildMasterPlaylist(): string {
   const lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
   for (const v of VARIANTS) {
     lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${v.bandwidth},RESOLUTION=${v.resolution}`);

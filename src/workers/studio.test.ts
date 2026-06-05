@@ -15,6 +15,10 @@ vi.mock('@tanstack/ai', async (orig) => {
       model: '@cf/black-forest-labs/flux-1-schnell',
       images: [{ b64Json: btoa('hello') }],
     })),
+    generateTranscription: vi.fn(async () => ({
+      text: 'hello world',
+      segments: [{ start: 0, end: 1, text: 'hello' }, { start: 1, end: 2, text: 'world' }],
+    })),
   };
 });
 
@@ -653,5 +657,51 @@ describe('POST /api/videos/:id/thumbnail/from-asset', () => {
     const urlFilename = thumbnailUrl.split('/').pop();
     const r2Filename = puts[0].key.split('/').pop();
     expect(urlFilename).toBe(r2Filename);
+  });
+});
+
+describe('POST /api/studio/captions (ALO-648)', () => {
+  const captionsUser = { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true };
+
+  function postCaptions(user: typeof captionsUser | null, body: unknown, envOverrides: Record<string, unknown> = {}) {
+    const db = makeDbStub({
+      videoRow: { id: 'v1', user_id: 'u1', r2_key: 'u1/v1/raw.mp4', title: 'My video' },
+    });
+    const videos = makeVideosStub();
+    (videos['_setGetResult'] as (v: unknown) => void)({
+      body: new Uint8Array([1, 2, 3]),
+      arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+      httpMetadata: { contentType: 'video/mp4' },
+    });
+    const app = new Hono<{ Variables: { user: typeof captionsUser | null } }>();
+    app.use('*', async (c, next) => { c.set('user', user); await next(); });
+    app.route('/', studioRoutes);
+    const base = {
+      AI: { gateway: () => ({ run: async () => new Response('') }), run: async () => ({}) },
+      DB: db,
+      VIDEOS: videos,
+      RATE_LIMITER: undefined,
+      ...envOverrides,
+    };
+    return app.request('/api/studio/captions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }, base);
+  }
+
+  it('returns 401 without a session', async () => {
+    expect((await postCaptions(null, { videoId: 'v1' })).status).toBe(401);
+  });
+
+  it('maps transcription segments to CaptionCue[] and persists generated_assets', async () => {
+    const res = await postCaptions(captionsUser, { videoId: 'v1' });
+    expect(res.status).toBe(201);
+    const body = await res.json() as { assetId: string; cues: Array<{ startFrames: number; endFrames: number; text: string }> };
+    expect(body.cues).toEqual([
+      { startFrames: 0, endFrames: 30, text: 'hello' },
+      { startFrames: 30, endFrames: 60, text: 'world' },
+    ]);
+    expect(body.assetId).toMatch(/^a_/);
   });
 });

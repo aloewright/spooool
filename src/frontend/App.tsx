@@ -3,6 +3,7 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParam
 import { LogOut, Moon, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
+import { NotificationBell } from './components/NotificationBell';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the @cloudflare/stream-react
@@ -246,9 +247,7 @@ function HeaderNav(): JSX.Element {
   };
   return (
     <nav className="app-header__nav">
-      <Link to="/subscriptions">
-        <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
-      </Link>
+      <NotificationBell />
       <Link to="/payouts">
         <button type="button" className="btn btn--ghost btn--sm">Payouts</button>
       </Link>

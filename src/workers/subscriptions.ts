@@ -110,6 +110,20 @@ subscriptionRoutes.get('/api/users/me/subscriptions', async (c) => {
   return c.json({ subscriptions: results });
 });
 
+subscriptionRoutes.get('/api/users/me/inbox/unread-count', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS count FROM subscription_inbox
+     WHERE subscriber_user_id = ? AND seen_at IS NULL`,
+  )
+    .bind(user.id)
+    .first<{ count: number }>();
+
+  return c.json({ count: Number(row?.count ?? 0) });
+});
+
 subscriptionRoutes.get('/api/users/me/inbox', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);

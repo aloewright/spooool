@@ -474,3 +474,43 @@ describe('upload storage-quota gate', () => {
     expect(res.status).toBe(201);
   });
 });
+
+describe('DELETE /api/videos/:id cache invalidation (ALO-431)', () => {
+  it('deletes videoMetaCacheKey from KV when the owner deletes their video', async () => {
+    const cacheDeletes: string[] = [];
+    const videoId = 'vid-del-cache';
+    const ownerId = 'owner-del';
+
+    const CACHE = {
+      delete: async (key: string) => { cacheDeletes.push(key); },
+      get: async () => null,
+      put: async () => {},
+    } as unknown as KVNamespace;
+
+    const DB = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        const stmt = {
+          bind(...v: unknown[]) { bound = v; return stmt; },
+          async first() {
+            if (sql.includes('SELECT id, user_id, r2_key FROM videos')) {
+              return { id: videoId, user_id: ownerId, r2_key: `${ownerId}/${videoId}/raw.mp4` };
+            }
+            return null;
+          },
+          async run() { return { success: true }; },
+        };
+        void bound;
+        return stmt;
+      },
+    } as unknown as D1Database;
+
+    const VIDEOS = { delete: async () => {} } as unknown as R2Bucket;
+    const env = { DB, CACHE, VIDEOS, SESSIONS: {} as KVNamespace, VIDEO_ENCODING: { send: async () => {} } as unknown as Queue };
+
+    const fetcher = mountWithUser(env, { id: ownerId, email: 'o@t.com', name: 'Owner', emailVerified: true });
+    const res = await fetcher(`/api/videos/${videoId}`, { method: 'DELETE' });
+    expect(res.status).toBe(200);
+    expect(cacheDeletes).toContain(`video:v1:${videoId}`);
+  });
+});

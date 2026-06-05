@@ -20,6 +20,7 @@ interface FakeDBSpec {
   // rows the GET /me/subscriptions and /me/inbox queries should return.
   meSubscriptions?: unknown[];
   inboxItems?: unknown[];
+  inboxCount?: number;
   runs?: Array<{ sql: string; bound: unknown[] }>;
 }
 
@@ -47,6 +48,9 @@ function fakeDB(spec: FakeDBSpec): D1Database {
         if (sql.startsWith('SELECT id FROM user')) {
           const username = bound[0] as string;
           return (spec.channels?.[username] ?? null) as never;
+        }
+        if (sql.includes('FROM subscription_inbox') && sql.includes('COUNT(*)')) {
+          return { count: spec.inboxCount ?? 0 } as never;
         }
         if (sql.startsWith('SELECT COUNT(*)')) {
           return { c: spec.subscriberCount ?? subscriptions.size } as never;
@@ -185,6 +189,27 @@ describe('GET /api/users/me/subscriptions', () => {
     const res = await req('/api/users/me/subscriptions');
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ subscriptions: rows });
+  });
+});
+
+describe('GET /api/users/me/inbox/unread-count', () => {
+  it('returns 401 when unauthenticated', async () => {
+    const req = buildApp(fakeDB({}), null);
+    const res = await req('/api/users/me/inbox/unread-count');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns unseen inbox count for the current user', async () => {
+    const req = buildApp(
+      fakeDB({
+        inboxCount: 3,
+      }),
+      { id: 'me' },
+    );
+    const res = await req('/api/users/me/inbox/unread-count');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { count: number };
+    expect(body.count).toBe(3);
   });
 });
 

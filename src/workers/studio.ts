@@ -7,8 +7,18 @@
 // copies a generated image asset into the thumbnail namespace.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { chat, generateImage, toServerSentEventsResponse } from '@tanstack/ai';
-import { gatewayChat, gatewayImage, DEFAULT_IMAGE_MODEL, type AiGatewayEnv, type AiGatewayMode } from './ai-gateway';
+import { chat, generateImage, generateTranscription, toServerSentEventsResponse } from '@tanstack/ai';
+import {
+  gatewayChat,
+  gatewayImage,
+  gatewayTranscription,
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_STT_MODEL,
+  type AiGatewayEnv,
+  type AiGatewayMode,
+} from './ai-gateway';
+import { mapSegmentsToCaptionCues } from './edit-model';
+import { extractAudioForTranscription } from './media-transform';
 import type { AIBindingEnv } from './create-tools';
 import { STUDIO_GEN_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
@@ -44,6 +54,11 @@ const imageBodySchema = z.object({ prompt: z.string().min(1).max(2048) }); // fl
 
 const fromAssetSchema = z.object({ asset_id: z.string().min(1) });
 const videoBodySchema = z.object({ prompt: z.string().min(1).max(2048) });
+const captionsBodySchema = z.object({
+  videoId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+});
+const EST_USD_PER_STT_SECOND = 0.0001;
 
 export const studioRoutes = new Hono<{ Bindings: StudioEnv; Variables: StudioVariables }>();
 
@@ -118,6 +133,83 @@ studioRoutes.post('/api/studio/image', async (c) => {
 
   // dataUrl lets the panel preview immediately (studio/images/* has no public GET route).
   return c.json({ assetId, r2Key, bytes, dataUrl: `data:${IMAGE_CONTENT_TYPE};base64,${b64}` }, 201);
+});
+
+studioRoutes.post('/api/studio/captions', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
+
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
+  if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
+
+  const raw = await c.req.json().catch(() => null);
+  const parsed = captionsBodySchema.safeParse(raw);
+  if (!parsed.success) return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
+
+  const video = await c.env.DB.prepare(
+    `SELECT id, user_id, r2_key, title FROM videos WHERE id = ? AND deleted_at IS NULL`,
+  )
+    .bind(parsed.data.videoId)
+    .first<{ id: string; user_id: string; r2_key: string; title: string }>();
+  if (!video) return c.json({ error: 'Video not found' }, 404);
+  if (video.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
+
+  let audioBytes: Uint8Array;
+  try {
+    const extracted = await extractAudioForTranscription(c.env, video.r2_key);
+    audioBytes = extracted.bytes;
+  } catch (err) {
+    return c.json({ error: 'Audio extraction failed', detail: err instanceof Error ? err.message : String(err) }, 502);
+  }
+
+  let transcription;
+  try {
+    transcription = await generateTranscription({
+      adapter: gatewayTranscription(c.env as unknown as AiGatewayEnv, DEFAULT_STT_MODEL),
+      audio: new Blob([new Uint8Array(audioBytes)], { type: 'audio/mp4' }),
+    });
+  } catch (err) {
+    return c.json({ error: 'Transcription failed', detail: err instanceof Error ? err.message : String(err) }, 502);
+  }
+
+  const segments = (transcription.segments ?? []).map((s) => ({
+    start: s.start ?? 0,
+    end: s.end ?? 0,
+    text: s.text ?? '',
+  }));
+  const cues = mapSegmentsToCaptionCues(segments);
+  const durationSeconds = segments.length > 0
+    ? Math.max(...segments.map((s) => s.end))
+    : 0;
+
+  const assetId = `a_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  const specJson = JSON.stringify({
+    videoId: video.id,
+    model: DEFAULT_STT_MODEL,
+    cues,
+    segments,
+  });
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO generated_assets (id, user_id, kind, source, r2_key, stream_video_id, bytes, status, spec_json, error_message, project_id, created_at, updated_at)
+       VALUES (?, ?, 'caption', 'stt_gen', NULL, NULL, 0, 'ready', ?, NULL, ?, ?, ?)`,
+    ).bind(assetId, user.id, specJson, parsed.data.projectId ?? null, now, now),
+    aiCostStatement(c.env.DB, {
+      userId: user.id,
+      op: 'caption_gen',
+      route: 'dynamic/transcription',
+      model: DEFAULT_STT_MODEL,
+      units: Math.max(1, Math.ceil(durationSeconds)),
+      unitKind: 'seconds',
+      estUsd: Math.max(1, Math.ceil(durationSeconds)) * EST_USD_PER_STT_SECOND,
+      projectId: parsed.data.projectId ?? null,
+    }),
+  ]);
+
+  return c.json({ assetId, cues, durationSeconds }, 201);
 });
 
 studioRoutes.post('/api/studio/video', async (c) => {

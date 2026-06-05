@@ -1,0 +1,89 @@
+# Minimal wrangler config for @cloudflare/vitest-pool-workers integration tests.
+# Omits container images (not runnable in workerd test pool) while keeping D1/KV/R2
+# bindings and DO class registrations so the real Worker entry boots.
+name = "spooool-vitest"
+main = "src/workers/index.ts"
+compatibility_date = "2024-03-29"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "spooool-vitest"
+database_id = "00000000-0000-0000-0000-000000000001"
+migrations_dir = "src/db/migrations"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "00000000000000000000000000000001"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "00000000000000000000000000000002"
+
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "spooool-videos-vitest"
+
+[[r2_buckets]]
+binding = "LOGS"
+bucket_name = "spooool-logs-vitest"
+
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "spooool_video_analytics"
+
+[[durable_objects.bindings]]
+name = "CHANNEL_SUBSCRIBER_DO"
+class_name = "ChannelSubscriberDO"
+
+[[durable_objects.bindings]]
+name = "RATE_LIMITER"
+class_name = "RateLimiterDO"
+
+[[durable_objects.bindings]]
+name = "RENDER_CONTAINER"
+class_name = "RenderContainer"
+
+[[durable_objects.bindings]]
+name = "ENCODE_CONTAINER"
+class_name = "EncoderContainer"
+
+[[durable_objects.bindings]]
+name = "COMPOSER_AGENT"
+class_name = "ComposerAgent"
+
+[[migrations]]
+tag = "do_v1"
+new_classes = ["ChannelSubscriberDO"]
+
+[[migrations]]
+tag = "do_v2"
+new_classes = ["RateLimiterDO"]
+
+[[migrations]]
+tag = "do_v3"
+new_sqlite_classes = ["RenderContainer"]
+
+[[migrations]]
+tag = "do_v4"
+new_sqlite_classes = ["ComposerAgent"]
+
+[[migrations]]
+tag = "do_v5"
+new_sqlite_classes = ["EncoderContainer"]
+
+[vars]
+ALLOWED_ORIGINS = ""
+ADMIN_EMAILS = "test@example.com"
+EMAIL_FROM = "noreply@spooool.com"
+EMAIL_FROM_NAME = "Spooool"
+AI_GATEWAY_MODE = "run-gateway"
+CF_STREAM_WEBHOOK_SECRET = "vitest-webhook-secret"
+
+[ai]
+binding = "AI"
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"

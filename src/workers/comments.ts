@@ -1,12 +1,17 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { isLikelySpam } from './spam-filter';
+import { sendCommentNotificationEmail } from './notification-email';
+import { waitUntilBackground } from './wait-until';
 
 export interface CommentsEnv {
   DB: D1Database;
+  EMAIL?: import('./email').EmailBinding;
+  EMAIL_FROM?: string;
+  EMAIL_FROM_NAME?: string;
 }
 
-type SessionUser = { id: string } | null;
+type SessionUser = { id: string; name?: string } | null;
 type CommentsVariables = { user: SessionUser };
 
 const COMMENT_BODY_MAX = 4_000;
@@ -168,6 +173,15 @@ commentRoutes.post('/api/videos/:id/comments', async (c) => {
     resolvedParent = parent.id;
   }
 
+  const owner = await c.env.DB.prepare(
+    `SELECT v.user_id, v.title, u.name AS commenter_name
+     FROM videos v
+     LEFT JOIN user u ON u.id = ?
+     WHERE v.id = ? AND v.deleted_at IS NULL`,
+  )
+    .bind(user.id, videoId)
+    .first<{ user_id: string; title: string; commenter_name: string | null }>();
+
   const id = crypto.randomUUID();
   await c.env.DB.prepare(
     `INSERT INTO comments (id, video_id, user_id, parent_comment_id, body, created_at, updated_at)
@@ -175,6 +189,19 @@ commentRoutes.post('/api/videos/:id/comments', async (c) => {
   )
     .bind(id, videoId, user.id, resolvedParent, trimmed)
     .run();
+
+  if (owner && owner.user_id !== user.id) {
+    waitUntilBackground(c, sendCommentNotificationEmail(c.env, {
+      ownerUserId: owner.user_id,
+      commenterName: owner.commenter_name ?? user.name ?? 'Someone',
+      videoId,
+      videoTitle: owner.title,
+      excerpt: trimmed,
+      origin: new URL(c.req.url).origin,
+    }).catch((err) => {
+      console.warn('comment email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
+    }));
+  }
 
   return c.json({ id, body: trimmed, parent_comment_id: resolvedParent }, 201);
 });

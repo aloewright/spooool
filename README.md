@@ -349,6 +349,30 @@ wrangler r2 object list spooool-videos
 - Use Queue for async processing
 - Deploy separate encoding Worker
 
+## Testing
+
+Unit and DOM tests run through Vitest against `src/**/*.test.ts` (and `*.dom.test.tsx` with happy-dom):
+
+```bash
+npm test
+```
+
+Worker integration tests use [`@cloudflare/vitest-pool-workers`](https://developers.cloudflare.com/workers/testing/vitest-integration/) with `wrangler.vitest.toml` (real D1 migrations, KV, R2 bindings). They live in `src/**/*.workers.test.ts`:
+
+```bash
+npm run test:workers
+```
+
+`npm test` runs both suites. CI runs unit + worker integration with `--run`.
+
+Playwright E2E specs live under `tests/e2e/`:
+
+```bash
+npm run test:e2e
+```
+
+Set `PLAYWRIGHT_STUDIO=1` to enable the gated `/studio` smoke spec (`tests/e2e/studio.spec.ts`).
+
 ## Contributing
 
 Contributions welcome! Areas needing help:

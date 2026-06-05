@@ -411,6 +411,6 @@ describe('handlePolarWebhook', () => {
       { method: 'POST', headers, body: payload },
       { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
     );
-    expect(rows[0].user_id).toBe('polar_usr_abc');
+    expect(rows[0].polar_user_id).toBe('polar_usr_abc');
   });
 });

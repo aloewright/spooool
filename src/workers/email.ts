@@ -245,3 +245,34 @@ export async function sendAccountDeletionEmail(
 ): Promise<EmailResult> {
   return send(env, { to: args.to, ...buildAccountDeletionEmail(args) });
 }
+
+// LEGAL-REVIEW: placeholder copy — ALO-170. Counsel must approve before launch.
+export function buildDmcaUploaderNotifyEmail(args: {
+  claimId: string;
+  videoId: string;
+  counterUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { claimId, videoId, counterUrl } = args;
+  return {
+    subject: 'Notice: Your Spooool video has been disabled (DMCA claim)',
+    text:
+      `Your video (ID: ${videoId}) has been disabled following a DMCA takedown request ` +
+      `(claim ID: ${claimId}).\n\n` +
+      `If you believe this takedown is mistaken, you may file a counter-notice:\n` +
+      `${counterUrl}\n\n` +
+      `For questions, contact dmca@spooool.com.`,
+    html:
+      `<p>Your video (ID: <code>${escapeHtml(videoId)}</code>) has been disabled following ` +
+      `a DMCA takedown request (claim ID: <code>${escapeHtml(claimId)}</code>).</p>` +
+      `<p>If you believe this takedown is mistaken, you may ` +
+      `<a href="${escapeHtml(counterUrl)}">file a counter-notice</a>.</p>` +
+      `<p>For questions, contact <a href="mailto:dmca@spooool.com">dmca@spooool.com</a>.</p>`,
+  };
+}
+
+export async function sendDmcaUploaderNotifyEmail(
+  env: EmailEnv,
+  args: { to: string; claimId: string; videoId: string; counterUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildDmcaUploaderNotifyEmail(args) });
+}

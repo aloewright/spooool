@@ -173,14 +173,6 @@ new_sqlite_classes = ["ComposerAgent"]
 [triggers]
 crons = ["0 2 * * *", "*/5 * * * *"]
 
-[env.staging]
-vars = { ALLOWED_ORIGINS = "" }
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "spooool-staging"
-database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
-migrations_dir = "src/db/migrations"
-
 [vars]
 # YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:
 #   wrangler secret put YOUTUBE_API_KEY            (prod)
@@ -189,7 +181,6 @@ migrations_dir = "src/db/migrations"
 # no credentials (public oEmbed). Neither is a model provider, so neither
 # routes through the AI Gateway.
 
-[vars]
 # Comma-separated origin allow-list for CSRF protection on /api/*. Same-origin
 # is always allowed in addition to whatever is listed here. Override per env.
 ALLOWED_ORIGINS = ""
@@ -213,6 +204,17 @@ EMAIL_FROM_NAME = "Spooool"
 # Switch to "gateway-binding" to use the @cloudflare/tanstack-ai gateway-binding
 # adapter once it's smoke-verified on this account (see E11 AI Studio spec, App. B).
 AI_GATEWAY_MODE = "run-gateway"
+
+# Staging environment. MUST come after the top-level [vars] table: TOML treats
+# [env.*] sections as terminal, so any top-level table declared after the first
+# [env.*] section triggers "trying to redefine an already defined table".
+[env.staging]
+vars = { ALLOWED_ORIGINS = "" }
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "spooool-staging"
+database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
+migrations_dir = "src/db/migrations"
 
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)

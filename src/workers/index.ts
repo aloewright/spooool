@@ -36,12 +36,9 @@ import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
-<<<<<<< HEAD
 import { studioRoutes, type StudioEnv } from './studio';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { warmFeedCaches } from './feed-warm';
-=======
->>>>>>> origin/main
 import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { tipsRoutes, handleStripeWebhook, type TipsEnv } from './tips';
@@ -76,13 +73,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv 
   // 'run-gateway' uses the env.AI.run('@cf/..', .., { gateway: { id: 'x' } })
   // custom adapter. Never plain { binding: env.AI } (drops observability).
   AI_GATEWAY_MODE?: AiGatewayMode;
-<<<<<<< HEAD
   // YouTube Data API v3 key for custom feeds (src/workers/youtube.ts). A
   // Cloudflare *secret* (Doppler-synced), NOT a [vars] entry. Optional so the
   // worker still boots without it; YouTube sources just return an error result.
   YOUTUBE_API_KEY?: string;
-=======
->>>>>>> origin/main
 };
 
 type Variables = {

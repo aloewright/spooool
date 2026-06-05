@@ -50,13 +50,13 @@ function makeFakeDB(seed: FakeLedgerRow[] = []): {
         async run() {
           // INSERT OR IGNORE: skip if webhook_id already present.
           const [id, webhook_id, event_type, polar_object_id, polar_customer_id,
-                user_id, amount_cents, currency, status, meta_json, created_at] =
+                polar_user_id, amount_cents, currency, status, meta_json, created_at] =
             bound as [string, string, string, string | null, string | null,
                        string | null, number | null, string | null, string, string, number];
           const exists = rows.some((r) => r.webhook_id === webhook_id);
           if (exists) return { meta: { changes: 0 } };
           rows.push({ id, webhook_id, event_type, polar_object_id, polar_customer_id,
-                       user_id, amount_cents, currency, status, meta_json, created_at });
+                       polar_user_id, amount_cents, currency, status, meta_json, created_at });
           return { meta: { changes: 1 } };
         },
       };

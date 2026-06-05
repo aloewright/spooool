@@ -1,11 +1,12 @@
--- src/db/migrations/0023_polar_ledger.sql
+-- src/db/migrations/0024_polar_ledger.sql
 --
 -- Polar payment ledger — append-only log of every Polar webhook event that
 -- carries financial significance (orders, subscriptions, refunds, partner
 -- benefit-grant payouts, disputes/chargebacks). Follows 0022 conventions:
 --   * id TEXT PRIMARY KEY NOT NULL
 --   * INTEGER ms timestamps (Date.now()), NOT CURRENT_TIMESTAMP
---   * FOREIGN KEY (...) REFERENCES user(id) where mappable
+--   * polar_user_id stores Polar's OWN user id — NOT a local user.id — so it
+--     carries no FOREIGN KEY (Polar ids do not exist in our user table)
 --   * status via TEXT NOT NULL CHECK (... IN (...))
 --   * UNIQUE constraint on webhook_id — the Standard Webhooks message ID
 --     used for idempotent writes (INSERT OR IGNORE)
@@ -25,19 +26,18 @@ CREATE TABLE IF NOT EXISTS polar_ledger (
   event_type TEXT NOT NULL,
   polar_object_id TEXT,
   polar_customer_id TEXT,
-  user_id TEXT,
+  polar_user_id TEXT,
   amount_cents INTEGER,
   currency TEXT,
   status TEXT NOT NULL CHECK (status IN (
     'pending','active','paid','cancelled','revoked','refunded','disputed','failed','unknown'
   )),
   meta_json TEXT NOT NULL DEFAULT '{}',
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES user(id)
+  created_at INTEGER NOT NULL
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_polar_ledger_webhook_id ON polar_ledger(webhook_id);
-CREATE INDEX IF NOT EXISTS idx_polar_ledger_user_id ON polar_ledger(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_polar_ledger_user_id ON polar_ledger(polar_user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_polar_ledger_customer ON polar_ledger(polar_customer_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_polar_ledger_event_type ON polar_ledger(event_type, created_at);
 CREATE INDEX IF NOT EXISTS idx_polar_ledger_object ON polar_ledger(polar_object_id, event_type);

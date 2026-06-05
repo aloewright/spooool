@@ -246,7 +246,7 @@ export const handlePolarWebhook =
     const result = await c.env.DB.prepare(
       `INSERT OR IGNORE INTO polar_ledger
          (id, webhook_id, event_type, polar_object_id, polar_customer_id,
-          user_id, amount_cents, currency, status, meta_json, created_at)
+          polar_user_id, amount_cents, currency, status, meta_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
       .bind(

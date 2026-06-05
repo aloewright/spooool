@@ -37,6 +37,9 @@ import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
+import { studioRoutes, type StudioEnv } from './studio';
+import { feedRoutes, type FeedsEnv } from './feeds';
+import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
@@ -50,7 +53,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   POLAR_WEBHOOK_SECRET?: string;
@@ -71,6 +74,10 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUplo
   // 'run-gateway' uses the env.AI.run('@cf/..', .., { gateway: { id: 'x' } })
   // custom adapter. Never plain { binding: env.AI } (drops observability).
   AI_GATEWAY_MODE?: AiGatewayMode;
+  // YouTube Data API v3 key for custom feeds (src/workers/youtube.ts). A
+  // Cloudflare *secret* (Doppler-synced), NOT a [vars] entry. Optional so the
+  // worker still boots without it; YouTube sources just return an error result.
+  YOUTUBE_API_KEY?: string;
 };
 
 type Variables = {
@@ -165,11 +172,13 @@ app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
 app.route('/', createRoutes);
+app.route('/', studioRoutes);
 app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
+app.route('/', feedRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.
@@ -202,6 +211,9 @@ const workerHandlers = {
             // Frequent sweep: render-job timeout cleanup + abandoned create_sessions
             await runStuckJobSweep(env.DB);
             await runAbandonedSessionsSweep(env.DB);
+            // ALO-feeds: warm cheap YouTube source caches for recently-viewed feeds.
+            const warmed = await warmFeedCaches(env);
+            if (warmed > 0) console.log('[feed-warm]', { cron: controller.cron, warmed });
             return;
           }
           if (controller.cron !== '0 2 * * *') {

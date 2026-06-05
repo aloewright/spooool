@@ -17,6 +17,7 @@ const CSP_DIRECTIVES: Record<string, string[]> = {
     'https://videodelivery.net',
     'https://*.cloudflarestream.com',
   ],
+  'frame-src': ['https://www.youtube-nocookie.com'],
   'object-src': ["'none'"],
   'frame-ancestors': ["'none'"],
   'base-uri': ["'self'"],

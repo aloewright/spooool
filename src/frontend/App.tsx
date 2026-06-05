@@ -46,6 +46,7 @@ const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.P
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
 const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -225,6 +226,9 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
+      </Link>
+      <Link to="/studio">
+        <button type="button" className="btn btn--ghost btn--sm">Studio</button>
       </Link>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user.email}`} style={iconBtn}>
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -716,6 +720,14 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Create />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/studio"
+            element={
+              <RequireAuth>
+                <Studio />
               </RequireAuth>
             }
           />

@@ -89,6 +89,13 @@ const planWithTooManyPlaceholders = (): AnimationProjectSpec => ({
   }],
 });
 
+// durationFrames (900) deliberately disagrees with the scene coverage (450).
+// The route should normalize durationFrames to the scene coverage instead of 502ing.
+const planWithMismatchedDuration = (): AnimationProjectSpec => ({
+  ...validPlan(),
+  durationFrames: 900,
+});
+
 const planWithOwnedAsset = (): AnimationProjectSpec => ({
   ...validPlan(),
   scenes: [{
@@ -315,10 +322,25 @@ describe('POST /api/studio/animation success', () => {
     });
   });
 
-  it('502 when plan validation fails twice', async () => {
+  it('502 when plan validation fails twice, with a validation detail surfaced', async () => {
     chatResults = [{ version: 1, scenes: [] }, { version: 1, scenes: [] }];
     const { res } = await postAnimation(verifiedUser, { prompt: 'make an animation' });
     expect(res.status).toBe(502);
+    const body = await res.json() as { error: string; detail?: string };
+    expect(body.detail).toBeTruthy();
+  });
+
+  it('normalizes durationFrames to scene coverage instead of 502ing', async () => {
+    chatResults = [planWithMismatchedDuration(), planWithMismatchedDuration()];
+    const { app, base } = buildApp(verifiedUser);
+    const res = await app.request('/api/studio/animation', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'make an animation' }),
+    }, base);
+    expect(res.status).toBe(202);
+    const calls = (base.RENDER_CONTAINER as unknown as { _calls: Array<{ body: { compositionProps: { animation: { durationFrames: number } } } }> })._calls;
+    expect(calls[0].body.compositionProps.animation.durationFrames).toBe(450);
   });
 });
 

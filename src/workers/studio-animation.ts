@@ -57,15 +57,38 @@ function targetDurationFrames(durationSeconds: AnimationRequest['durationSeconds
   return durationSeconds * 30;
 }
 
+/**
+ * Compute the final frame covered by the plan's scenes (max of startFrame +
+ * durationFrames). Returns null when scenes are missing or non-numeric so the
+ * caller leaves durationFrames untouched and lets schema validation report it.
+ */
+function planSceneCoverage(plan: { scenes?: unknown }): number | null {
+  if (!Array.isArray(plan.scenes) || plan.scenes.length === 0) return null;
+  let end = 0;
+  for (const scene of plan.scenes) {
+    if (!scene || typeof scene !== 'object') return null;
+    const start = (scene as { startFrame?: unknown }).startFrame;
+    const duration = (scene as { durationFrames?: unknown }).durationFrames;
+    if (typeof start !== 'number' || typeof duration !== 'number') return null;
+    end = Math.max(end, start + duration);
+  }
+  return Number.isFinite(end) && end > 0 ? end : null;
+}
+
 function normalizePlanDimensions(
   plan: AnimationProjectSpec,
   aspectRatio: AnimationRequest['aspectRatio'],
 ): AnimationProjectSpec {
   const dims = dimensionsForAspectRatio(aspectRatio);
+  // The model often reports a durationFrames that disagrees with its own scene
+  // coverage. Width/height are already overridden to authoritative values; do the
+  // same for durationFrames so a contiguous plan isn't rejected over an off-by-N total.
+  const coverage = planSceneCoverage(plan as { scenes?: unknown });
   return parseAnimationProjectSpec({
     ...plan,
     width: dims.width,
     height: dims.height,
+    ...(coverage !== null ? { durationFrames: coverage } : {}),
   });
 }
 
@@ -283,14 +306,23 @@ studioAnimationRoutes.post('/api/studio/animation', async (c) => {
     animation = await generateAnimationPlan({ env: c.env, request: parsed.data });
   } catch (firstErr) {
     const issues = firstErr instanceof Error ? firstErr.message : String(firstErr);
+    console.warn('[studio-animation] plan generation failed, attempting repair', { issues });
     try {
       animation = await generateAnimationPlan({
         env: c.env,
         request: parsed.data,
         repairIssues: issues,
       });
-    } catch {
-      return c.json({ error: 'Animation plan failed validation. Try a simpler prompt.' }, 502);
+    } catch (repairErr) {
+      const repairIssues = repairErr instanceof Error ? repairErr.message : String(repairErr);
+      console.error('[studio-animation] plan generation failed after repair', {
+        firstIssues: issues,
+        repairIssues,
+      });
+      return c.json({
+        error: 'Animation plan failed validation. Try a simpler prompt.',
+        detail: repairIssues.slice(0, 600),
+      }, 502);
     }
   }
 

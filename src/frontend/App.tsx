@@ -49,6 +49,10 @@ const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Cre
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
+const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
+const AdminStatus = lazy(() =>
+  import('./pages/AdminStatus').then((m) => ({ default: m.AdminStatus })),
+);
 
 function RouteFallback(): JSX.Element {
   return (
@@ -641,6 +645,7 @@ export function SiteFooter(): JSX.Element {
       <Link to="/legal/privacy">Privacy Policy</Link>
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
+      <Link to="/status">Status</Link>
     </footer>
   );
 }
@@ -780,6 +785,15 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Onboarding />
+              </RequireAuth>
+            }
+          />
+          <Route path="/status" element={<Status />} />
+          <Route
+            path="/admin/status"
+            element={
+              <RequireAuth>
+                <AdminStatus />
               </RequireAuth>
             }
           />

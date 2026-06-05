@@ -84,6 +84,27 @@ export async function buildHealthReport(env: HealthEnv, now: number = Date.now()
   };
 }
 
+export async function storeHealthSnapshot(db: D1Database, report: HealthReport): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO health_snapshots
+         (status, db_status, db_latency_ms, cache_status, cache_latency_ms,
+          storage_status, storage_latency_ms, checked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      report.status,
+      report.checks.db.status,
+      report.checks.db.latency_ms ?? null,
+      report.checks.cache.status,
+      report.checks.cache.latency_ms ?? null,
+      report.checks.storage.status,
+      report.checks.storage.latency_ms ?? null,
+      report.timestamp,
+    )
+    .run();
+}
+
 export const healthRoutes = new Hono<{ Bindings: HealthEnv }>();
 
 healthRoutes.get('/api/health', async (c) => {

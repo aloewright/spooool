@@ -21,7 +21,7 @@ interface SessionUser { id: string }
 type RenderVariables = { user: SessionUser | null };
 
 const createBodySchema = z.object({
-  takeKeys: z.array(z.string().min(1)).min(1),
+  takeKeys: z.array(z.string().min(1)),
   compositionProps: z.object({}).passthrough(),
 });
 
@@ -179,10 +179,16 @@ renderRoutes.post('/api/render/jobs/:id/complete', async (c) => {
   }
 
   let title = 'Untitled recording';
+  let aiGenerated = 0;
   try {
-    const spec = JSON.parse(job.composition_spec) as { compositionProps?: { title?: string } };
+    const spec = JSON.parse(job.composition_spec) as {
+      compositionProps?: { title?: string; compositionId?: string };
+    };
     if (spec?.compositionProps?.title && typeof spec.compositionProps.title === 'string') {
       title = spec.compositionProps.title;
+    }
+    if (spec?.compositionProps?.compositionId === 'spooool-animation') {
+      aiGenerated = 1;
     }
   } catch { /* tolerate malformed spec — use default title */ }
 
@@ -197,9 +203,9 @@ renderRoutes.post('/api/render/jobs/:id/complete', async (c) => {
   // between INSERT here and the encoding update.
   await c.env.DB.batch([
     c.env.DB.prepare(
-      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 0, 'queued', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-    ).bind(videoId, job.user_id, title, '', body.outputKey),
+      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, ai_generated, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, 'queued', 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    ).bind(videoId, job.user_id, title, '', body.outputKey, aiGenerated),
     c.env.DB.prepare(
       `UPDATE render_jobs SET status='completed', progress=100, output_r2_key=?, video_id=?, updated_at=? WHERE id=?`,
     ).bind(body.outputKey, videoId, now, id),

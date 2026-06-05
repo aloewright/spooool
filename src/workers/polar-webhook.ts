@@ -69,7 +69,7 @@ export async function verifyPolarSignature(
 
   const key = await crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    new Uint8Array(keyBytes),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],

@@ -27,7 +27,7 @@ export function Studio(): JSX.Element {
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
       <h1 className="ds-h2">AI Studio</h1>
-      <p className="ds-lede">Brainstorm ideas, titles, scripts, and thumbnails with a creative assistant.</p>
+      <p className="ds-lede">Create prompt-generated animations, brainstorm ideas, and generate thumbnails with AI Studio.</p>
       <StudioRoot videoId={videoId} />
     </main>
   );

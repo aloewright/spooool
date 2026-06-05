@@ -1,9 +1,14 @@
+import { AnimationPanel } from './AnimationPanel';
 import { AIStudio } from './AIStudio';
 import { ImagePanel } from './ImagePanel';
 
 export function StudioRoot({ videoId }: { videoId?: string } = {}): JSX.Element {
   return (
     <div className="stack-lg">
+      <section className="stack-sm">
+        <h2 className="ds-h3">Animated video</h2>
+        <AnimationPanel />
+      </section>
       <section className="stack-sm">
         <h2 className="ds-h3">Chat</h2>
         <AIStudio />

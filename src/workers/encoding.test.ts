@@ -96,7 +96,9 @@ describe('handleEncodingMessage', () => {
     expect(updates[0].bound[0]).toBe('encoding');
     // Should have dispatched to the encoder container.
     expect(containerFetch).toHaveBeenCalledTimes(1);
-    const [url, init] = containerFetch.mock.calls[0] as unknown as [string, RequestInit];
+    const call = containerFetch.mock.calls[0];
+    expect(call).toBeDefined();
+    const [url, init] = call as unknown as [string, RequestInit];
     expect(url).toBe('https://encoder-container/encode');
     expect(JSON.parse(init.body as string)).toEqual({ videoId: 'v1', r2Key: 'k' });
   });

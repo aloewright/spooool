@@ -145,4 +145,40 @@ describe('renderJob', () => {
     );
     expect(downloaded.some((d) => d.key === 'recorder/tts/j_p2v.mp3' && d.dest.endsWith('/j_p2v/audio.mp3'))).toBe(true);
   });
+
+  it('stages animation assets into public/{jobId}/ and injects r2Path', async () => {
+    const downloaded: Array<{ key: string; dest: string }> = [];
+    const renderer: RemotionRenderer = {
+      bundle: vi.fn(async () => '/bundle'),
+      selectComposition: vi.fn(async () => ({ id: 'spooool-animation', durationInFrames: 150, fps: 30, width: 1920, height: 1080 })),
+      renderMedia: vi.fn(async () => {}),
+    };
+    await renderJob(
+      {
+        jobId: 'j_anim',
+        takeKeys: [],
+        compositionProps: {
+          compositionId: 'spooool-animation',
+          animation: { version: 1, title: 'x', fps: 30, width: 1920, height: 1080, durationFrames: 150, background: { kind: 'solid', color: '#000000' }, scenes: [] },
+          assets: [{ assetId: 'a_img', r2Key: 'studio/images/a_img.jpg', kind: 'image' }],
+        },
+        onProgress: () => {},
+      },
+      {
+        renderer,
+        downloadTake: vi.fn(async (key: string, dest: string) => { downloaded.push({ key, dest }); }),
+        tmpDir: '/tmp',
+        publicDir: '/bundle/public',
+        remotionEntry: '/remotion/index.ts',
+      },
+    );
+
+    expect(downloaded).toContainEqual({ key: 'studio/images/a_img.jpg', dest: '/bundle/public/j_anim/a_img.jpg' });
+    expect(renderer.selectComposition).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'spooool-animation',
+      inputProps: expect.objectContaining({
+        assets: [expect.objectContaining({ assetId: 'a_img', r2Path: 'j_anim/a_img.jpg' })],
+      }),
+    }));
+  });
 });

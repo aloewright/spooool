@@ -47,6 +47,49 @@ export async function postImage(prompt: string): Promise<GeneratedImage> {
   return (await res.json()) as GeneratedImage;
 }
 
+export interface AnimationRequestBody {
+  prompt: string;
+  aspectRatio: '16:9' | '9:16' | '1:1';
+  durationSeconds: 15 | 30 | 45 | 60 | 90;
+  style: 'clean' | 'playful' | 'cinematic' | 'technical' | 'social';
+  voiceover: 'none' | 'warm' | 'neutral' | 'energetic';
+  useGeneratedImages: boolean;
+}
+
+export interface AnimationQueuedResponse {
+  jobId: string;
+  status: 'queued';
+  estimate: { durationSeconds: number; estimatedCostUsd: number };
+  generatedAssetCount: number;
+}
+
+export interface RenderJobStatus {
+  id: string;
+  status: 'queued' | 'rendering' | 'completed' | 'failed';
+  progress: number;
+  outputKey?: string | null;
+  videoId?: string | null;
+  error?: string | null;
+}
+
+export async function postAnimation(body: AnimationRequestBody): Promise<AnimationQueuedResponse> {
+  const route = '/api/studio/animation';
+  const res = await timedFetch(route, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  await throwIfNotOk(res, route);
+  return (await res.json()) as AnimationQueuedResponse;
+}
+
+export async function getRenderJob(jobId: string): Promise<RenderJobStatus> {
+  const route = `/api/render/jobs/${jobId}`;
+  const res = await timedFetch(route, { method: 'GET' });
+  await throwIfNotOk(res, route);
+  return (await res.json()) as RenderJobStatus;
+}
+
 export async function setThumbnailFromAsset(
   videoId: string,
   assetId: string,

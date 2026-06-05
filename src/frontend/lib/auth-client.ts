@@ -19,24 +19,33 @@ export interface AuthResponse {
 export async function requestPasswordReset(args: {
   email: string;
   redirectTo: string;
+  captchaToken?: string;
 }): Promise<AuthResponse> {
-  return postAuth('/api/auth/request-password-reset', args);
+  const { captchaToken, ...body } = args;
+  return postAuth('/api/auth/request-password-reset', body, captchaToken);
 }
 
 export async function resetPassword(args: {
   token: string;
   newPassword: string;
+  captchaToken?: string;
 }): Promise<AuthResponse> {
-  return postAuth('/api/auth/reset-password', args);
+  const { captchaToken, ...body } = args;
+  return postAuth('/api/auth/reset-password', body, captchaToken);
 }
 
-async function postAuth(path: string, body: unknown): Promise<AuthResponse> {
+async function postAuth(path: string, body: unknown, captchaToken?: string): Promise<AuthResponse> {
   let res: Response;
   try {
+    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    if (captchaToken) {
+      headers['x-captcha-response'] = captchaToken;
+    }
+
     res = await fetch(path, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
   } catch (err) {

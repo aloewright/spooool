@@ -13,6 +13,7 @@ import {
   validateChunkShape,
   validateInitialFile,
 } from './upload-validation';
+import { verifyTurnstile, type TurnstileEnv } from './turnstile';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
@@ -27,7 +28,7 @@ interface AnalyticsEngineDataset {
   writeDataPoint(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
 }
 
-export interface VideoRoutesEnv {
+export interface VideoRoutesEnv extends TurnstileEnv {
   VIDEOS: R2Bucket;
   DB: D1Database;
   CACHE: KVNamespace;
@@ -505,6 +506,13 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         rateLimitHeaders(rl),
       );
     }
+
+    const captchaToken = c.req.header('x-captcha-response');
+    const captcha = await verifyTurnstile(captchaToken, env.TURNSTILE_SECRET_KEY);
+    if (!captcha.success) {
+      return c.json({ error: captcha.error ?? 'Captcha verification failed' }, 403);
+    }
+
     const initialError = validateInitialFile({
       fileName: rawFile.name,
       mimeType: rawFile.type,

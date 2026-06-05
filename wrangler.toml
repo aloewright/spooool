@@ -183,14 +183,6 @@ new_sqlite_classes = ["ComposerAgent"]
 [triggers]
 crons = ["0 2 * * *", "*/5 * * * *"]
 
-[env.staging]
-vars = { ALLOWED_ORIGINS = "" }
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "spooool-staging"
-database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
-migrations_dir = "src/db/migrations"
-
 [vars]
 # YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:
 #   wrangler secret put YOUTUBE_API_KEY            (prod)
@@ -222,6 +214,18 @@ EMAIL_FROM_NAME = "Spooool"
 # Switch to "gateway-binding" to use the @cloudflare/tanstack-ai gateway-binding
 # adapter once it's smoke-verified on this account (see E11 AI Studio spec, App. B).
 AI_GATEWAY_MODE = "run-gateway"
+
+# Staging environment. Defined after the top-level [vars] table because TOML
+# treats [env.*] tables as terminal — any top-level table (like [vars]) must be
+# declared before the first [env.*] section or wrangler errors with
+# "trying to redefine an already defined table".
+[env.staging]
+vars = { ALLOWED_ORIGINS = "" }
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "spooool-staging"
+database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
+migrations_dir = "src/db/migrations"
 
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)

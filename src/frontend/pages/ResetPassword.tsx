@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { resetPassword } from '../lib/auth-client';
-
+import { TurnstileWidget } from '../components/TurnstileWidget';
 
 export function ResetPassword(): JSX.Element {
   const [params] = useSearchParams();
@@ -10,6 +10,7 @@ export function ResetPassword(): JSX.Element {
 
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,8 +33,14 @@ export function ResetPassword(): JSX.Element {
       setError('Passwords do not match.');
       return;
     }
+
+    if (!captchaToken) {
+      setError('Please complete the captcha');
+      return;
+    }
+
     setSubmitting(true);
-    const result = await resetPassword({ token, newPassword: password });
+    const result = await resetPassword({ token, newPassword: password, captchaToken });
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error ?? 'Could not reset password');
@@ -81,6 +88,8 @@ export function ResetPassword(): JSX.Element {
             required
           />
         </div>
+
+        <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <Link to="/login" className="ds-meta">Back to sign in</Link>

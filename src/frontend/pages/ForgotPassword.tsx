@@ -1,19 +1,27 @@
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { requestPasswordReset } from '../lib/auth-client';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 
 export function ForgotPassword(): JSX.Element {
   const [email, setEmail] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+
+    if (!captchaToken) {
+      setError('Please complete the captcha');
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
     const redirectTo = `${window.location.origin}/reset-password`;
-    const result = await requestPasswordReset({ email, redirectTo });
+    const result = await requestPasswordReset({ email, redirectTo, captchaToken });
     setSubmitting(false);
     if (!result.ok) {
       setError(result.error ?? 'Could not send reset email');
@@ -61,6 +69,8 @@ export function ForgotPassword(): JSX.Element {
             required
           />
         </div>
+
+        <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <Link to="/login" className="ds-meta">Back to sign in</Link>

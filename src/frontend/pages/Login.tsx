@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 
 export function Login(): JSX.Element {
   const location = useLocation();
@@ -8,6 +9,7 @@ export function Login(): JSX.Element {
   const { data: session, isPending } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,9 +21,22 @@ export function Login(): JSX.Element {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+
+    if (!captchaToken) {
+      setError('Please complete the captcha');
+      return;
+    }
+
     setError(null);
     setSubmitting(true);
-    const { data, error: signInError } = await signIn.email({ email, password });
+    const { data, error: signInError } = await signIn.email(
+      { email, password },
+      {
+        headers: {
+          'x-captcha-response': captchaToken,
+        },
+      }
+    );
     setSubmitting(false);
     if (signInError) {
       setError(signInError.message ?? 'Sign in failed');
@@ -78,6 +93,8 @@ export function Login(): JSX.Element {
             required
           />
         </div>
+
+        <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <Link to="/signup" state={{ from: next }} className="ds-meta">

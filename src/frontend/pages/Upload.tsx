@@ -1,6 +1,7 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
   'mp4',
@@ -29,12 +30,14 @@ async function uploadInChunks(
   title: string,
   description: string,
   onProgress: (value: number) => void,
+  captchaToken?: string,
 ): Promise<Response> {
   const result = await runChunkedUpload({
     file,
     endpoint: '/api/videos/upload',
     target: 'video',
     fields: { title, description },
+    headers: captchaToken ? { 'x-captcha-response': captchaToken } : undefined,
     onProgress: (fraction) => onProgress(Math.round(fraction * 100)),
   });
   return result.lastResponse;
@@ -84,6 +87,7 @@ export function Upload(): JSX.Element {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -115,6 +119,11 @@ export function Upload(): JSX.Element {
       return;
     }
 
+    if (!captchaToken) {
+      setError('Please complete the captcha');
+      return;
+    }
+
     // ALO-184: PostHog funnel event so we can chart Upload start → complete.
     // File size is bucketed in MB to avoid surfacing odd byte values in the
     // event explorer; never includes title/description (PII risk).
@@ -132,7 +141,7 @@ export function Upload(): JSX.Element {
     });
 
     try {
-      await uploadInChunks(file, title, description, setProgress);
+      await uploadInChunks(file, title, description, setProgress, captchaToken);
       setStatus('Upload complete');
       dispatch('upload_completed', { size_mb: sizeMb });
     } catch (err: unknown) {
@@ -223,6 +232,8 @@ export function Upload(): JSX.Element {
           />
           <span className="ds-meta">MP4, MOV, MKV, WebM, AVI, MPEG, M4V, 3GP, FLV, OGV, or TS. 30GB max.</span>
         </div>
+
+        <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="stack-sm">
           <div className="row" style={{ justifyContent: 'space-between' }}>

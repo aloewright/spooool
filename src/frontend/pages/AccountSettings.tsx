@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
 
@@ -19,11 +19,17 @@ interface EarningsSummary {
   grossEarningsUsd: number | null;
   netPayoutsUsd: number | null;
   taxDocStatus: 'polar-pending' | 'polar-issues';
+  polar: {
+    organizationId: string | null;
+    accountStatus: 'not_connected' | 'pending' | 'active' | 'under_review';
+    needsOnboarding: boolean;
+  };
 }
 
 export function AccountSettings(): JSX.Element {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
@@ -37,6 +43,7 @@ export function AccountSettings(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [notifyNewUpload, setNotifyNewUpload] = useState(true);
   const [notifyComments, setNotifyComments] = useState(true);
+  const [polarError, setPolarError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) return;
@@ -66,6 +73,26 @@ export function AccountSettings(): JSX.Element {
       cancelled = true;
     };
   }, [session]);
+
+  // Handle redirect params from the Polar OAuth callback.
+  useEffect(() => {
+    const connected = searchParams.get('polar_connected');
+    const err = searchParams.get('polar_error');
+    if (connected || err) {
+      if (err) setPolarError(`Polar connection failed: ${err.replace(/_/g, ' ')}`);
+      if (connected) {
+        // Refresh earnings to show the updated Polar status.
+        fetch('/api/account/earnings', { credentials: 'include' })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => { if (data) setEarnings(data as EarningsSummary); })
+          .catch(() => {});
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete('polar_connected');
+      next.delete('polar_error');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const reload = async (): Promise<void> => {
     const r = await fetch('/api/account', { credentials: 'include' });
@@ -294,6 +321,70 @@ export function AccountSettings(): JSX.Element {
       </section>
 
       <ActiveSessions />
+
+      <section className="stack-sm" aria-label="Payout account">
+        <span className="ds-label">Payout account</span>
+        <p className="ds-meta">
+          Connect your Polar account to receive creator payouts (tips, memberships). Polar acts as
+          Merchant of Record and routes payouts via Stripe Connect.
+        </p>
+
+        {polarError && <p className="status-error">{polarError}</p>}
+
+        {earnings?.polar.accountStatus === 'not_connected' && (
+          <a href="/api/account/polar/connect" className="btn btn--secondary btn--sm">
+            Connect with Polar
+          </a>
+        )}
+
+        {earnings?.polar.accountStatus === 'pending' && (
+          <div className="stack-sm">
+            <p className="ds-meta">
+              Your Polar account is connected but payout setup is incomplete. Complete your payout
+              account on Polar to start receiving earnings.
+            </p>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+              <a
+                href="https://polar.sh/dashboard"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--secondary btn--sm"
+              >
+                Complete payout setup on Polar
+              </a>
+              <a href="/api/account/polar/connect" className="btn btn--ghost btn--sm">
+                Re-check status
+              </a>
+            </div>
+          </div>
+        )}
+
+        {earnings?.polar.accountStatus === 'active' && (
+          <p className="ds-meta" style={{ color: 'var(--color-success, green)' }}>
+            Payout account connected and active.
+          </p>
+        )}
+
+        {earnings?.polar.accountStatus === 'under_review' && (
+          <div className="stack-sm">
+            <p className="ds-meta" style={{ borderLeft: '3px solid currentColor', paddingLeft: 'var(--space-2)' }}>
+              <strong>Payout account under review.</strong> Polar / Stripe is verifying your
+              identity. You may need to submit additional documentation. Check your{' '}
+              <a
+                href="https://polar.sh/dashboard"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Polar dashboard
+              </a>{' '}
+              for next steps, then re-check your status here.
+            </p>
+            <a href="/api/account/polar/connect" className="btn btn--ghost btn--sm">
+              Re-check status
+            </a>
+          </div>
+        )}
+      </section>
 
       <section className="stack-sm" aria-label="Earnings and taxes">
         <span className="ds-label">Earnings &amp; taxes</span>

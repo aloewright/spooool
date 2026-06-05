@@ -40,7 +40,15 @@ export async function extractAudioForTranscription(
     };
   }
 
-  // Dev/test fallback when MEDIA binding is not configured.
+  // Dev/test fallback when MEDIA binding is not configured. Guard against
+  // buffering a large video fully into memory — Workers cap heap near 128MB.
+  const MAX_FALLBACK_BYTES = 100 * 1024 * 1024;
+  if (typeof obj.size === 'number' && obj.size > MAX_FALLBACK_BYTES) {
+    throw new Error(
+      `Source ${r2Key} (${obj.size} bytes) exceeds the in-memory fallback limit ` +
+        `(${MAX_FALLBACK_BYTES} bytes); configure the MEDIA binding for large files`,
+    );
+  }
   const buf = await obj.arrayBuffer();
   return {
     bytes: new Uint8Array(buf),

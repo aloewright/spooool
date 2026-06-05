@@ -77,6 +77,28 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
+// Send in parallel but bounded — unbounded Promise.all over many subscribers
+// can exhaust the Worker's simultaneous-connection / subrequest budget.
+const EMAIL_SEND_CONCURRENCY = 10;
+
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = cursor++;
+      if (index >= items.length) break;
+      results[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 export async function sendNewUploadEmails(
   env: NotificationDbEnv,
   args: { videoId: string; channelUserId: string; channelName: string; videoTitle: string; origin: string },
@@ -99,12 +121,12 @@ export async function sendNewUploadEmails(
     watchUrl,
   });
 
-  let sent = 0;
-  for (const row of results ?? []) {
-    const result = await send(env, { to: row.email, ...template });
-    if (result.ok) sent++;
-  }
-  return sent;
+  const sendResults = await mapWithConcurrency(
+    results ?? [],
+    EMAIL_SEND_CONCURRENCY,
+    (row) => send(env, { to: row.email, ...template }),
+  );
+  return sendResults.filter((r) => r.ok).length;
 }
 
 export async function sendCommentNotificationEmail(
@@ -175,12 +197,14 @@ export async function runEmailDigestSweep(env: NotificationDbEnv): Promise<{ use
     byUser.set(row.user_id, bucket);
   }
 
-  let sent = 0;
-  for (const { email, items } of byUser.values()) {
-    if (items.length === 0) continue;
-    const result = await send(env, { to: email, ...buildDigestEmail({ items: items.slice(0, 20) }) });
-    if (result.ok) sent++;
-  }
+  const digests = Array.from(byUser.values()).filter(({ items }) => items.length > 0);
+  const sendResults = await mapWithConcurrency(
+    digests,
+    EMAIL_SEND_CONCURRENCY,
+    ({ email, items }) =>
+      send(env, { to: email, ...buildDigestEmail({ items: items.slice(0, 20) }) }),
+  );
+  const sent = sendResults.filter((r) => r.ok).length;
 
   return { users: byUser.size, sent };
 }

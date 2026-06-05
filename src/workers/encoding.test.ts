@@ -66,16 +66,35 @@ describe('handleEncodingMessage', () => {
     expect(db.runs).toHaveLength(0);
   });
 
-  it('does nothing when STREAM_ENABLED is unset (R2 fallback path)', async () => {
-    const db = fakeDB();
-    const spy = vi.fn();
-    globalThis.fetch = spy as unknown as typeof fetch;
+  it('dispatches to EncoderContainer when STREAM_ENABLED is unset (R2 fallback path)', async () => {
+    const db = fakeDB('queued');
+    const containerFetch = vi.fn(async () => new Response('ok', { status: 200 }));
+    const fakeStub = { fetch: containerFetch };
+    const fakeNS = {
+      idFromName: vi.fn(() => 'fake-id'),
+      get: vi.fn(() => fakeStub),
+    };
+    globalThis.fetch = vi.fn() as unknown as typeof fetch;
+
     await handleEncodingMessage(
-      { DB: db as unknown as D1Database },
+      {
+        DB: db as unknown as D1Database,
+        ENCODE_CONTAINER: fakeNS as unknown as DurableObjectNamespace,
+      },
       { videoId: 'v1', r2Key: 'k' },
     );
-    expect(spy).not.toHaveBeenCalled();
-    expect(db.runs).toHaveLength(0);
+
+    // Should not have called the global fetch (Stream API).
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    // Should have transitioned the video to encoding.
+    const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('encoding');
+    // Should have dispatched to the encoder container.
+    expect(containerFetch).toHaveBeenCalledTimes(1);
+    const [url, init] = containerFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://encoder-container/encode');
+    expect(JSON.parse(init.body as string)).toEqual({ videoId: 'v1', r2Key: 'k' });
   });
 
   it('submits to the Stream API and captures the returned uid', async () => {

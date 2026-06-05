@@ -182,6 +182,32 @@ accountRoutes.post('/api/account/delete', async (c) => {
   });
 });
 
+// GET /api/account/earnings — returns the creator's payout summary for the
+// current calendar year.  Numbers are null until the Polar payout webhook
+// integration lands (ALO-partner-tax gap): Polar is MoR for sales-tax/VAT but
+// does not yet issue 1099-K / 1099-MISC for US creator partners.  The
+// `taxDocStatus` field drives the gap banner in AccountSettings.
+accountRoutes.get('/api/account/earnings', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  // ALO-TODO: replace with real Polar payout webhook aggregation once the
+  // partner-payout integration is live.  Until then we return the correct
+  // shape with null values so the UI can render the gap banner.
+  const year = new Date().getUTCFullYear();
+  return c.json({
+    year,
+    currency: 'USD',
+    // Gross earnings before Spooool's 10% platform fee and Polar processing fees.
+    grossEarningsUsd: null as number | null,
+    // Net creator payout — what Polar actually transfers to the creator's bank.
+    netPayoutsUsd: null as number | null,
+    // 'polar-pending' = Polar has not yet issued 1099 forms for creator partners.
+    // Update to 'polar-issues' once Polar confirms 1099-K / 1099-MISC delivery.
+    taxDocStatus: 'polar-pending' as 'polar-pending' | 'polar-issues',
+  });
+});
+
 accountRoutes.post('/api/account/delete/cancel', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);

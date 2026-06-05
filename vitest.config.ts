@@ -33,6 +33,13 @@ export default defineConfig({
         __dirname,
         'src/__mocks__/cloudflare-workers.ts',
       ),
+      // container/render/src/encode.ts imports the AWS S3 client, whose deps
+      // live in the container's own node_modules (not installed at the repo
+      // root in CI). Root tests only touch pure helpers, so stub the client.
+      '@aws-sdk/client-s3': path.resolve(
+        __dirname,
+        'src/__mocks__/aws-sdk-client-s3.ts',
+      ),
     },
   },
 });

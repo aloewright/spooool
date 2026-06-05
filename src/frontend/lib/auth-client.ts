@@ -19,7 +19,7 @@ export interface AuthResponse {
 export async function requestPasswordReset(args: {
   email: string;
   redirectTo: string;
-  captchaToken?: string;
+  captchaToken?: string | null;
 }): Promise<AuthResponse> {
   const { captchaToken, ...body } = args;
   return postAuth('/api/auth/request-password-reset', body, captchaToken);

@@ -269,18 +269,40 @@ code, kbd, pre, samp {
 }
 
 .ds-wordmark {
-  font-family: 'Caveat', 'Sour Gummy', var(--font-display);
+  font-family: 'Nunito', var(--font-display);
   font-style: normal;
-  font-weight: 600;
+  font-weight: 800;
   font-size: 52px;
   line-height: 1;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.04em;
   color: var(--foreground);
+  text-shadow: 0 0 0.18em rgba(255, 255, 255, 0.6);
   position: relative;
 }
 
 .ds-wordmark--sm {
   font-size: 30px;
+}
+
+/* The run of o's bobs continuously — present from first paint, no entrance.
+   Amplitude is em-based so it tracks the wordmark font size. */
+.ds-wordmark__o {
+  display: inline-block;
+  animation: ds-wordmark-bob 1.257s linear infinite;
+}
+
+@keyframes ds-wordmark-bob {
+  0%   { transform: translateY(0); }
+  25%  { transform: translateY(0.12em); }
+  50%  { transform: translateY(0); }
+  75%  { transform: translateY(-0.12em); }
+  100% { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-wordmark__o {
+    animation: none;
+  }
 }
 
 

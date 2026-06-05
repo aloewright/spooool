@@ -34,7 +34,7 @@ export async function resetPassword(args: {
   return postAuth('/api/auth/reset-password', body, captchaToken);
 }
 
-async function postAuth(path: string, body: unknown, captchaToken?: string): Promise<AuthResponse> {
+async function postAuth(path: string, body: unknown, captchaToken?: string | null): Promise<AuthResponse> {
   let res: Response;
   try {
     const headers: Record<string, string> = { 'content-type': 'application/json' };

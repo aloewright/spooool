@@ -15,9 +15,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // fast.
 export default defineConfig({
   test: {
-    env: {
-      NODE_ENV: 'test',
-    },
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'scripts/**/*.test.{js,mjs,ts}',

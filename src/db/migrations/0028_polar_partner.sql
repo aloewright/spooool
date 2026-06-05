@@ -1,4 +1,4 @@
--- src/db/migrations/0027_polar_partner.sql
+-- src/db/migrations/0028_polar_partner.sql
 --
 -- Polar partner onboarding: links a Spooool creator to their Polar organization
 -- so tips and memberships can be routed to their payout account.

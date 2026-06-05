@@ -18,6 +18,9 @@ interface RunCall {
 function aiTextEnv(responder: (call: RunCall) => unknown | Promise<unknown>): AIBindingEnv & { _calls: RunCall[] } {
   const calls: RunCall[] = [];
   const env = {
+    // AI_GATEWAY_MODE:'run-gateway' routes chatComplete through runGatewayChat,
+    // which calls env.AI.run (the only Worker-side path confirmed working per CLAUDE.md).
+    AI_GATEWAY_MODE: 'run-gateway' as const,
     AI: {
       async run(model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) {
         const call: RunCall = { model, input, opts };
@@ -64,6 +67,73 @@ describe('draftScript', () => {
     await expect(draftScript({ template: heroJourney, answers: {}, env })).rejects.toThrow(/Script generation failed/);
     expect(env._calls.length).toBe(3); // initial + 2 retries
   });
+
+  it('[gateway-binding mode] returns a script via gateway binding (success-path coverage for production transport)', async () => {
+    // Build an env WITHOUT AI_GATEWAY_MODE so chatComplete defaults to
+    // gateway-binding mode and routes through createWorkersAiChat({ binding: env.AI.gateway('x') }).
+    // The gateway binding's run() returns a minimal OpenAI-compat JSON response
+    // (non-streaming shape). The @cloudflare/tanstack-ai adapter calls
+    // binding.run(request, { signal }), uses the response as if returned by
+    // the OpenAI SDK fetch, and emits TEXT_MESSAGE_CONTENT chunks which
+    // chatComplete accumulates into the final string.
+    // env.AI.run is stubbed to throw — it must NOT be called in this mode,
+    // verifying that the gateway-binding path is the only one exercised.
+    //
+    // Why success-path rather than error-path: when gateway.run() throws, the
+    // @cloudflare/tanstack-ai adapter catches the error, falls back to a second
+    // non-streaming call, which also throws. The OpenAI SDK's internal retry
+    // logic then waits before giving up, causing the test to exceed vitest's
+    // 5 s default timeout. The success-path is equally valid coverage of the
+    // production transport — it confirms gateway-binding mode is wired end-to-end.
+    const gatewayRunCalls: unknown[] = [];
+    // The @cloudflare/tanstack-ai workers-ai adapter always requests stream:true
+    // first. Return a proper OpenAI-compat SSE stream so the streaming path
+    // succeeds and emits TEXT_MESSAGE_CONTENT chunks (the non-streaming fallback
+    // only fires on a fetch error, which we can't trigger without a timeout).
+    const content = 'A hero rises from the ordinary world.';
+    const model = '@cf/google/gemma-4-26b-a4b-it';
+    const streamId = 'workers-ai-test';
+    const created = Math.floor(Date.now() / 1000);
+    function makeOpenAiSseResponse(text: string): Response {
+      // Emit: one delta chunk with the content, then a finish chunk, then [DONE].
+      const deltaChunk = JSON.stringify({
+        id: streamId, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
+      });
+      const doneChunk = JSON.stringify({
+        id: streamId, object: 'chat.completion.chunk', created, model,
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+      });
+      const sse = `data: ${deltaChunk}\n\ndata: ${doneChunk}\n\ndata: [DONE]\n\n`;
+      return new Response(sse, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+      });
+    }
+    const env = {
+      // Explicit gateway-binding mode (run-gateway is the default now) so this
+      // test exercises createWorkersAiChat({ binding: env.AI.gateway('x') }).
+      AI_GATEWAY_MODE: 'gateway-binding' as const,
+      AI: {
+        gateway(_slug: string) {
+          return {
+            async run(req: unknown): Promise<Response> {
+              gatewayRunCalls.push(req);
+              return makeOpenAiSseResponse(content);
+            },
+          };
+        },
+        run(_model: string, _input: Record<string, unknown>, _opts?: unknown): never {
+          throw new Error('env.AI.run must not be called in gateway-binding mode');
+        },
+      },
+    } as unknown as AIBindingEnv;
+
+    const result = await draftScript({ template: heroJourney, answers: {}, env });
+    expect(result.script).toMatch(/hero rises/i);
+    // At least one gateway.run call was made (streaming attempt or non-streaming
+    // fallback) — confirms the gateway-binding transport was exercised.
+    expect(gatewayRunCalls.length).toBeGreaterThanOrEqual(1);
+  });
 });
 
 describe('planScenes', () => {
@@ -77,10 +147,13 @@ describe('planScenes', () => {
     expect(result.scenes).toEqual(fakeScenes);
   });
 
-  it('re-prompts once on malformed JSON, then throws', async () => {
+  it('throws Scene plan invalid on malformed JSON (no internal retry)', async () => {
+    // The old hand-rolled double-attempt is replaced by chat({ outputSchema }),
+    // which validates internally and throws on malformed / invalid output.
+    // We assert the error message shape only; call count is not asserted because
+    // outputSchema validation is an internal detail of the @tanstack/ai layer.
     const env = aiTextEnv(() => chatResponse('not json at all'));
     await expect(planScenes({ script: 'x', template: heroJourney, env })).rejects.toThrow(/Scene plan invalid/);
-    expect(env._calls.length).toBe(2); // initial + 1 reprompt
   });
 
   it('caps scenes to 20 even when the LLM returns more', async () => {
@@ -96,8 +169,10 @@ describe('synthesizeTts', () => {
   function r2Env(): { VIDEOS: R2Bucket; _puts: Array<{ key: string; bytes: number; contentType?: string }> } {
     const puts: Array<{ key: string; bytes: number; contentType?: string }> = [];
     const VIDEOS = {
-      put: async (key: string, body: ArrayBuffer | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }) => {
-        const bytes = body instanceof ArrayBuffer ? body.byteLength : -1;
+      put: async (key: string, body: ArrayBuffer | Uint8Array | ReadableStream, opts?: { httpMetadata?: { contentType?: string } }) => {
+        // After the generateSpeech() refactor, synthesizeTts passes a Uint8Array
+        // (decoded from base64). Support both ArrayBuffer and Uint8Array.
+        const bytes = body instanceof Uint8Array ? body.byteLength : body instanceof ArrayBuffer ? body.byteLength : -1;
         puts.push({ key, bytes, contentType: opts?.httpMetadata?.contentType });
       },
     } as unknown as R2Bucket;
@@ -105,30 +180,40 @@ describe('synthesizeTts', () => {
   }
 
   /**
-   * Fake AI binding. `run` takes a model id + input + opts; in production it
-   * resolves with audio bytes from Workers AI Deepgram. `gateway()` is
-   * stubbed to throw — TTS uses `env.AI.run` directly, not the dynamic-
-   * route gateway proxy (Vertex Gemini + Workers AI Deepgram each want
-   * different request shapes; see notes in create-tools.ts).
+   * Fake AI binding for TTS tests — run-gateway mode so generateSpeech()
+   * routes through runGatewayTts → env.AI.run (the only Worker-side path
+   * confirmed working per CLAUDE.md). AI_GATEWAY_MODE must be set so
+   * gatewayTts() selects runGatewayTts instead of the gateway-binding adapter.
+   *
+   * `run` takes a model id + input + opts; in run-gateway mode runGatewayTts
+   * calls env.AI.run('@cf/deepgram/aura-2-en', { text, speaker, encoding: 'mp3' },
+   * { gateway: { id: 'x' } }) and base64-encodes the result into TTSResult.audio.
+   * synthesizeTts then decodes it with atob() before writing to R2.
+   *
+   * gateway() is stubbed to throw — in run-gateway mode the gateway binding is
+   * never used for TTS.
    */
   function aiEnv(run: (model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string } }) => Promise<ArrayBuffer | Uint8Array | Response>): AIBindingEnv {
     return {
+      AI_GATEWAY_MODE: 'run-gateway' as const,
       AI: {
         run,
-        gateway() { throw new Error('synthesizeTts should not invoke env.AI.gateway()'); },
+        gateway() { throw new Error('synthesizeTts should not invoke env.AI.gateway() in run-gateway mode'); },
       } as unknown as AIBindingEnv['AI'],
-    };
+    } as unknown as AIBindingEnv;
   }
 
   it('calls @cf/deepgram/aura-2-en through gateway x, writes mp3 to recorder/tts/{jobId}.mp3, returns key + durationMs', async () => {
     const seenCalls: Array<{ model: string; input: Record<string, unknown>; opts?: { gateway?: { id: string } } }> = [];
-    const audioBytes = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
+    // 4 raw audio bytes; runGatewayTts base64-encodes them into TTSResult.audio;
+    // synthesizeTts atob()-decodes back to the original bytes before R2.put.
+    const rawAudio = new Uint8Array([0xff, 0xfb, 0x90, 0x00]);
     const r2 = r2Env();
     const env: TtsEnv = {
       ...r2,
       ...aiEnv(async (model, input, opts) => {
         seenCalls.push({ model, input, opts });
-        return audioBytes;
+        return rawAudio;
       }),
     };
     const result = await synthesizeTts({
@@ -139,11 +224,14 @@ describe('synthesizeTts', () => {
     });
     expect(result.r2Key).toBe('recorder/tts/j_abc.mp3');
     expect(result.durationMs).toBeGreaterThan(0);
+    // runGatewayTts calls env.AI.run exactly once with the correct model + input.
     expect(seenCalls).toHaveLength(1);
     expect(seenCalls[0].model).toBe('@cf/deepgram/aura-2-en');
     expect(seenCalls[0].input).toMatchObject({ text: 'Hello world.', speaker: 'asteria-en', encoding: 'mp3' });
     expect(seenCalls[0].opts?.gateway?.id).toBe('x');
     expect(r2._puts[0]).toMatchObject({ key: 'recorder/tts/j_abc.mp3', contentType: 'audio/mpeg' });
+    // Base64 round-trip: atob(btoa(rawAudio)) must recover the original 4 bytes.
+    expect(r2._puts[0].bytes).toBe(4);
   });
 
   it('rejects scripts longer than 2000 chars before calling Workers AI', async () => {
@@ -154,6 +242,8 @@ describe('synthesizeTts', () => {
   });
 
   it('masks content-policy refusals with a generic message', async () => {
+    // runGatewayTts propagates env.AI.run rejections to generateSpeech(), which
+    // synthesizeTts catches and masks when isContentPolicyMsg returns true.
     const env: TtsEnv = {
       ...r2Env(),
       ...aiEnv(async () => { throw new Error('Inference failed: content_policy_violation — forbidden'); }),
@@ -164,6 +254,8 @@ describe('synthesizeTts', () => {
   });
 
   it('surfaces upstream errors as TTS synthesis failed', async () => {
+    // runGatewayTts propagates env.AI.run rejections to generateSpeech(), which
+    // synthesizeTts catches and re-wraps with the 'TTS synthesis failed:' prefix.
     const env: TtsEnv = {
       ...r2Env(),
       ...aiEnv(async () => { throw new Error('Workers AI 500 - model busy'); }),

@@ -55,6 +55,32 @@ export interface RenderJobDeps {
 //    independent cache entry, so mock call-count assertions stay clean.
 const bundleCache = new WeakMap<RemotionRenderer, string>();
 
+type CompositionAsset = { assetId?: string; r2Key?: string; r2Path?: string; kind?: 'image' | 'video' | 'audio' };
+
+function extensionForR2Key(key: string, kind?: string): string {
+  const ext = path.extname(key);
+  if (ext) return ext;
+  if (kind === 'video') return '.mp4';
+  if (kind === 'audio') return '.mp3';
+  return '.jpg';
+}
+
+async function stageCompositionAssets(args: {
+  assets: unknown;
+  jobId: string;
+  publicDir: string;
+  downloadTake: (key: string, destPath: string) => Promise<void>;
+}): Promise<CompositionAsset[] | undefined> {
+  if (!Array.isArray(args.assets)) return undefined;
+  return Promise.all(args.assets.map(async (raw) => {
+    const asset = raw as CompositionAsset;
+    if (!asset.assetId || !asset.r2Key) return asset;
+    const filename = `${asset.assetId}${extensionForR2Key(asset.r2Key, asset.kind)}`;
+    await args.downloadTake(asset.r2Key, path.join(args.publicDir, args.jobId, filename));
+    return { ...asset, r2Path: `${args.jobId}/${filename}` };
+  }));
+}
+
 export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Promise<{ outputPath: string }> {
   const cached = bundleCache.get(deps.renderer);
   const serveUrl = cached ?? await (async () => {
@@ -88,6 +114,14 @@ export async function renderJob(input: RenderJobInput, deps: RenderJobDeps): Pro
     await deps.downloadTake(audioMeta.r2Key, audioDest);
     props.audio = { r2Key: audioMeta.r2Key, r2Path: `${input.jobId}/audio.mp3` };
   }
+
+  const stagedAssets = await stageCompositionAssets({
+    assets: props.assets,
+    jobId: input.jobId,
+    publicDir: deps.publicDir,
+    downloadTake: deps.downloadTake,
+  });
+  if (stagedAssets) props.assets = stagedAssets;
 
   const compositionId = typeof props.compositionId === 'string' ? props.compositionId : 'spooool-video';
 

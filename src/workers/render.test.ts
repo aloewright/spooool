@@ -27,7 +27,12 @@ function stubDB() {
               error_message: null, created_at: binds[4], updated_at: binds[4],
             });
           } else if (/^INSERT INTO videos/i.test(sql)) {
-            videos.set(binds[0] as string, { id: binds[0], user_id: binds[1], r2_key: binds[4] });
+            videos.set(binds[0] as string, {
+              id: binds[0],
+              user_id: binds[1],
+              r2_key: binds[4],
+              ai_generated: binds[5],
+            });
           } else if (/^UPDATE render_jobs/i.test(sql)) {
             // simple match: last bind is the id
             const id = binds[binds.length - 1] as string;
@@ -468,5 +473,54 @@ describe('GET /api/render/jobs/:id', () => {
     const created = [...((env.DB as unknown as { rows: Map<string, { id: string }> }).rows.values())][0];
     const res = await buildApp({ id: 'u_2' }).request(`/api/render/jobs/${created.id}`, { method: 'GET' }, env);
     expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /api/render/jobs animation jobs', () => {
+  it('accepts empty takeKeys for spooool-animation', async () => {
+    const env = envFor();
+    const res = await buildApp({ id: 'u_1' }).request(
+      '/api/render/jobs',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ takeKeys: [], compositionProps: { compositionId: 'spooool-animation' } }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const calls = (env.RENDER_CONTAINER as unknown as { _calls: Array<{ body: { takeKeys: string[] } }> })._calls;
+    expect(calls[0].body.takeKeys).toEqual([]);
+  });
+
+  it('marks completed spooool-animation videos as ai_generated', async () => {
+    const env = envFor();
+    const jobId = 'j_anim_test';
+    (env.DB as unknown as { rows: Map<string, Record<string, unknown>> }).rows.set(jobId, {
+      id: jobId,
+      user_id: 'u_1',
+      status: 'rendering',
+      progress: 50,
+      composition_spec: JSON.stringify({
+        takeKeys: [],
+        compositionProps: { compositionId: 'spooool-animation', title: 'Anim' },
+      }),
+      output_r2_key: null,
+      video_id: null,
+      error_message: null,
+    });
+    const res = await buildApp(null).request(
+      `/api/render/jobs/${jobId}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': 'secret_test' },
+        body: JSON.stringify({ outputKey: 'recorder/renders/j_anim_test.mp4' }),
+      },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const videos = (env.DB as unknown as { videos: Map<string, { ai_generated: number }> }).videos;
+    const video = [...videos.values()][0];
+    expect(video.ai_generated).toBe(1);
   });
 });

@@ -2,25 +2,23 @@ import { z } from 'zod';
 import { transitionVideoStatus } from './video-status';
 import { getEncoderStub } from './encoder-container';
 
-interface Env {
-  DB: D1Database;
-  STREAM_ENABLED?: string;
+export interface SendToStreamEnv {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CF_STREAM_API_TOKEN?: string;
-  ENCODE_CONTAINER: DurableObjectNamespace;
 }
 
-// sendToStream only needs the Stream API credentials, not the full encoding Env.
-// Narrowing the param lets other workers (e.g. the AI-gen consumer, which has no
-// ENCODE_CONTAINER binding) reuse it for Stream ingest.
-type StreamCredentials = Pick<Env, 'CLOUDFLARE_ACCOUNT_ID' | 'CF_STREAM_API_TOKEN'>;
+interface EncodingEnv extends SendToStreamEnv {
+  DB: D1Database;
+  STREAM_ENABLED?: string;
+  ENCODE_CONTAINER?: DurableObjectNamespace;
+}
 
 const queueMessageSchema = z.object({
   videoId: z.string().min(1),
   r2Key: z.string().min(1),
 });
 
-export async function sendToStream(env: StreamCredentials, r2Key: string): Promise<string> {
+export async function sendToStream(env: SendToStreamEnv, r2Key: string): Promise<string> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CF_STREAM_API_TOKEN;
   if (!accountId || !apiToken) {
@@ -56,7 +54,7 @@ export async function sendToStream(env: StreamCredentials, r2Key: string): Promi
   return streamId;
 }
 
-export async function handleEncodingMessage(env: Env, body: unknown): Promise<void> {
+export async function handleEncodingMessage(env: EncodingEnv, body: unknown): Promise<void> {
   const parsed = queueMessageSchema.safeParse(body);
   if (!parsed.success) {
     return;
@@ -75,6 +73,9 @@ export async function handleEncodingMessage(env: Env, body: unknown): Promise<vo
     }
 
     // R2+FFmpeg fallback: dispatch to EncoderContainer pool (ALO-136).
+    if (!env.ENCODE_CONTAINER) {
+      throw new Error('ENCODE_CONTAINER binding required for R2 encoding fallback');
+    }
     await transitionVideoStatus(env.DB, videoId, 'encoding');
     const stub = getEncoderStub(env.ENCODE_CONTAINER, videoId);
     const res = await stub.fetch('https://encoder-container/encode', {

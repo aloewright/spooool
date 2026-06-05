@@ -89,6 +89,7 @@ describe('AIStudio', () => {
       </MemoryRouter>,
     );
 
+    expect(container!.textContent).toContain('Animated video');
     expect(container!.textContent).toContain('Ask for video ideas');
   });
 
@@ -106,23 +107,20 @@ describe('AIStudio', () => {
     const USER_MSG = 'Give me video ideas';
 
     // Set textarea value and fire React's synthetic onChange.
-    const textarea = container!.querySelector<HTMLTextAreaElement>('textarea');
-    expect(textarea).not.toBeNull();
+    const textareas = container!.querySelectorAll('textarea');
+    const chatTextarea = textareas[1] as HTMLTextAreaElement;
+    expect(chatTextarea).not.toBeNull();
 
     await act(async () => {
-      // Simulate React controlled input update.
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-      if (setter) setter.call(textarea, USER_MSG);
-      else (textarea as HTMLTextAreaElement).value = USER_MSG;
-      textarea!.dispatchEvent(new Event('input', { bubbles: true }));
+      if (setter) setter.call(chatTextarea, USER_MSG);
+      else chatTextarea.value = USER_MSG;
+      chatTextarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
 
-    // Sanity-check: the textarea must carry USER_MSG so a future setter
-    // regression fails loudly rather than silently passing '' to sendMessage.
-    expect(textarea!.value).toBe(USER_MSG);
+    expect(chatTextarea.value).toBe(USER_MSG);
 
-    // Submit the form.
-    const form = container!.querySelector<HTMLFormElement>('form');
+    const form = chatTextarea.closest('form');
     expect(form).not.toBeNull();
     await act(async () => {
       form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));

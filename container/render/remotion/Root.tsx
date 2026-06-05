@@ -6,6 +6,7 @@ import { calcMetadata } from "./calculate-metadata/calc-metadata";
 import { SpoooolVideo, FRAMES_PER_TAKE } from "./SpoooolVideo";
 import type { SpoooolVideoProps } from "./SpoooolVideo";
 import { SpoooolExplainer, calculateExplainerDuration } from "./SpoooolExplainer";
+import { SpoooolAnimation, DEFAULT_ANIMATION_PROJECT, calculateAnimationMetadata } from "./SpoooolAnimation";
 
 const SPOOOOL_DEFAULT_PROPS: SpoooolVideoProps = {
   takes: [] as string[],
@@ -30,6 +31,22 @@ export const RemotionRoot = () => {
         calculateMetadata={({ props }) => ({
           durationInFrames: Math.max(1, props.takes.length) * FRAMES_PER_TAKE,
         })}
+      />
+      {/* spooool-animation — AI Studio prompt-generated animation composition */}
+      <Composition
+        id="spooool-animation"
+        component={SpoooolAnimation}
+        width={1920}
+        height={1080}
+        fps={30}
+        durationInFrames={DEFAULT_ANIMATION_PROJECT.durationFrames}
+        defaultProps={{
+          compositionId: 'spooool-animation',
+          animation: DEFAULT_ANIMATION_PROJECT,
+          assets: [],
+          brand: { color: '#0a84ff' },
+        }}
+        calculateMetadata={({ props }) => calculateAnimationMetadata(props)}
       />
       {/* spooool-explainer — prompt-to-video composition driven by ComposerAgent */}
       <Composition

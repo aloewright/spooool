@@ -41,6 +41,7 @@ import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
 import { studioRoutes, type StudioEnv } from './studio';
+import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
@@ -58,7 +59,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & TurnstileEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & TurnstileEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
@@ -214,6 +215,7 @@ app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
 app.route('/', createRoutes);
+app.route('/', studioAnimationRoutes);
 app.route('/', studioRoutes);
 app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);

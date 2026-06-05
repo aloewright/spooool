@@ -32,11 +32,7 @@ export function Login(): JSX.Element {
     setSubmitting(true);
     const { data, error: signInError } = await signIn.email(
       { email, password },
-      {
-        headers: {
-          'x-captcha-response': captchaToken,
-        },
-      }
+      captchaToken ? { headers: { 'x-captcha-response': captchaToken } } : undefined,
     );
     setSubmitting(false);
     if (signInError) {

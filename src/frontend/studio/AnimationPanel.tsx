@@ -50,7 +50,7 @@ export function AnimationPanel(): JSX.Element {
 
   function startPolling(id: string): void {
     stopPolling();
-    pollRef.current = setInterval(() => {
+    const tick = (): void => {
       void (async () => {
         try {
           const status = await getRenderJob(id);
@@ -76,7 +76,9 @@ export function AnimationPanel(): JSX.Element {
           setBusy(false);
         }
       })();
-    }, 2000);
+    };
+    tick();
+    pollRef.current = setInterval(tick, 2000);
   }
 
   async function onSubmit(e: FormEvent<HTMLFormElement>): Promise<void> {

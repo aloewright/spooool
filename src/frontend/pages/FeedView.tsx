@@ -18,6 +18,32 @@ const SOURCE_KINDS: Array<{ kind: FeedSourceKind; label: string; placeholder: st
   { kind: 'tiktok_video', label: 'TikTok video', placeholder: 'tiktok.com video URL' },
 ];
 
+type FeedSize = 'xs' | 'sm' | 'md' | 'ml' | 'lg';
+
+const FEED_SIZES: Array<{ value: FeedSize; label: string; minWidth: number }> = [
+  { value: 'xs', label: 'Extra small', minWidth: 180 },
+  { value: 'sm', label: 'Small', minWidth: 280 },
+  { value: 'md', label: 'Medium', minWidth: 360 },
+  { value: 'ml', label: 'Medium large', minWidth: 460 },
+  { value: 'lg', label: 'Large', minWidth: 580 },
+];
+
+const FEED_SIZE_STORAGE_KEY = 'spooool.feedSize';
+
+function isFeedSize(v: unknown): v is FeedSize {
+  return typeof v === 'string' && FEED_SIZES.some((s) => s.value === v);
+}
+
+function loadFeedSize(): FeedSize {
+  try {
+    const stored = localStorage.getItem(FEED_SIZE_STORAGE_KEY);
+    if (isFeedSize(stored)) return stored;
+  } catch {
+    // localStorage unavailable (private mode / SSR) — fall through to default
+  }
+  return 'sm';
+}
+
 export function FeedView(): JSX.Element {
   const { id = '' } = useParams();
   const [data, setData] = useState<FeedItemsResponse | null>(null);
@@ -25,6 +51,18 @@ export function FeedView(): JSX.Element {
   const [kind, setKind] = useState<FeedSourceKind>('youtube_channel');
   const [ref, setRef] = useState('');
   const [adding, setAdding] = useState(false);
+  const [size, setSize] = useState<FeedSize>(loadFeedSize);
+
+  function onChangeSize(next: FeedSize): void {
+    setSize(next);
+    try {
+      localStorage.setItem(FEED_SIZE_STORAGE_KEY, next);
+    } catch {
+      // ignore persistence failures
+    }
+  }
+
+  const minCardWidth = FEED_SIZES.find((s) => s.value === size)?.minWidth ?? 280;
 
   const load = useCallback(async (): Promise<void> => {
     setError(null);
@@ -117,7 +155,24 @@ export function FeedView(): JSX.Element {
       ) : null}
 
       {data !== null && data.items.length > 0 ? (
-        <div className="feed-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+        <div className="feed-size-controls row" role="group" aria-label="Video size" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="ds-meta">Size:</span>
+          {FEED_SIZES.map((s) => (
+            <button
+              key={s.value}
+              type="button"
+              className={`ds-btn${size === s.value ? ' ds-btn--active' : ''}`}
+              aria-pressed={size === s.value}
+              onClick={() => onChangeSize(s.value)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {data !== null && data.items.length > 0 ? (
+        <div className="feed-grid" style={{ display: 'grid', gap: 16, gridTemplateColumns: `repeat(auto-fill, minmax(${minCardWidth}px, 1fr))` }}>
           {data.items.map((item: FeedItem) => (
             <FeedItemCard key={`${item.source}:${item.id}`} item={item} />
           ))}

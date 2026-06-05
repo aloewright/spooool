@@ -88,4 +88,40 @@ describe('D1 migrations', () => {
     expect(sql).toMatch(/CREATE TRIGGER\s+videos_fts_ad/);
     expect(sql).toMatch(/CREATE TRIGGER\s+user_name_videos_fts/);
   });
+
+  it('0022_studio_assets adds edit_projects + generated_assets + ai_costs and videos provenance (ALO-626)', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0022_studio_assets.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS edit_projects/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS generated_assets/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS ai_costs/);
+    expect(sql).toMatch(/kind\s+TEXT NOT NULL CHECK \(kind IN \('image','video','audio','caption','metadata','clip'\)\)/);
+    expect(sql).toMatch(/unit_kind\s+TEXT NOT NULL CHECK \(unit_kind IN \('tokens','seconds','images','characters'\)\)/);
+    expect(sql).toMatch(/ALTER TABLE videos ADD COLUMN ai_generated INTEGER NOT NULL DEFAULT 0/);
+    expect(sql).toMatch(/ALTER TABLE videos ADD COLUMN source_video_id TEXT/);
+    expect(sql).toMatch(/FOREIGN KEY \(user_id\) REFERENCES user\(id\)/);
+    expect(sql).toMatch(/idx_generated_assets_user_kind\s+ON\s+generated_assets\(user_id,\s*kind\)/i);
+    expect(sql).toMatch(/idx_ai_costs_user_created\s+ON\s+ai_costs\(user_id,\s*created_at\)/i);
+  });
+
+  it('0023_custom_feeds adds feeds + feed_sources tables and indexes', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0023_custom_feeds.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS feeds/);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS feed_sources/);
+    expect(sql).toMatch(/kind TEXT NOT NULL/);
+    expect(sql).toMatch(/idx_feeds_user/);
+    expect(sql).toMatch(/idx_feed_sources_feed/);
+  });
+
+  it('schema.sql mirrors the feeds tables from 0023', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS feeds');
+    expect(schema).toContain('CREATE TABLE IF NOT EXISTS feed_sources');
+  });
+
+  it('0024_polar_ledger adds polar_ledger with polar_user_id and no user FK', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0024_polar_ledger.sql'), 'utf8');
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS polar_ledger/);
+    expect(sql).toMatch(/polar_user_id TEXT/);
+    expect(sql).not.toMatch(/FOREIGN KEY \(user_id\) REFERENCES user\(id\)/);
+  });
 });

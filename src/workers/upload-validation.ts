@@ -9,15 +9,7 @@ export const ALLOWED_VIDEO_MIME_TYPES = new Set<string>([
   'video/webm',
   'video/quicktime',
   'video/x-matroska',
-  'video/x-msvideo',
-  'video/avi',
-  'video/mpeg',
   'video/x-m4v',
-  'video/3gpp',
-  'video/3gpp2',
-  'video/ogg',
-  'video/x-flv',
-  'video/mp2t',
 ]);
 
 // 30GB matches Cloudflare Stream's basic-ingest ceiling — videos larger than
@@ -29,19 +21,35 @@ export const MAX_CHUNK_BYTES = 50 * 1024 * 1024;
 // Keep this calculation in sync with CHUNK_SIZE on the frontend.
 export const MAX_CHUNK_COUNT = Math.ceil(MAX_VIDEO_BYTES / (10 * 1024 * 1024));
 
-const ALLOWED_EXTENSIONS = new Set<string>([
-  'mp4',
-  'm4v',
-  'webm',
-  'mov',
-  'mkv',
-  'avi',
-  'mpeg',
-  'mpg',
-  'ogv',
-  '3gp',
-  'flv',
-  'ts',
+// Restricted to containers we can reliably identify by magic bytes and that
+// our encoding pipeline handles well. Exotic formats (AVI, FLV, MPEG-TS, 3GP)
+// are excluded — they reach us rarely and add encoder edge cases.
+const ALLOWED_EXTENSIONS = new Set<string>(['mp4', 'm4v', 'webm', 'mov', 'mkv']);
+
+// ftyp major brands (bytes 8–11 of an ISO Base Media file) that indicate a
+// codec family we support. This is not a full codec parse — the moov box is
+// not in chunk 0 for large files — but the brand is a reliable proxy:
+//   isom/iso2–9 → generic MPEG-4 (almost always H.264 in practice)
+//   avc1/avc2/avc3 → H.264 explicitly
+//   hvc1/hev1 → H.265 / HEVC
+//   av01 → AV1
+//   mp41/mp42 → MPEG-4 v1/v2
+//   M4V /M4VP/M4VH → iTunes video
+//   qt   → QuickTime (.mov)
+//   f4v  → Flash Video in ISOBMFF wrapper (widely used legacy)
+//   dash/cmfc → MPEG-DASH fragmented
+//   mmp4/MSNV → mobile MP4 variants
+const ALLOWED_FTYP_BRANDS = new Set<string>([
+  'isom', 'iso2', 'iso3', 'iso4', 'iso5', 'iso6', 'iso7', 'iso8', 'iso9',
+  'avc1', 'avc2', 'avc3',
+  'hvc1', 'hev1',
+  'av01',
+  'mp41', 'mp42',
+  'M4V ', 'M4VP', 'M4VH', 'M4A ',
+  'qt  ',
+  'f4v ',
+  'dash', 'cmfc',
+  'mmp4', 'MSNV',
 ]);
 
 export type UploadValidationError = {
@@ -52,9 +60,84 @@ export type UploadValidationError = {
     | 'chunk_too_large'
     | 'chunk_count_invalid'
     | 'chunk_index_out_of_range'
-    | 'empty_file';
+    | 'empty_file'
+    | 'magic_bytes_invalid'
+    | 'codec_not_allowed';
   message: string;
 };
+
+// ---------------------------------------------------------------------------
+// Magic-bytes helpers
+// ---------------------------------------------------------------------------
+
+// EBML element ID that heads every WebM and MKV file: 1A 45 DF A3
+const EBML_MAGIC = [0x1a, 0x45, 0xdf, 0xa3] as const;
+
+type ContainerHint = 'ebml' | 'ftyp' | null;
+
+function sniffContainer(bytes: Uint8Array): ContainerHint {
+  if (bytes.length < 4) return null;
+  if (
+    bytes[0] === EBML_MAGIC[0] &&
+    bytes[1] === EBML_MAGIC[1] &&
+    bytes[2] === EBML_MAGIC[2] &&
+    bytes[3] === EBML_MAGIC[3]
+  ) {
+    return 'ebml';
+  }
+  // ftyp box layout: [4-byte size][4-byte 'ftyp'][4-byte major brand]...
+  // The box type lives at byte offset 4 regardless of the size field value.
+  if (
+    bytes.length >= 8 &&
+    bytes[4] === 0x66 && // 'f'
+    bytes[5] === 0x74 && // 't'
+    bytes[6] === 0x79 && // 'y'
+    bytes[7] === 0x70    // 'p'
+  ) {
+    return 'ftyp';
+  }
+  return null;
+}
+
+function readFtypBrand(bytes: Uint8Array): string {
+  if (bytes.length < 12) return '';
+  // Major brand is the 4 ASCII bytes immediately after the 'ftyp' marker.
+  return String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+}
+
+/**
+ * Inspect the first bytes of chunk 0 and reject files that don't begin with
+ * a recognised container signature or that carry a disallowed codec brand.
+ *
+ * Call this only on chunkIndex === 0 after validateInitialFile passes.
+ * Pass at least 12 bytes so ftyp brand extraction is possible.
+ */
+export function validateMagicBytes(bytes: Uint8Array): UploadValidationError | null {
+  const container = sniffContainer(bytes);
+
+  if (container === null) {
+    return {
+      code: 'magic_bytes_invalid',
+      message: 'File does not begin with a recognised video container signature (expected MP4/MOV ftyp box or WebM/MKV EBML header)',
+    };
+  }
+
+  if (container === 'ftyp') {
+    const brand = readFtypBrand(bytes);
+    if (brand && !ALLOWED_FTYP_BRANDS.has(brand)) {
+      return {
+        code: 'codec_not_allowed',
+        message: `Unsupported codec or container brand: "${brand}". Accepted formats: MP4 (H.264/H.265/AV1), MOV, WebM, MKV.`,
+      };
+    }
+  }
+
+  // EBML files (WebM/MKV): magic verified. The WebM spec restricts video to
+  // VP8/VP9/AV1 by definition; MKV codec enforcement is left to the encoder.
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 
 function fileExtension(name: string): string {
   const dot = name.lastIndexOf('.');

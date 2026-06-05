@@ -32,6 +32,7 @@
 #   LOOPS_API_KEY                 transactional email
 #   STRIPE_SECRET_KEY             monetization (when E6 lands)
 #   STRIPE_WEBHOOK_SECRET
+#   YOUTUBE_API_KEY               YouTube Data API v3 key for multi-source feeds (ALO-642)
 #
 #   # Frontend env — written to .env.production.local, baked into the bundle:
 #   VITE_SENTRY_DSN               browser-side Sentry DSN

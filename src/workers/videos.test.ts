@@ -207,7 +207,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
     fd.set('target', 'recorder');
     fd.set('sessionId', 'sess_x');
     fd.set('takeId', 'take_001');
-    fd.set('file', new Blob([new Uint8Array(8)], { type: 'video/webm' }), 'take.webm');
+    fd.set('file', new Blob([new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0])], { type: 'video/webm' }), 'take.webm');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
 
@@ -274,7 +274,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
     fd.set('sessionId', 'sess_y');
     fd.set('takeId', 'take_002');
     // Intentionally no title / description
-    fd.set('file', new Blob([new Uint8Array(8)], { type: 'video/webm' }), 'take.webm');
+    fd.set('file', new Blob([new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, 0, 0, 0, 0])], { type: 'video/webm' }), 'take.webm');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
 
@@ -296,7 +296,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
     fd0.set('target', 'recorder');
     fd0.set('sessionId', sessionId);
     fd0.set('takeId', takeId);
-    fd0.set('file', new Blob([new Uint8Array(512)], { type: 'video/webm' }), 'take.webm');
+    fd0.set('file', new Blob([new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, ...new Array(508).fill(0)])], { type: 'video/webm' }), 'take.webm');
     fd0.set('chunkIndex', '0');
     fd0.set('chunkCount', '2');
 
@@ -342,7 +342,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
     fd0.set('target', 'recorder');
     fd0.set('sessionId', sessionId);
     fd0.set('takeId', takeId);
-    fd0.set('file', new Blob([new Uint8Array(512)], { type: 'video/webm' }), 'take.webm');
+    fd0.set('file', new Blob([new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, ...new Array(508).fill(0)])], { type: 'video/webm' }), 'take.webm');
     fd0.set('chunkIndex', '0');
     fd0.set('chunkCount', '3');
 
@@ -383,7 +383,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
     fd0.set('target', 'recorder');
     fd0.set('sessionId', sessionId);
     fd0.set('takeId', takeId);
-    fd0.set('file', new Blob([new Uint8Array(512)], { type: 'video/webm' }), 'take.webm');
+    fd0.set('file', new Blob([new Uint8Array([0x1A, 0x45, 0xDF, 0xA3, ...new Array(508).fill(0)])], { type: 'video/webm' }), 'take.webm');
     fd0.set('chunkIndex', '0');
     fd0.set('chunkCount', '2');
 
@@ -462,7 +462,8 @@ describe('upload storage-quota gate', () => {
     const fd = new FormData();
     fd.set('title', 'hi');
     fd.set('description', '');
-    fd.set('file', new Blob([new Uint8Array(5)], { type: 'video/mp4' }), 'clip.mp4');
+    // Valid MP4 ftyp box (size=16, 'ftyp', brand='isom') so magic-byte check passes.
+    fd.set('file', new Blob([new Uint8Array([0, 0, 0, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D])], { type: 'video/mp4' }), 'clip.mp4');
     fd.set('chunkIndex', '0');
     fd.set('chunkCount', '1');
     const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });

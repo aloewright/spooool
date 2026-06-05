@@ -73,7 +73,7 @@ export function Profile(): JSX.Element {
       })
       .catch(() => undefined);
     return () => { cancelled = true; };
-  }, [searchParams]);
+  }, [searchParams.get('stripe')]);
 
   useEffect(() => {
     let cancelled = false;

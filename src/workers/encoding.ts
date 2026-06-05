@@ -13,7 +13,7 @@ const queueMessageSchema = z.object({
   r2Key: z.string().min(1),
 });
 
-async function sendToStream(env: Env, r2Key: string): Promise<string> {
+export async function sendToStream(env: Env, r2Key: string): Promise<string> {
   const accountId = env.CLOUDFLARE_ACCOUNT_ID;
   const apiToken = env.CF_STREAM_API_TOKEN;
   if (!accountId || !apiToken) {

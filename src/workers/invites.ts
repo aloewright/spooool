@@ -236,7 +236,9 @@ inviteRoutes.get('/api/admin/invite-codes', async (c) => {
   const user = c.get('user');
   if (!(await isAdmin(c.env, user))) return c.json({ error: 'Forbidden' }, 403);
 
-  const wave = c.req.query('wave');
+  const waveStr = c.req.query('wave');
+  const waveParsed = waveStr ? parseInt(waveStr, 10) : NaN;
+  const wave = waveStr && !isNaN(waveParsed) ? waveParsed : null;
   const limitStr = c.req.query('limit') ?? '100';
   const offsetStr = c.req.query('offset') ?? '0';
   const limit = Math.min(parseInt(limitStr, 10) || 100, 500);
@@ -247,11 +249,11 @@ inviteRoutes.get('/api/admin/invite-codes', async (c) => {
             u.email AS created_by_email
      FROM invite_codes ic
      LEFT JOIN user u ON u.id = ic.created_by
-     ${wave ? 'WHERE ic.wave = ?' : ''}
+     ${wave !== null ? 'WHERE ic.wave = ?' : ''}
      ORDER BY ic.created_at DESC
      LIMIT ? OFFSET ?`,
   )
-    .bind(...(wave ? [parseInt(wave, 10), limit, offset] : [limit, offset]))
+    .bind(...(wave !== null ? [wave, limit, offset] : [limit, offset]))
     .all<InviteCodeRow & { created_by_email: string | null }>();
 
   return c.json({ codes: results ?? [] });

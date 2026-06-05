@@ -34,7 +34,7 @@ export function ResetPassword(): JSX.Element {
       return;
     }
 
-    if (!captchaToken) {
+    if (import.meta.env.VITE_TURNSTILE_SITE_KEY && !captchaToken) {
       setError('Please complete the captcha');
       return;
     }

@@ -6,6 +6,7 @@ import {
   parseChunkMetadataFromFormData,
   validateChunkShape,
   validateInitialFile,
+  validateMagicBytes,
 } from './upload-validation';
 
 describe('validateInitialFile', () => {
@@ -48,16 +49,16 @@ describe('validateInitialFile', () => {
       ['clip.mov', 'video/quicktime'],
       ['clip.mkv', 'video/x-matroska'],
       ['clip.webm', 'video/webm'],
-      ['clip.avi', 'video/x-msvideo'],
-      ['clip.mpeg', 'video/mpeg'],
-      ['clip.mpg', 'video/mpeg'],
-      ['clip.3gp', 'video/3gpp'],
-      ['clip.ogv', 'video/ogg'],
-      ['clip.flv', 'video/x-flv'],
-      ['clip.ts', 'video/mp2t'],
     ];
     for (const [fileName, mimeType] of cases) {
       expect(validateInitialFile({ fileName, mimeType })).toBeNull();
+    }
+  });
+
+  it('rejects formats removed from the allowlist (avi, flv, 3gp, ts, mpeg)', () => {
+    const rejected = ['clip.avi', 'clip.flv', 'clip.3gp', 'clip.ts', 'clip.mpeg', 'clip.mpg', 'clip.ogv'];
+    for (const fileName of rejected) {
+      expect(validateInitialFile({ fileName, mimeType: 'video/mp4' })?.code).toBe('extension_not_allowed');
     }
   });
 
@@ -178,5 +179,70 @@ describe('parseChunkMetadataFromFormData', () => {
     fd.set('chunkCount', '0');
 
     expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Magic-byte helpers
+// ---------------------------------------------------------------------------
+
+function makeEbml(): Uint8Array {
+  // Minimal EBML header: 1A 45 DF A3 followed by padding
+  return new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
+}
+
+function makeFtyp(brand: string): Uint8Array {
+  // [size=24][ftyp][brand][version=0][compatible=brand]
+  const bytes = new Uint8Array(24);
+  bytes[3] = 24; // box size
+  bytes[4] = 0x66; bytes[5] = 0x74; bytes[6] = 0x79; bytes[7] = 0x70; // 'ftyp'
+  for (let i = 0; i < 4; i++) bytes[8 + i] = brand.charCodeAt(i); // major brand
+  return bytes;
+}
+
+describe('validateMagicBytes', () => {
+  it('accepts a WebM/MKV EBML header', () => {
+    expect(validateMagicBytes(makeEbml())).toBeNull();
+  });
+
+  it('accepts common MP4 ftyp brands', () => {
+    const brands = ['isom', 'iso2', 'avc1', 'mp41', 'hvc1', 'hev1', 'av01', 'M4V ', 'qt  ', 'f4v '];
+    for (const brand of brands) {
+      expect(validateMagicBytes(makeFtyp(brand))).toBeNull();
+    }
+  });
+
+  it('rejects an unknown ftyp brand', () => {
+    const result = validateMagicBytes(makeFtyp('heic'));
+    expect(result?.code).toBe('codec_not_allowed');
+  });
+
+  it('rejects an unknown ftyp brand for an image container (avif)', () => {
+    const result = validateMagicBytes(makeFtyp('avif'));
+    expect(result?.code).toBe('codec_not_allowed');
+  });
+
+  it('rejects a file with no recognised magic bytes (e.g. a JPEG)', () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01]);
+    expect(validateMagicBytes(jpeg)?.code).toBe('magic_bytes_invalid');
+  });
+
+  it('rejects a zeroed buffer (no container)', () => {
+    expect(validateMagicBytes(new Uint8Array(12))?.code).toBe('magic_bytes_invalid');
+  });
+
+  it('rejects fewer than 4 bytes', () => {
+    expect(validateMagicBytes(new Uint8Array([0x00, 0x00]))?.code).toBe('magic_bytes_invalid');
+  });
+
+  it('accepts a buffer with valid EBML but fewer than 12 bytes', () => {
+    // Only 4 bytes — enough for EBML detection, brand read is not needed
+    expect(validateMagicBytes(new Uint8Array([0x1a, 0x45, 0xdf, 0xa3]))).toBeNull();
+  });
+
+  it('accepts a ftyp file with fewer than 12 bytes (cannot read brand → pass through)', () => {
+    // 8 bytes: size + 'ftyp' but no brand bytes
+    const bytes = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70]);
+    expect(validateMagicBytes(bytes)).toBeNull();
   });
 });

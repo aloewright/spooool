@@ -44,6 +44,7 @@ import { warmFeedCaches } from './feed-warm';
 >>>>>>> origin/main
 import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
+import { tipsRoutes, handleStripeWebhook, type TipsEnv } from './tips';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import * as Sentry from '@sentry/cloudflare';
@@ -55,7 +56,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & FeedsEnv & TipsEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -105,6 +106,7 @@ app.use('/api/*', async (c, next) => {
 });
 
 app.post('/api/webhooks/stream', handleStreamWebhook());
+app.post('/api/webhooks/stripe', async (c) => handleStripeWebhook(c.req.raw, c.env));
 
 // /api/health is a public liveness probe — no auth, no CSRF body checks
 // (the global CSRF middleware exempts safe methods, so GET passes through).
@@ -182,6 +184,7 @@ app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);
 app.route('/', feedRoutes);
+app.route('/', tipsRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.

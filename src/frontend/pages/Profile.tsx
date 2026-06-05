@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 interface UserProfile {
   id: string;
@@ -45,13 +46,34 @@ async function uploadImage(field: 'avatar' | 'banner', file: File): Promise<{ ur
   return (await res.json()) as { url: string };
 }
 
+type StripeConnectStatus =
+  | { connected: false; chargesEnabled: false }
+  | { connected: true; chargesEnabled: boolean; payoutsEnabled: boolean };
+
 export function Profile(): JSX.Element {
+  const [searchParams] = useSearchParams();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [stripeStatus, setStripeStatus] = useState<StripeConnectStatus | null>(null);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
+
+  // Load Stripe Connect status on mount and after returning from onboarding.
+  useEffect(() => {
+    let cancelled = false;
+    void fetch('/api/users/me/stripe/connect', { credentials: 'same-origin' })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = (await r.json()) as StripeConnectStatus;
+        if (!cancelled) setStripeStatus(data);
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,6 +107,26 @@ export function Profile(): JSX.Element {
       setStatus('Saved');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save');
+    }
+  }
+
+  async function connectStripe(): Promise<void> {
+    setStripeLoading(true);
+    setStripeError(null);
+    try {
+      const res = await fetch('/api/users/me/stripe/connect', {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? 'Failed to start Stripe onboarding');
+      }
+      const { url } = (await res.json()) as { url: string };
+      window.location.href = url;
+    } catch (err: unknown) {
+      setStripeError(err instanceof Error ? err.message : 'Failed to connect Stripe');
+      setStripeLoading(false);
     }
   }
 
@@ -204,6 +246,41 @@ export function Profile(): JSX.Element {
           onChange={(e) => void onPickImage('banner', e.target.files?.[0] ?? null)}
         />
         <span className="ds-meta">JPEG/PNG/WebP, up to 5MB.</span>
+      </section>
+
+      <section className="card stack-sm">
+        <span className="ds-label">Tipping</span>
+        <p className="ds-meta">
+          Connect a Stripe account to receive tips from viewers. Spooool takes a 10% platform fee;
+          you keep the rest minus Stripe processing fees.
+        </p>
+        {stripeStatus?.connected && stripeStatus.chargesEnabled ? (
+          <p className="status-ok">
+            Stripe connected — tipping is enabled on your videos.
+          </p>
+        ) : stripeStatus?.connected && !stripeStatus.chargesEnabled ? (
+          <>
+            <p className="ds-meta">Onboarding incomplete — finish setting up your Stripe account.</p>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => void connectStripe()}
+              disabled={stripeLoading}
+            >
+              {stripeLoading ? 'Redirecting…' : 'Resume Stripe setup'}
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => void connectStripe()}
+            disabled={stripeLoading}
+          >
+            {stripeLoading ? 'Redirecting…' : 'Connect Stripe to enable tipping'}
+          </button>
+        )}
+        {stripeError ? <p className="status-error">{stripeError}</p> : null}
       </section>
 
       {error ? <p className="status-error">{error}</p> : null}

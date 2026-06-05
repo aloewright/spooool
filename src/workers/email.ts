@@ -202,3 +202,46 @@ export async function sendCostAlertEmail(
 ): Promise<EmailResult> {
   return send(env, { to: args.to, ...buildCostAlertEmail(args.props) });
 }
+
+export function buildAccountDeletionEmail(args: {
+  name: string;
+  deletionDate: string;
+  cancelUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { name, deletionDate, cancelUrl } = args;
+  return {
+    subject: 'Your Spooool account deletion has been scheduled',
+    text:
+      `Hi ${name},\n\n` +
+      `We received a request to delete your Spooool account. Your account is scheduled for permanent deletion on ${deletionDate} (30 days from now).\n\n` +
+      `WHAT WILL HAPPEN ON THAT DATE\n` +
+      `• Your videos, profile, and account credentials will be permanently deleted.\n` +
+      `• Comments you have posted will remain on the platform but will be anonymised.\n` +
+      `• Your subscriptions and any active memberships will be cancelled.\n\n` +
+      `TO CANCEL THIS REQUEST\n` +
+      `Sign back in to your account at ${cancelUrl} any time before ${deletionDate}.\n\n` +
+      `YOUR RIGHTS UNDER GDPR\n` +
+      `Under Article 17 of the GDPR you have the right to erasure of your personal data. We will complete this request within 30 days per Article 12(3). To lodge a complaint, contact your local supervisory authority (in the UK: ico.org.uk).\n\n` +
+      `If you did not make this request, sign in and cancel immediately, then contact us at privacy@spooool.tv.\n\n` +
+      `— The Spooool team`,
+    html:
+      `<p>Hi ${escapeHtml(name)},</p>` +
+      `<p>We received a request to delete your Spooool account. Your account is scheduled for permanent deletion on <strong>${escapeHtml(deletionDate)}</strong> (30 days from now).</p>` +
+      `<p><strong>What will happen on that date:</strong></p>` +
+      `<ul>` +
+      `<li>Your videos, profile, and account credentials will be permanently deleted.</li>` +
+      `<li>Comments you have posted will remain on the platform but will be anonymised.</li>` +
+      `<li>Your subscriptions and any active memberships will be cancelled.</li>` +
+      `</ul>` +
+      `<p><strong>To cancel:</strong> <a href="${cancelUrl}">Sign back in and cancel</a> any time before ${escapeHtml(deletionDate)}.</p>` +
+      `<p><strong>Your rights under GDPR:</strong> Under Article 17 you have the right to erasure of your personal data. We will complete this request within 30 days per Article 12(3). To lodge a complaint, contact your local supervisory authority (in the UK: <a href="https://ico.org.uk">ico.org.uk</a>).</p>` +
+      `<p>If you did not make this request, sign in and cancel immediately, then contact us at <a href="mailto:privacy@spooool.tv">privacy@spooool.tv</a>.</p>`,
+  };
+}
+
+export async function sendAccountDeletionEmail(
+  env: EmailEnv,
+  args: { to: string; name: string; deletionDate: string; cancelUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildAccountDeletionEmail(args) });
+}

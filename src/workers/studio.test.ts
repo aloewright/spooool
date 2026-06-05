@@ -61,6 +61,7 @@ function makeDbStub(overrides: Record<string, unknown> = {}) {
       if (sql.includes('storage_bytes_quota')) return { quota: 5 * 1024 * 1024 * 1024 };
       if (sql.includes('FROM videos WHERE id')) return (overrides['videoRow'] as unknown) ?? null;
       if (sql.includes('FROM generated_assets WHERE id')) return (overrides['assetRow'] as unknown) ?? null;
+      if (sql.includes('FROM ai_costs')) return (overrides['aiCostsCount'] as unknown) ?? { n: 0 };
       return null;
     });
     stmt['sql'] = sql;
@@ -197,6 +198,20 @@ describe('POST /api/studio/image', () => {
     const res = await r;
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBeTruthy();
+  });
+
+  it('429 when daily gen cap reached', async () => {
+    const db = makeDbStub({ aiCostsCount: { n: 50 } });
+    const videos = makeVideosStub();
+    const { app, base } = buildApp(verifiedUser, db, videos);
+    const r = await app.request('http://localhost/api/studio/image', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'a dog' }),
+    }, base);
+    expect(r.status).toBe(429);
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body.error as string).toContain('Daily generation limit');
   });
 
   it('400 on missing prompt', async () => {
@@ -384,6 +399,7 @@ describe('POST /api/studio/video', () => {
         first: vi.fn(async () => {
           if (sql.includes('SUM(bytes)')) return { used: 0 };
           if (sql.includes('storage_bytes_quota')) return { quota: 5 * 1024 * 1024 * 1024 };
+          if (sql.includes('FROM ai_costs')) return { n: 0 };
           return null;
         }),
       };
@@ -433,6 +449,40 @@ describe('POST /api/studio/video', () => {
     const res = await r;
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBeTruthy();
+  });
+
+  it('429 when daily gen cap reached', async () => {
+    function makeVideoDbStubAtCap() {
+      const runs: Array<{ sql: string; binds: unknown[] }> = [];
+      const makeStmt = (sql: string) => {
+        let boundValues: unknown[] = [];
+        const stmt: Record<string, unknown> = {
+          sql,
+          bind: (...args: unknown[]) => { boundValues = args; return stmt; },
+          run: vi.fn(async () => { runs.push({ sql, binds: [...boundValues] }); return {}; }),
+          first: vi.fn(async () => {
+            if (sql.includes('SUM(bytes)')) return { used: 0 };
+            if (sql.includes('storage_bytes_quota')) return { quota: 5 * 1024 * 1024 * 1024 };
+            if (sql.includes('FROM ai_costs')) return { n: 50 };
+            return null;
+          }),
+        };
+        return stmt;
+      };
+      return { prepare: (sql: string) => makeStmt(sql), _runs: runs };
+    }
+    const db = makeVideoDbStubAtCap();
+    const videos = makeVideosStub();
+    const aiGen = makeAiGenStub();
+    const { app, base } = buildApp(verifiedUser, db, videos, { AI_GEN: aiGen });
+    const r = await app.request('http://localhost/api/studio/video', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'a rocket launch' }),
+    }, base);
+    expect(r.status).toBe(429);
+    const body = (await r.json()) as Record<string, unknown>;
+    expect(body.error as string).toContain('Daily generation limit');
   });
 
   it('400 on missing prompt', async () => {

@@ -128,10 +128,29 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
     return c.json({ error: 'Unauthorized' }, 401);
   }
   const videoId = c.req.param('id');
-  const body = await c.req.json().catch(() => null) as { masterKey?: string } | null;
+  const body = await c.req.json().catch(() => null) as {
+    masterKey?: string;
+    thumbnailKey?: string | null;
+  } | null;
   if (!body?.masterKey) return c.json({ error: 'masterKey required' }, 400);
-  await transitionVideoStatus(c.env.DB, videoId, 'ready');
-  console.log('[encode] complete', { videoId, masterKey: body.masterKey });
+
+  const playbackHlsUrl = `/api/videos/${videoId}/hls/master.m3u8`;
+  const thumbnailUrl = body.thumbnailKey ? `/api/${body.thumbnailKey}` : null;
+  const thumbnailCandidates = thumbnailUrl ? JSON.stringify([thumbnailUrl]) : null;
+
+  await c.env.DB.prepare(
+    `UPDATE videos
+       SET status = 'ready',
+           playback_hls_url = ?,
+           thumbnail_url = COALESCE(?, thumbnail_url),
+           thumbnail_candidates = COALESCE(?, thumbnail_candidates),
+           updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('encoding', 'ready')`,
+  )
+    .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
+    .run();
+
+  console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });
 });
 
@@ -186,10 +205,18 @@ app.use('/api/*', async (c, next) => {
       // a boolean (ALO-128).
       emailVerified: u.emailVerified === true || u.emailVerified === 1,
     };
-    const banned = await c.env.DB.prepare('SELECT banned_at FROM user WHERE id = ?')
-      .bind(sessionUser.id)
-      .first<{ banned_at: number | null }>();
-    if (banned?.banned_at != null) {
+    // Cache ban status for 5 min to avoid a D1 round-trip on every auth'd request.
+    // A newly-banned user can still act for up to 300s; acceptable for moderation.
+    const banCacheKey = `ban:${sessionUser.id}`;
+    let banValue = await c.env.CACHE.get(banCacheKey);
+    if (banValue === null) {
+      const banned = await c.env.DB.prepare('SELECT banned_at FROM user WHERE id = ?')
+        .bind(sessionUser.id)
+        .first<{ banned_at: number | null }>();
+      banValue = banned?.banned_at != null ? '1' : '0';
+      await c.env.CACHE.put(banCacheKey, banValue, { expirationTtl: 300 });
+    }
+    if (banValue === '1') {
       sessionUser = null;
     }
   }

@@ -3,10 +3,6 @@
    Foundations: OKLCH near-greyscale, Nunito throughout (UI + wordmark).
    ============================================================ */
 
-/* Handwritten signature font for the spooool wordmark — Caveat from
-   Google Fonts. Loaded via @import; the wordmark is the only consumer. */
-@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&display=swap');
-
 @font-face {
   font-family: "Nunito";
   src: url("/fonts/Nunito-VariableFont_wght.ttf") format("truetype-variations");

@@ -24,6 +24,16 @@ import { STUDIO_GEN_BUCKET, rateLimit, rateLimitHeaders } from './rate-limit';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
 import { aiCostStatement } from './ai-costs';
 
+const STUDIO_DAILY_GEN_CAP = 50;
+
+async function withinDailyGenCap(env: StudioEnv, userId: string): Promise<boolean> {
+  const since = Date.now() - 24 * 60 * 60 * 1000;
+  const row = await env.DB.prepare(
+    'SELECT COUNT(*) AS n FROM ai_costs WHERE user_id = ? AND created_at >= ?',
+  ).bind(userId, since).first<{ n: number | null }>();
+  return Number(row?.n ?? 0) < STUDIO_DAILY_GEN_CAP;
+}
+
 export interface StudioEnv extends AIBindingEnv {
   RATE_LIMITER?: DurableObjectNamespace;
   AI_GATEWAY_MODE?: AiGatewayMode;
@@ -92,6 +102,10 @@ studioRoutes.post('/api/studio/image', async (c) => {
 
   const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
   if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
+
+  if (!(await withinDailyGenCap(c.env, user.id))) {
+    return c.json({ error: 'Daily generation limit reached. Try again tomorrow.' }, 429);
+  }
 
   const raw = await c.req.json().catch(() => null);
   const parsed = imageBodySchema.safeParse(raw);
@@ -221,6 +235,10 @@ studioRoutes.post('/api/studio/video', async (c) => {
 
   const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
   if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
+
+  if (!(await withinDailyGenCap(c.env, user.id))) {
+    return c.json({ error: 'Daily generation limit reached. Try again tomorrow.' }, 429);
+  }
 
   const raw = await c.req.json().catch(() => null);
   const parsed = videoBodySchema.safeParse(raw);

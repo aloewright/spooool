@@ -64,6 +64,7 @@
     "clsx": "^2.1.1",
     "entities": "file:entities-7.0.1.tgz",
     "happy-dom": "file:happy-dom-20.10.1.tgz",
+    "hls.js": "^1.6.16",
     "hono": "^4.12.21",
     "jose": "^6.2.2",
     "lottie-react": "^2.4.1",

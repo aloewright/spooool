@@ -30,6 +30,12 @@ export default defineConfig({
           // @tanstack/ai* (ai-react + ai-client) is only loaded by the lazy /studio
           // route — keep it out of the eager vendor chunk.
           if (id.includes('@tanstack/ai')) return 'tanstack-ai';
+          // Remotion + sub-packages are only used by the lazy /record route;
+          // keep them out of vendor so they never inflate the eager bundle.
+          if (id.includes('remotion') || id.includes('@remotion')) return 'remotion';
+          // Sentry has its own caching story and grows independently of React;
+          // isolate it so vendor cache isn't busted on Sentry upgrades.
+          if (id.includes('@sentry/')) return 'sentry';
           // Group long-tail node_modules together so we don't end up with
           // dozens of tiny chunks (cf. https://rolldown.rs/reference/OutputOptions).
           return 'vendor';

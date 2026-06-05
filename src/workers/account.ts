@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createAuth, type AuthEnv } from '../auth';
 import { getStorageUsage } from './storage-quota';
+import { sendAccountDeletionEmail } from './email';
 
 export const DELETION_GRACE_DAYS = 30;
 export const DELETION_GRACE_MS = DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000;
@@ -167,41 +168,19 @@ accountRoutes.post('/api/account/delete', async (c) => {
     .bind(now, scheduledFor, now, user.id)
     .run();
 
-  // TODO(ALO-???): wire into email provider. Replace console.log with a call to
-  // the email service using template id `account-deletion-requested` and the
-  // body below.
   const deletionDate = new Date(scheduledFor).toLocaleDateString('en-GB', {
     year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC',
   });
-  const emailBody = `Subject: Your Spooool account deletion has been scheduled
-
-Hi ${user.name},
-
-We received a request to delete your Spooool account. Your account is scheduled for permanent deletion on ${deletionDate} (30 days from now).
-
-WHAT WILL HAPPEN ON THAT DATE
-• Your videos, profile, and account credentials will be permanently deleted.
-• Comments you have posted will remain on the platform but will be anonymised — your name and any information linking them to your account will be removed.
-• Your subscriptions and any active memberships will be cancelled.
-• Any unpaid earnings will be processed according to the Polar payout schedule before deletion.
-
-TO CANCEL THIS REQUEST
-You can cancel at any time before ${deletionDate} by signing back in to your account at spooool.tv/settings. Once the 30-day grace period has expired, deletion cannot be reversed.
-
-YOUR RIGHTS UNDER GDPR
-Under Article 17 of the General Data Protection Regulation (right to erasure), you have the right to request deletion of your personal data. We will complete processing of this request within 30 days in accordance with Article 12(3). If you believe your request has not been handled correctly, you have the right to lodge a complaint with your local supervisory authority (in the EU/EEA, the authority in your country of residence; in the UK, the Information Commissioner's Office at ico.org.uk).
-
-If you did not make this request, please sign in immediately and cancel, then contact us at privacy@spooool.tv.
-
-— The Spooool team`;
-
-  console.log('[account-delete] scheduled — email pending provider wiring', {
-    userId: user.id,
-    scheduledFor: new Date(scheduledFor).toISOString(),
-    template: 'account-deletion-requested',
-    placeholder: true,
-    emailBody,
+  const origin = new URL(c.req.url).origin;
+  const emailResult = await sendAccountDeletionEmail(c.env, {
+    to: user.email,
+    name: user.name,
+    deletionDate,
+    cancelUrl: `${origin}/settings`,
   });
+  if (!emailResult.ok) {
+    console.warn('[account-delete] deletion email not sent', { userId: user.id, emailResult });
+  }
 
   return c.json({
     deletionRequestedAt: now,

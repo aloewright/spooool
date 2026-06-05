@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { isLikelySpam } from './spam-filter';
+import { isLikelySpam, scoreCommentWithAi } from './spam-filter';
+import type { AiSpamEnv } from './spam-filter';
 import { sendCommentNotificationEmail } from './notification-email';
 import { waitUntilBackground } from './wait-until';
 
-export interface CommentsEnv {
+export interface CommentsEnv extends AiSpamEnv {
   DB: D1Database;
   EMAIL?: import('./email').EmailBinding;
   EMAIL_FROM?: string;
@@ -151,6 +152,11 @@ commentRoutes.post('/api/videos/:id/comments', async (c) => {
     return c.json({ error: 'Comment blocked', code: spam.reason ?? 'spam' }, 422);
   }
 
+  const aiScore = await scoreCommentWithAi(c.env, trimmed);
+  if (aiScore?.spam) {
+    return c.json({ error: 'Comment blocked', code: 'ai_spam' }, 422);
+  }
+
   const video = await c.env.DB.prepare(
     'SELECT 1 FROM videos WHERE id = ? AND deleted_at IS NULL',
   )
@@ -221,6 +227,11 @@ commentRoutes.patch('/api/comments/:commentId', async (c) => {
   const spam = isLikelySpam(trimmed);
   if (spam.blocked) {
     return c.json({ error: 'Comment blocked', code: spam.reason ?? 'spam' }, 422);
+  }
+
+  const aiScore = await scoreCommentWithAi(c.env, trimmed);
+  if (aiScore?.spam) {
+    return c.json({ error: 'Comment blocked', code: 'ai_spam' }, 422);
   }
 
   const existing = await c.env.DB.prepare(

@@ -9,6 +9,13 @@ import {
   type CascadeEnv,
 } from './account';
 
+const sendAccountDeletionEmailSpy = vi.fn().mockResolvedValue({ ok: true });
+
+vi.mock('./email', () => ({
+  sendAccountDeletionEmail: (env: unknown, args: unknown) =>
+    sendAccountDeletionEmailSpy(env as never, args as never),
+}));
+
 describe('deletion grace constants', () => {
   it('grace is 30 days in ms', () => {
     expect(DELETION_GRACE_DAYS).toBe(30);
@@ -318,24 +325,22 @@ describe('account delete + cancel window', () => {
     expect((await app.get('/api/account')).status).toBe(401);
   });
 
-  // The confirmation email body is a LEGAL-REVIEW placeholder. Until an email
-  // provider lands, we just verify the trigger fires on /delete with the
-  // correct user id + scheduled date so swapping the placeholder for a real
-  // mailer is a one-line change.
-  it('fires the confirmation-email trigger on delete', async () => {
+  it('sends the account-deletion confirmation email on delete', async () => {
+    sendAccountDeletionEmailSpy.mockClear();
     const store = makeStore();
     const app = userApp(store, { id: 'u1' });
-    const logs: unknown[][] = [];
-    const spy = vi.spyOn(console, 'log').mockImplementation((...args) => {
-      logs.push(args);
-    });
     await app.post('/api/account/delete');
-    spy.mockRestore();
 
-    const triggered = logs.find((args) => String(args[0]).includes('[account-delete]'));
-    expect(triggered).toBeTruthy();
-    const payload = triggered?.[1] as { userId: string; placeholder: boolean };
-    expect(payload.userId).toBe('u1');
-    expect(payload.placeholder).toBe(true);
+    expect(sendAccountDeletionEmailSpy).toHaveBeenCalledOnce();
+    const args = sendAccountDeletionEmailSpy.mock.calls[0]?.[1] as {
+      to: string;
+      name: string;
+      deletionDate: string;
+      cancelUrl: string;
+    };
+    expect(args.to).toBe('a@b.com');
+    expect(args.name).toBe('A');
+    expect(args.deletionDate).toMatch(/\d{4}/);
+    expect(args.cancelUrl).toBe('http://t/settings');
   });
 });

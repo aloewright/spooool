@@ -19,12 +19,17 @@ const VARIANTS = [
   { label: '360p',  scale: 'scale=640:-2',  maxrate:  '500k', bufsize:  '1000k', abr:  '96k', bandwidth:  596000, resolution:  '640x360'  },
 ] as const;
 
+export type EncodeResult = {
+  masterKey: string;
+  thumbnailKey: string | null;
+};
+
 export async function encodeToHls(opts: {
   videoId: string;
   r2Key: string;
   s3: S3Client;
   bucket: string;
-}): Promise<string> {
+}): Promise<EncodeResult> {
   const { videoId, r2Key, s3, bucket } = opts;
   const workDir = await mkdtemp(join(tmpdir(), 'enc-'));
   const inputPath = join(workDir, 'input');
@@ -50,10 +55,45 @@ export async function encodeToHls(opts: {
     const prefix = `hls/${videoId}`;
     await uploadDir(hlsDir, prefix, s3, bucket);
 
-    return `${prefix}/master.m3u8`;
+    const thumbnailKey = await extractThumbnail({ inputPath, videoId, r2Key, s3, bucket }).catch(() => null);
+
+    return { masterKey: `${prefix}/master.m3u8`, thumbnailKey };
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
+}
+
+async function extractThumbnail(opts: {
+  inputPath: string;
+  videoId: string;
+  r2Key: string;
+  s3: S3Client;
+  bucket: string;
+}): Promise<string> {
+  const { inputPath, videoId, r2Key, s3, bucket } = opts;
+  const userId = r2Key.split('/')[0];
+  const thumbPath = `${inputPath}_thumb.jpg`;
+  await new Promise<void>((resolve, reject) => {
+    const proc = spawn('ffmpeg', [
+      '-y', '-ss', '1', '-i', inputPath,
+      '-frames:v', '1', '-vf', 'scale=640:-2',
+      '-q:v', '4', thumbPath,
+    ], { stdio: ['ignore', 'ignore', 'ignore'] });
+    proc.on('error', reject);
+    proc.on('close', (code) => {
+      if (code !== 0) reject(new Error(`ffmpeg thumbnail exited ${code}`));
+      else resolve();
+    });
+  });
+  const body = await readFile(thumbPath);
+  const key = `thumbnails/${userId}/${videoId}/auto.jpg`;
+  await s3.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: body,
+    ContentType: 'image/jpeg',
+  }));
+  return key;
 }
 
 function runFfmpeg(inputPath: string, hlsDir: string): Promise<void> {

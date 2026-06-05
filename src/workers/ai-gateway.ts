@@ -174,11 +174,13 @@ function runGatewayTts(env: AiGatewayEnv, model: string): TTSAdapter {
 /**
  * run-gateway chat adapter.
  *
- * Mirrors `src/workers/create-tools.ts` byte-for-byte: it calls
- * `env.AI.run('@cf/<model>', { messages, max_tokens: 800 }, { gateway: { id } })`
+ * Mirrors `src/workers/create-tools.ts`: it calls
+ * `env.AI.run('@cf/<model>', { messages }, { gateway: { id } })`
  * directly (the only Worker-side invocation proven to work) and narrows the
  * single completed response the same way create-tools does
- * (`raw.response ?? raw.choices[0].message.content`). Because `env.AI.run`
+ * (`raw.response ?? raw.choices[0].message.content`). No `max_tokens` cap is
+ * sent — the app lets the model size its own output so large structured
+ * responses (e.g. animation plans) are not truncated mid-JSON. Because `env.AI.run`
  * returns one complete (non-streamed) response, the AG-UI lifecycle mirrors
  * the real WorkersAiTextAdapter's *non-streaming* branch exactly:
  *   RUN_STARTED → TEXT_MESSAGE_START → TEXT_MESSAGE_CONTENT(delta) → TEXT_MESSAGE_END → RUN_FINISHED
@@ -211,7 +213,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
       try {
         raw = await env.AI.run(
           model,
-          { messages: buildMessages(options.systemPrompts, options.messages), max_tokens: 800 },
+          { messages: buildMessages(options.systemPrompts, options.messages) },
           { gateway: { id: GATEWAY_ID } },
         );
       } catch (error) {
@@ -234,7 +236,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
       // Promise contract. Intentional; do not wrap in a try/catch that swallows.
       const raw = await env.AI.run(
         model,
-        { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages), max_tokens: 800 },
+        { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages) },
         { gateway: { id: GATEWAY_ID } },
       );
       const rawText = narrowChatText(raw);

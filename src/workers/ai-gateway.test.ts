@@ -119,10 +119,10 @@ describe('ai-gateway run-gateway mode', () => {
       chunks.push(chunk);
     }
 
-    // byte-for-byte parity with create-tools.ts chat call
+    // No token cap is sent — the app intentionally lets the model size its own output.
     expect(env.AI.run).toHaveBeenCalledWith(
       DEFAULT_CHAT_MODEL,
-      { messages, max_tokens: 800 },
+      { messages },
       { gateway: { id: GATEWAY_ID } },
     );
     expect(env.AI.gateway).not.toHaveBeenCalled();
@@ -164,7 +164,7 @@ describe('ai-gateway run-gateway mode', () => {
 
     expect(env.AI.run).toHaveBeenCalledWith(
       DEFAULT_CHAT_MODEL,
-      { messages: [], max_tokens: 800 },
+      { messages: [] },
       { gateway: { id: GATEWAY_ID } },
     );
     expect(env.AI.gateway).not.toHaveBeenCalled();

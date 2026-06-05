@@ -259,8 +259,6 @@ migrations_dir = "src/db/migrations"
 # STREAM_ENABLED          (set to "true" to route uploads through Cloudflare Stream)
 # POLAR_ACCESS_TOKEN      (Polar API token — sandbox or production)
 # POLAR_WEBHOOK_SECRET    (HMAC secret to verify Polar webhook signatures)
-# STRIPE_SECRET_KEY       (sk_live_... or sk_test_... for Stripe Connect tipping)
-# STRIPE_WEBHOOK_SECRET   (whsec_... from Stripe dashboard → Webhooks for /api/webhooks/stripe)
 # POLAR_CLIENT_ID         (Polar OAuth app client ID — for creator partner onboarding)
 # POLAR_CLIENT_SECRET     (Polar OAuth app client secret — paired with POLAR_CLIENT_ID)
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)

@@ -199,6 +199,7 @@ If you did not make this request, please sign in immediately and cancel, then co
     userId: user.id,
     scheduledFor: new Date(scheduledFor).toISOString(),
     template: 'account-deletion-requested',
+    placeholder: true,
     emailBody,
   });
 

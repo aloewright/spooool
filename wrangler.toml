@@ -217,6 +217,10 @@ AI_GATEWAY_MODE = "run-gateway"
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)
+# GOOGLE_CLIENT_ID        (OAuth — from console.cloud.google.com → Credentials)
+# GOOGLE_CLIENT_SECRET    (OAuth — paired with GOOGLE_CLIENT_ID)
+# GITHUB_CLIENT_ID        (OAuth — from github.com → Settings → Developer settings → OAuth Apps)
+# GITHUB_CLIENT_SECRET    (OAuth — paired with GITHUB_CLIENT_ID)
 # CLOUDFLARE_ACCOUNT_ID
 # CF_STREAM_API_TOKEN
 # CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)

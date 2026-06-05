@@ -175,6 +175,7 @@ new_sqlite_classes = ["RenderContainer"]
 [[migrations]]
 tag = "do_v4"
 new_sqlite_classes = ["ComposerAgent"]
+
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
 # The */5 cron runs the render-job timeout sweep — marks any render_job
@@ -198,7 +199,6 @@ migrations_dir = "src/db/migrations"
 # no credentials (public oEmbed). Neither is a model provider, so neither
 # routes through the AI Gateway.
 
-[vars]
 # Comma-separated origin allow-list for CSRF protection on /api/*. Same-origin
 # is always allowed in addition to whatever is listed here. Override per env.
 ALLOWED_ORIGINS = ""

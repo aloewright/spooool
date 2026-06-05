@@ -51,6 +51,9 @@ export const CREATE_BUCKET: RateLimitBucket = {
 
 // 30 studio generations per hour per user (placeholder — tuned per Polar tier
 // in ALO-650). Shared across AI Studio ops; chat is the first consumer.
+// NOTE: per-tier Polar spend caps (est_usd hard limits) are deferred until
+// Polar tiers are wired (ALO-650). est_usd values are order-of-magnitude
+// placeholders only; do NOT enforce spend-based hard caps on them.
 export const STUDIO_GEN_BUCKET: RateLimitBucket = {
   name: 'studio-gen',
   capacity: 30,

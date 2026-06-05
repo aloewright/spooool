@@ -135,7 +135,11 @@ function SpoolWave({
 }
 
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
-  const fontPx = size === 'sm' ? 30 : 52;
+  // Each "o" in the run bobs on a staggered sine-like loop. Delays match the
+  // Remotion source (i*4 frames @ 30fps ≈ 0.133s per letter index); the o's
+  // sit at indices 2–5.
+  const oDelays = ['-0.267s', '-0.400s', '-0.533s', '-0.667s'];
+  let oIndex = 0;
   return (
     <Link
       to="/"
@@ -143,9 +147,20 @@ function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
       className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}
       style={{ display: 'inline-flex', alignItems: 'baseline', gap: 0 }}
     >
-      <span aria-hidden="true">sp</span>
-      <SpoolWave fontPx={fontPx} />
-      <span aria-hidden="true" style={{ marginLeft: '-0.05em' }}>l</span>
+      {'spooool'.split('').map((char, i) => {
+        const isO = char === 'o';
+        const delay = isO ? oDelays[oIndex++] : undefined;
+        return (
+          <span
+            key={i}
+            aria-hidden="true"
+            className={isO ? 'ds-wordmark__o' : undefined}
+            style={isO ? { animationDelay: delay } : undefined}
+          >
+            {char}
+          </span>
+        );
+      })}
     </Link>
   );
 }

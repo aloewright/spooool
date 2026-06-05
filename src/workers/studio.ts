@@ -154,8 +154,8 @@ studioRoutes.post('/api/videos/:id/thumbnail/from-asset', async (c) => {
   const thumbnailUrl = url.toString();   // ABSOLUTE — required by isOwnedR2ThumbnailUrl + OG/oembed
 
   await c.env.DB.prepare(
-    `UPDATE videos SET thumbnail_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-  ).bind(thumbnailUrl, videoId).run();
+    `UPDATE videos SET thumbnail_url = ?, updated_at = ? WHERE id = ?`
+  ).bind(thumbnailUrl, Date.now(), videoId).run();
 
   return c.json({ id: videoId, thumbnail_url: thumbnailUrl });
 });

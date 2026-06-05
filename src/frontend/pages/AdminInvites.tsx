@@ -107,7 +107,7 @@ function WaitlistPanel(): JSX.Element {
       }
       setSendResult(`Sent ${data.sent ?? 0} invite(s)${data.errors?.length ? ` (${data.errors.length} failed)` : ''}`);
       // Refresh list
-      setStatusFilter((s) => s);
+      setRefreshKey((k) => k + 1);
     } catch {
       setSendResult('Network error');
     } finally {

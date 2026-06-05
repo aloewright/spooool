@@ -313,16 +313,27 @@ videoRoutes.get('/api/videos/:id/hls/*', async (c) => {
   const id = c.req.param('id');
   const rest = c.req.path.slice(`/api/videos/${id}/hls/`.length);
 
-  const video = await c.env.DB.prepare(
-    `SELECT status, stream_video_id, hidden_at, dmca_status, user_id
-     FROM videos WHERE id = ? AND deleted_at IS NULL`,
-  ).bind(id).first<{
+  // HLS players fire one request per segment; hitting D1 on every one would
+  // exhaust the database under load. The auth row is tiny and changes rarely,
+  // so cache it in KV for 60s (matches the playlist's max-age=60 freshness).
+  type HlsAuthRow = {
     status: string;
     stream_video_id: string | null;
     hidden_at: string | null;
     dmca_status: string | null;
     user_id: string;
-  }>();
+  };
+  const authKey = `hls-auth:${id}`;
+  let video = await c.env.CACHE.get<HlsAuthRow>(authKey, 'json');
+  if (!video) {
+    video = await c.env.DB.prepare(
+      `SELECT status, stream_video_id, hidden_at, dmca_status, user_id
+       FROM videos WHERE id = ? AND deleted_at IS NULL`,
+    ).bind(id).first<HlsAuthRow>();
+    if (video) {
+      await c.env.CACHE.put(authKey, JSON.stringify(video), { expirationTtl: 60 });
+    }
+  }
 
   if (!video) return c.json({ error: 'Video not found' }, 404);
   if (video.dmca_status === 'disabled') return c.json({ error: 'Unavailable for legal reasons', dmca: true }, 451);

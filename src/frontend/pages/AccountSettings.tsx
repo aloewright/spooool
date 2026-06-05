@@ -11,11 +11,20 @@ interface AccountInfo {
   deletionScheduledFor: number | null;
 }
 
+interface EarningsSummary {
+  year: number;
+  currency: string;
+  grossEarningsUsd: number | null;
+  netPayoutsUsd: number | null;
+  taxDocStatus: 'polar-pending' | 'polar-issues';
+}
+
 export function AccountSettings(): JSX.Element {
   const { data: session, isPending } = useSession();
   const navigate = useNavigate();
 
   const [account, setAccount] = useState<AccountInfo | null>(null);
+  const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -28,15 +37,21 @@ export function AccountSettings(): JSX.Element {
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
-    void fetch('/api/account', { credentials: 'include' })
-      .then(async (r) => {
+    void Promise.all([
+      fetch('/api/account', { credentials: 'include' }).then(async (r) => {
         if (!r.ok) throw new Error(`Account fetch failed: ${r.status}`);
         return (await r.json()) as AccountInfo;
-      })
-      .then((data) => {
+      }),
+      fetch('/api/account/earnings', { credentials: 'include' }).then(async (r) => {
+        if (!r.ok) return null;
+        return (await r.json()) as EarningsSummary;
+      }),
+    ])
+      .then(([accountData, earningsData]) => {
         if (cancelled) return;
-        setAccount(data);
-        setEmailDraft(data.email);
+        setAccount(accountData);
+        setEmailDraft(accountData.email);
+        setEarnings(earningsData);
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Unknown error');
@@ -222,6 +237,92 @@ export function AccountSettings(): JSX.Element {
       </section>
 
       <ActiveSessions />
+
+      <section className="stack-sm" aria-label="Earnings and taxes">
+        <span className="ds-label">Earnings &amp; taxes</span>
+        <p className="ds-meta">
+          Spooool payouts are processed by{' '}
+          <a
+            href="https://docs.polar.sh/payments/taxes"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Polar
+          </a>
+          , which acts as Merchant of Record — Polar collects and remits sales tax
+          and VAT on all transactions on your behalf. You do not need to register
+          for Stripe Tax or file sales-tax returns for Spooool revenue.
+        </p>
+
+        <table style={{ borderCollapse: 'collapse', width: '100%' }} aria-label={`${earnings?.year ?? new Date().getUTCFullYear()} earnings summary`}>
+          <thead>
+            <tr>
+              <th className="ds-meta" style={{ textAlign: 'left', paddingBottom: 'var(--space-1)' }}>
+                {earnings?.year ?? new Date().getUTCFullYear()} (year to date)
+              </th>
+              <th className="ds-meta" style={{ textAlign: 'right', paddingBottom: 'var(--space-1)' }}>
+                USD
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="ds-meta">Gross earnings (before fees)</td>
+              <td className="ds-meta" style={{ textAlign: 'right' }}>
+                {earnings?.grossEarningsUsd != null
+                  ? `$${earnings.grossEarningsUsd.toFixed(2)}`
+                  : '—'}
+              </td>
+            </tr>
+            <tr>
+              <td className="ds-meta">Net payouts received</td>
+              <td className="ds-meta" style={{ textAlign: 'right' }}>
+                {earnings?.netPayoutsUsd != null
+                  ? `$${earnings.netPayoutsUsd.toFixed(2)}`
+                  : '—'}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* ALO-partner-tax: Polar does not yet issue 1099-K or 1099-MISC for
+            creator partners in the US.  Remove this banner and update the copy
+            below once Polar confirms 1099 delivery (set taxDocStatus to
+            'polar-issues' in the /api/account/earnings response). */}
+        {earnings?.taxDocStatus === 'polar-pending' && (
+          <p className="ds-meta" style={{ borderLeft: '3px solid currentColor', paddingLeft: 'var(--space-2)' }}>
+            <strong>Note for US creators:</strong> Polar does not yet issue
+            1099-K or 1099-MISC forms for creator partner payouts. You are
+            responsible for reporting your Spooool earnings on your federal and
+            state tax returns. Keep records of your gross earnings above — they
+            are your primary documentation until Polar adds 1099 support.
+            Spooool is tracking{' '}
+            <a
+              href="https://docs.polar.sh/payments/taxes"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Polar&apos;s tax documentation
+            </a>{' '}
+            and will update this page when the situation changes.
+          </p>
+        )}
+
+        {earnings?.taxDocStatus === 'polar-issues' && (
+          <p className="ds-meta">
+            Polar issues 1099-K / 1099-MISC forms for eligible US creators.
+            Log in to your{' '}
+            <a
+              href="https://polar.sh/dashboard"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Polar dashboard
+            </a>{' '}
+            to download your tax forms.
+          </p>
+        )}
+      </section>
 
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">

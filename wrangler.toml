@@ -79,6 +79,15 @@ id = "0b560dd1327445bd8b5eb6efca3e82e0"
 binding = "VIDEO_ENCODING"
 queue = "video-encoding"
 
+# Queue - AI Generative Video (ALO-647)
+# Consumer must be registered server-side (not declared here — wrangler errors on
+# re-declaration at deploy time). Register once with:
+#   npx wrangler queues consumer add ai-gen spooool
+# or via the Cloudflare dashboard, mirroring the video-encoding consumer setup.
+[[queues.producers]]
+binding = "AI_GEN"
+queue = "ai-gen"
+
 # Consumer is registered server-side; wrangler errors if re-declared on deploy.
 # To change batch size / DLQ, edit via the Cloudflare dashboard or `wrangler queues consumer`.
 
@@ -193,6 +202,22 @@ new_sqlite_classes = ["EncoderContainer"]
 [triggers]
 crons = ["0 2 * * *", "*/5 * * * *"]
 
+[env.staging]
+vars = { ALLOWED_ORIGINS = "" }
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "spooool-staging"
+database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
+migrations_dir = "src/db/migrations"
+
+[vars]
+# YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:
+#   wrangler secret put YOUTUBE_API_KEY            (prod)
+#   wrangler secret put YOUTUBE_API_KEY --env staging
+# Used by src/workers/youtube.ts for custom multi-source feeds. TikTok needs
+# no credentials (public oEmbed). Neither is a model provider, so neither
+# routes through the AI Gateway.
+
 [vars]
 # Comma-separated origin allow-list for CSRF protection on /api/*. Same-origin
 # is always allowed in addition to whatever is listed here. Override per env.
@@ -221,6 +246,10 @@ AI_GATEWAY_MODE = "run-gateway"
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)
 # BETTER_AUTH_URL         (optional — public origin, e.g. https://spooool.workers.dev)
+# GOOGLE_CLIENT_ID        (OAuth — from console.cloud.google.com → Credentials)
+# GOOGLE_CLIENT_SECRET    (OAuth — paired with GOOGLE_CLIENT_ID)
+# GITHUB_CLIENT_ID        (OAuth — from github.com → Settings → Developer settings → OAuth Apps)
+# GITHUB_CLIENT_SECRET    (OAuth — paired with GITHUB_CLIENT_ID)
 # CLOUDFLARE_ACCOUNT_ID
 # CF_STREAM_API_TOKEN
 # CF_STREAM_WEBHOOK_SECRET (HMAC secret to verify Cloudflare Stream webhooks)

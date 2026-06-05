@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AUTH_WRITE_BUCKET,
   SEARCH_BUCKET,
+  STUDIO_GEN_BUCKET,
   UPLOAD_INIT_BUCKET,
   clientIp,
   rateLimit,
@@ -154,5 +155,10 @@ describe('bucket configurations', () => {
   it('SEARCH_BUCKET sustains 1 search/sec with a 60-burst', () => {
     expect(SEARCH_BUCKET.capacity).toBe(60);
     expect(SEARCH_BUCKET.refillPerSecond).toBe(1);
+  });
+
+  it('STUDIO_GEN_BUCKET refills 30 tokens over 1 hour', () => {
+    expect(STUDIO_GEN_BUCKET.capacity).toBe(30);
+    expect(STUDIO_GEN_BUCKET.refillPerSecond * 3600).toBeCloseTo(30, 5);
   });
 });

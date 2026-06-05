@@ -33,11 +33,19 @@ export class EncoderContainer extends Container<EncoderContainerEnv> {
   }
 }
 
-// Distribute encode jobs across the pool by hashing the videoId.
+// Distribute encode jobs across the pool by hashing the videoId. A polynomial
+// rolling hash (FNV-1a-style) spreads ids far more evenly than summing char
+// codes — character-summing collides on anagrams and clusters because input
+// ids share an alphabet, leaving pool slots unevenly loaded.
 export function getEncoderStub(
   ns: DurableObjectNamespace,
   videoId: string,
 ): DurableObjectStub {
-  const slot = [...videoId].reduce((acc, c) => (acc + c.charCodeAt(0)) & 0xffff, 0) % POOL_SIZE;
+  let h = 2166136261; // FNV offset basis
+  for (let i = 0; i < videoId.length; i++) {
+    h ^= videoId.charCodeAt(i);
+    h = Math.imul(h, 16777619); // FNV prime
+  }
+  const slot = (h >>> 0) % POOL_SIZE;
   return ns.get(ns.idFromName(`encoder-${slot}`));
 }

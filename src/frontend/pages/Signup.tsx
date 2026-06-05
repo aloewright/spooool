@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signUp, useSession } from '../lib/auth-client';
+import { SocialAuthButtons } from '../components/SocialAuthButtons';
 
 export function Signup(): JSX.Element {
   const location = useLocation();
@@ -61,6 +62,8 @@ export function Signup(): JSX.Element {
         <span className="ds-label">Create account</span>
         <h1 className="ds-h2">Sign up</h1>
       </div>
+
+      <SocialAuthButtons callbackURL={next === '/' ? '/onboarding' : next} onError={setError} />
 
       <form onSubmit={(event) => void onSubmit(event)} className="card stack">
         <div className="field">

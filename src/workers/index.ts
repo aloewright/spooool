@@ -36,6 +36,7 @@ import { thumbnailRoutes } from './thumbnails';
 import { userRoutes } from './users';
 import { renderRoutes, runStuckJobSweep, type RenderEnv } from './render';
 import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './create';
+import { studioRoutes, type StudioEnv } from './studio';
 import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
@@ -49,7 +50,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StreamUploadEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -162,6 +163,7 @@ app.route('/', videoRoutes);
 app.route('/', relatedRoutes);
 app.route('/', renderRoutes);
 app.route('/', createRoutes);
+app.route('/', studioRoutes);
 app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', seoRoutes);

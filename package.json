@@ -51,6 +51,7 @@
     "@remotion/media-utils": "^4.0.467",
     "@remotion/shapes": "^4.0.467",
     "@remotion/studio": "^4.0.467",
+    "@rolldown/binding-linux-x64-gnu": "^1.0.0-rc.17",
     "@sentry/cloudflare": "^10.50.0",
     "@sentry/react": "^10.50.0",
     "@tanstack/ai": "^0.26.1",

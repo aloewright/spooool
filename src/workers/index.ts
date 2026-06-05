@@ -40,6 +40,7 @@ import type { AiGatewayMode } from './ai-gateway';
 import { streamUploadRoutes, type StreamUploadEnv } from './stream-upload';
 import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
+import { payoutsRoutes, type PayoutsEnv } from './payouts';
 import * as Sentry from '@sentry/cloudflare';
 
 type SessionUser = {
@@ -49,7 +50,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StreamUploadEnv & PayoutsEnv & {
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
@@ -164,6 +165,7 @@ app.route('/', renderRoutes);
 app.route('/', createRoutes);
 app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
+app.route('/', payoutsRoutes);
 app.route('/', seoRoutes);
 app.route('/', oembedRoutes);
 app.route('/', tagRoutes);

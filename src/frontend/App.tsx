@@ -49,6 +49,7 @@ const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Cre
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
+const Payouts = lazy(() => import('./pages/Payouts').then((m) => ({ default: m.Payouts })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -225,6 +226,9 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <Link to="/subscriptions">
         <button type="button" className="btn btn--ghost btn--sm">Subscriptions</button>
+      </Link>
+      <Link to="/payouts">
+        <button type="button" className="btn btn--ghost btn--sm">Payouts</button>
       </Link>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user.email}`} style={iconBtn}>
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -780,6 +784,14 @@ export default function App(): JSX.Element {
             element={
               <RequireAuth>
                 <Onboarding />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/payouts"
+            element={
+              <RequireAuth>
+                <Payouts />
               </RequireAuth>
             }
           />

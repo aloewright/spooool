@@ -49,6 +49,14 @@ export const CREATE_BUCKET: RateLimitBucket = {
   refillPerSecond: 5 / 3600,
 };
 
+// 30 studio generations per hour per user (placeholder — tuned per Polar tier
+// in ALO-650). Shared across AI Studio ops; chat is the first consumer.
+export const STUDIO_GEN_BUCKET: RateLimitBucket = {
+  name: 'studio-gen',
+  capacity: 30,
+  refillPerSecond: 30 / 3600,
+};
+
 interface RateLimiterBinding {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;

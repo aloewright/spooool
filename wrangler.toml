@@ -145,7 +145,7 @@ class_name = "RateLimiterDO"
 # Dockerfile / container source change before deploying.
 [[containers]]
 class_name = "RenderContainer"
-image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.0.4"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
 max_instances = 50
 instance_type = "standard-4"
 
@@ -154,6 +154,21 @@ instance_type = "standard-4"
 [[durable_objects.bindings]]
 name = "RENDER_CONTAINER"
 class_name = "RenderContainer"
+
+# R2+FFmpeg HLS encoding fallback (ALO-136). Same image as RenderContainer
+# (server.ts now handles both /render and /encode), separate DO class so
+# encode slots are independent of render slots. Pool of ≤20 instances
+# distributes encode jobs by videoId hash (see encoder-container.ts).
+# Bump image version whenever container/render source changes.
+[[containers]]
+class_name = "EncoderContainer"
+image = "registry.cloudflare.com/85d376fc54617bcb57185547f08e528b/spooool-render:1.1.0"
+max_instances = 20
+instance_type = "standard-4"
+
+[[durable_objects.bindings]]
+name = "ENCODE_CONTAINER"
+class_name = "EncoderContainer"
 
 # ComposerAgent DO — per-session state for guided prompt-to-video flow.
 [[durable_objects.bindings]]
@@ -175,6 +190,11 @@ new_sqlite_classes = ["RenderContainer"]
 [[migrations]]
 tag = "do_v4"
 new_sqlite_classes = ["ComposerAgent"]
+
+[[migrations]]
+tag = "do_v5"
+new_sqlite_classes = ["EncoderContainer"]
+
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
 # The */5 cron runs the render-job timeout sweep — marks any render_job

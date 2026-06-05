@@ -232,8 +232,7 @@ export function AccountSettings(): JSX.Element {
       <header className="stack-sm">
         <h1 className="ds-h2">Account settings</h1>
         <p className="ds-lede">
-          {/* LEGAL-REVIEW: confirm GDPR-compliant copy for the description and the delete confirm dialog. */}
-          Manage your email, password, notifications, and account status.
+          Manage your email, password, notifications, and account settings.
         </p>
       </header>
 
@@ -243,9 +242,9 @@ export function AccountSettings(): JSX.Element {
       {scheduledDate && (
         <section className="stack-sm" aria-label="Deletion scheduled">
           <p className="status-error">
-            {/* LEGAL-REVIEW: confirm the wording of the grace-window banner with counsel. */}
-            Your account is scheduled for deletion on{' '}
-            <strong>{scheduledDate.toUTCString()}</strong>. You can cancel any time before then.
+              Your account is scheduled for permanent deletion on{' '}
+            <strong>{scheduledDate.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</strong>.
+            {' '}To cancel, sign back in before that date and click the button below.
           </p>
           <button type="button" className="btn btn--secondary" onClick={() => void cancelDelete()} disabled={busy}>
             Cancel deletion
@@ -475,10 +474,10 @@ export function AccountSettings(): JSX.Element {
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">
           <span className="ds-label">Delete account</span>
-          {/* LEGAL-REVIEW: confirm GDPR-compliant language for delete confirmation. */}
           <p className="ds-meta">
-            Deletion is scheduled 30 days out. During that window you can sign back in and cancel. After the window,
-            your videos, comments, and account are permanently removed.
+            Your deletion request is held for 30 days. During that window you can sign back in and cancel at any time.
+            After 30 days, your videos, profile, and account credentials are permanently deleted.
+            Comments you posted remain on the platform but are anonymized — your name and account information are removed from them.
           </p>
           {!confirmDelete ? (
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmDelete(true)}>

@@ -1,0 +1,284 @@
+import { z } from 'zod';
+import type { Context, MiddlewareHandler } from 'hono';
+
+// Polar uses the Standard Webhooks spec (https://www.standardwebhooks.com/).
+// The secret is base64-encoded and prefixed with "whsec_". The signed message
+// is "{webhook-id}.{webhook-timestamp}.{rawBody}" and the signature is
+// base64(HMAC-SHA-256(key, message)). The header carries one or more
+// space-separated "v1,<base64>" entries to support key rotation.
+export const POLAR_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
+
+// ---------------------------------------------------------------------------
+// Signature verification
+// ---------------------------------------------------------------------------
+
+function base64ToBytes(b64: string): Uint8Array {
+  try {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return new Uint8Array(0);
+  }
+}
+
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length === 0 || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+
+export type SignatureVerification =
+  | { ok: true }
+  | { ok: false; reason: 'missing_header' | 'malformed_secret' | 'stale_timestamp' | 'bad_signature' };
+
+export async function verifyPolarSignature(
+  rawBody: string,
+  webhookId: string | null | undefined,
+  webhookTimestamp: string | null | undefined,
+  webhookSignature: string | null | undefined,
+  secret: string,
+  now: number = Math.floor(Date.now() / 1000),
+): Promise<SignatureVerification> {
+  if (!webhookId || !webhookTimestamp || !webhookSignature) {
+    return { ok: false, reason: 'missing_header' };
+  }
+
+  const ts = Number(webhookTimestamp);
+  if (!Number.isFinite(ts) || Math.abs(now - ts) > POLAR_WEBHOOK_TOLERANCE_SECONDS) {
+    return { ok: false, reason: 'stale_timestamp' };
+  }
+
+  // Strip optional "whsec_" prefix and decode the raw key bytes.
+  const b64Secret = secret.startsWith('whsec_') ? secret.slice(6) : secret;
+  const keyBytes = base64ToBytes(b64Secret);
+  if (keyBytes.length === 0) return { ok: false, reason: 'malformed_secret' };
+
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyBytes,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+
+  const message = `${webhookId}.${webhookTimestamp}.${rawBody}`;
+  const signed = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(message));
+  const expected = new Uint8Array(signed);
+
+  // The header may carry multiple "v1,<base64>" entries (key rotation).
+  // Accept if any one of them matches.
+  const entries = webhookSignature.split(' ');
+  for (const entry of entries) {
+    const comma = entry.indexOf(',');
+    if (comma < 0) continue;
+    const version = entry.slice(0, comma);
+    const sigB64 = entry.slice(comma + 1);
+    if (version !== 'v1') continue;
+    const provided = base64ToBytes(sigB64);
+    if (timingSafeEqual(expected, provided)) return { ok: true };
+  }
+
+  return { ok: false, reason: 'bad_signature' };
+}
+
+// ---------------------------------------------------------------------------
+// Payload schema — permissive: Polar's shape varies by event type. We extract
+// the fields we need and pass the rest to meta_json for audit.
+// ---------------------------------------------------------------------------
+
+const polarDataSchema = z
+  .object({
+    id: z.string().optional(),
+    // monetary fields (orders, subscriptions, refunds)
+    amount: z.number().int().nonnegative().optional(),
+    net_amount: z.number().int().optional(),
+    currency: z.string().optional(),
+    // subscription / order status
+    status: z.string().optional(),
+    // customer / user references
+    customer_id: z.string().optional(),
+    user_id: z.string().optional(),
+  })
+  .passthrough();
+
+const polarWebhookSchema = z.object({
+  type: z.string().min(1),
+  data: polarDataSchema,
+});
+
+export type PolarEventType = string;
+
+// ---------------------------------------------------------------------------
+// Status derivation
+// ---------------------------------------------------------------------------
+
+type LedgerStatus =
+  | 'pending'
+  | 'active'
+  | 'paid'
+  | 'cancelled'
+  | 'revoked'
+  | 'refunded'
+  | 'disputed'
+  | 'failed'
+  | 'unknown';
+
+function deriveStatus(eventType: string, dataStatus?: string): LedgerStatus {
+  const et = eventType.toLowerCase();
+
+  if (et.startsWith('refund.')) return 'refunded';
+  if (et.includes('dispute') || et.includes('chargeback')) return 'disputed';
+
+  if (et === 'order.created') return 'pending';
+  if (et === 'order.paid') return 'paid';
+  if (et === 'order.refunded') return 'refunded';
+
+  if (et === 'subscription.created') return 'active';
+  if (et === 'subscription.active') return 'active';
+  if (et === 'subscription.uncancelled') return 'active';
+  if (et === 'subscription.cancelled') return 'cancelled';
+  if (et === 'subscription.revoked') return 'revoked';
+
+  if (et === 'benefit_grant.created') return 'active';
+  if (et === 'benefit_grant.updated') return 'active';
+  if (et === 'benefit_grant.cycled') return 'active';
+  if (et === 'benefit_grant.revoked') return 'revoked';
+
+  if (et === 'pledge.created') return 'pending';
+  if (et === 'pledge.paid') return 'paid';
+
+  // For order.updated / subscription.updated, fall back to data.status.
+  if (dataStatus) {
+    const ds = dataStatus.toLowerCase();
+    if (ds === 'paid' || ds === 'complete' || ds === 'completed') return 'paid';
+    if (ds === 'active') return 'active';
+    if (ds === 'pending' || ds === 'incomplete') return 'pending';
+    if (ds === 'cancelled' || ds === 'canceled') return 'cancelled';
+    if (ds === 'revoked') return 'revoked';
+    if (ds === 'refunded') return 'refunded';
+    if (ds === 'disputed') return 'disputed';
+    if (ds === 'failed' || ds === 'past_due' || ds === 'unpaid') return 'failed';
+  }
+
+  return 'unknown';
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+export interface PolarWebhookEnv {
+  DB: D1Database;
+  POLAR_WEBHOOK_SECRET?: string;
+}
+
+export interface PolarWebhookDeps {
+  now?: () => number;
+  newId?: () => string;
+}
+
+function generateId(): string {
+  return crypto.randomUUID();
+}
+
+export const handlePolarWebhook =
+  (deps: PolarWebhookDeps = {}): MiddlewareHandler<{ Bindings: PolarWebhookEnv }> =>
+  async (c: Context<{ Bindings: PolarWebhookEnv }>) => {
+    const secret = c.env.POLAR_WEBHOOK_SECRET;
+    if (!secret) {
+      return c.json({ error: 'Webhook not configured' }, 503);
+    }
+
+    const rawBody = await c.req.text();
+    const webhookId = c.req.header('webhook-id');
+    const webhookTimestamp = c.req.header('webhook-timestamp');
+    const webhookSignature = c.req.header('webhook-signature');
+
+    const nowSecs = deps.now ? deps.now() : Math.floor(Date.now() / 1000);
+    const verification = await verifyPolarSignature(
+      rawBody,
+      webhookId,
+      webhookTimestamp,
+      webhookSignature,
+      secret,
+      nowSecs,
+    );
+    if (!verification.ok) {
+      return c.json({ error: 'Invalid signature', reason: verification.reason }, 401);
+    }
+
+    let json: unknown;
+    try {
+      json = JSON.parse(rawBody);
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400);
+    }
+
+    const parsed = polarWebhookSchema.safeParse(json);
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid payload', details: parsed.error.flatten() }, 400);
+    }
+
+    const { type: eventType, data } = parsed.data;
+    const status = deriveStatus(eventType, data.status);
+
+    // amount: prefer net_amount for refunds so we capture what the merchant
+    // actually receives/loses; fall back to amount for all other events.
+    const isRefund = eventType.toLowerCase().startsWith('refund.');
+    const amountCents =
+      (isRefund ? (data.net_amount ?? data.amount) : data.amount) ?? null;
+    const currency = data.currency?.toLowerCase() ?? null;
+
+    const polarObjectId = data.id ?? null;
+    const polarCustomerId = data.customer_id ?? null;
+    // data.user_id is Polar's user identifier — may not correspond to our
+    // user.id. Store it as-is; callers can JOIN on email if needed.
+    const polarUserId = data.user_id ?? null;
+
+    const id = deps.newId ? deps.newId() : generateId();
+    const createdAt = nowSecs * 1000; // store as ms epoch, matching other tables
+
+    // Idempotent write: UNIQUE constraint on webhook_id means a re-delivery
+    // of the same event simply returns inserted=false with no error.
+    const result = await c.env.DB.prepare(
+      `INSERT OR IGNORE INTO polar_ledger
+         (id, webhook_id, event_type, polar_object_id, polar_customer_id,
+          polar_user_id, amount_cents, currency, status, meta_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        id,
+        webhookId,
+        eventType,
+        polarObjectId,
+        polarCustomerId,
+        polarUserId,
+        amountCents,
+        currency,
+        status,
+        JSON.stringify(data),
+        createdAt,
+      )
+      .run();
+
+    const inserted = ((result.meta?.changes as number | undefined) ?? 0) > 0;
+    if (!inserted) {
+      // Duplicate delivery — already processed.
+      return c.json({ ok: true, inserted: false, event_type: eventType }, 200);
+    }
+
+    console.log('[polar-webhook]', {
+      webhook_id: webhookId,
+      event_type: eventType,
+      status,
+      amount_cents: amountCents,
+      currency,
+      polar_object_id: polarObjectId,
+      ledger_id: id,
+    });
+
+    return c.json({ ok: true, inserted: true, event_type: eventType, ledger_id: id });
+  };

@@ -16,7 +16,7 @@ interface EarningsSummary {
   currency: string;
   grossEarningsUsd: number | null;
   netPayoutsUsd: number | null;
-  taxDocStatus: 'polar-pending' | 'polar-issues';
+  taxDocStatus: 'polar-pending' | 'polar-issues' | 'unknown';
 }
 
 export function AccountSettings(): JSX.Element {
@@ -43,7 +43,7 @@ export function AccountSettings(): JSX.Element {
         return (await r.json()) as AccountInfo;
       }),
       fetch('/api/account/earnings', { credentials: 'include' }).then(async (r) => {
-        if (!r.ok) return null;
+        if (!r.ok) return { taxDocStatus: 'unknown' } as EarningsSummary;
         return (await r.json()) as EarningsSummary;
       }),
     ])
@@ -289,7 +289,7 @@ export function AccountSettings(): JSX.Element {
             creator partners in the US.  Remove this banner and update the copy
             below once Polar confirms 1099 delivery (set taxDocStatus to
             'polar-issues' in the /api/account/earnings response). */}
-        {earnings?.taxDocStatus === 'polar-pending' && (
+        {(earnings?.taxDocStatus === 'polar-pending' || earnings?.taxDocStatus === 'unknown') && (
           <p className="ds-meta" style={{ borderLeft: '3px solid currentColor', paddingLeft: 'var(--space-2)' }}>
             <strong>Note for US creators:</strong> Polar does not yet issue
             1099-K or 1099-MISC forms for creator partner payouts. You are

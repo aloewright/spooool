@@ -42,6 +42,7 @@ A video host that respects your time. Built **entirely on Cloudflare infrastruct
 | **D1** | Video metadata, user data, playlists | Free tier (500k reads/writes) |
 | **Durable Objects** | Session management, rate limiting, real-time features | $0.15/million ops |
 | **KV** | Cache layer, temporary uploads | Free tier (100k reads/day) |
+| **Workers AI / AI Gateway** | Two-stage comment spam filtering: deterministic pre-filter (free, sync) + `dynamic/text_gen` model via AI Gateway for subtle phishing and AI-written copypasta. Gateway error falls through — users are never penalised for infra failures. Configured via `AI` binding or `CF_ACCOUNT_ID`/`CF_AIG_TOKEN` secrets. | Pay-per-token above free tier |
 
 ### Alternative: R2-Only Path (No Stream Cost)
 

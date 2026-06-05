@@ -32,3 +32,98 @@ export function isLikelySpam(body: string): SpamCheckResult {
 
   return { blocked: false };
 }
+
+// Minimal shape of the Workers AI binding we need.
+interface AiBinding {
+  run(
+    model: string,
+    inputs: Record<string, unknown>,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
+}
+
+export interface AiSpamEnv {
+  AI?: AiBinding;
+  CF_ACCOUNT_ID?: string;
+  CF_GATEWAY_ID?: string;
+  CF_AIG_TOKEN?: string;
+}
+
+export interface AiSpamScore {
+  spam: boolean;
+  reason: string;
+}
+
+const SPAM_SYSTEM_PROMPT =
+  'You are a comment spam classifier. Respond with ONLY a JSON object: ' +
+  '{"spam": boolean, "reason": string}. ' +
+  'Set spam=true for: phishing, AI-written promotional copypasta, off-topic advertising, ' +
+  'or subtle manipulation. Set spam=false for genuine user comments.';
+
+export async function scoreCommentWithAi(
+  env: AiSpamEnv,
+  body: string,
+): Promise<AiSpamScore | null> {
+  const messages = [
+    { role: 'system', content: SPAM_SYSTEM_PROMPT },
+    { role: 'user', content: body },
+  ];
+
+  try {
+    if (env.AI) {
+      const gatewayId = env.CF_GATEWAY_ID ?? 'spooool';
+      const result = await env.AI.run(
+        'dynamic/text_gen',
+        { messages },
+        { gateway: { id: gatewayId } },
+      );
+      return parseAiResponse(result);
+    }
+
+    if (env.CF_ACCOUNT_ID && env.CF_AIG_TOKEN) {
+      const gatewayId = env.CF_GATEWAY_ID ?? 'spooool';
+      const url = `https://gateway.ai.cloudflare.com/v1/${env.CF_ACCOUNT_ID}/${gatewayId}/workers-ai/dynamic/text_gen`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.CF_AIG_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messages }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as unknown;
+      return parseAiResponse(data);
+    }
+  } catch {
+    // Gateway errors must not block users — fall through to allow.
+  }
+
+  return null;
+}
+
+function parseAiResponse(result: unknown): AiSpamScore | null {
+  try {
+    let text: string;
+    if (typeof result === 'string') {
+      text = result;
+    } else if (result !== null && typeof result === 'object') {
+      const r = result as Record<string, unknown>;
+      const inner = (r.result ?? r) as Record<string, unknown>;
+      text = typeof inner.response === 'string' ? inner.response : JSON.stringify(inner);
+    } else {
+      return null;
+    }
+
+    // Extract the first {...} block in case the model wraps JSON in prose.
+    const match = text.match(/\{[^{}]+\}/);
+    if (!match) return null;
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    if (typeof parsed.spam === 'boolean' && typeof parsed.reason === 'string') {
+      return { spam: parsed.spam, reason: parsed.reason };
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+}

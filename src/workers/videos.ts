@@ -12,6 +12,7 @@ import {
   parseChunkMetadataFromFormData,
   validateChunkShape,
   validateInitialFile,
+  validateMagicBytes,
 } from './upload-validation';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
@@ -348,6 +349,14 @@ async function handleRecorderUpload(
   const chunkError = validateChunkShape({ chunkSize: rawFile.size, chunkIndex, chunkCount });
   if (chunkError) return c.json({ error: chunkError.message, code: chunkError.code }, 400);
 
+  if (chunkIndex === 0) {
+    const headerBytes = new Uint8Array(await rawFile.slice(0, 12).arrayBuffer());
+    const magicError = validateMagicBytes(headerBytes);
+    if (magicError) {
+      return c.json({ error: magicError.message, code: magicError.code }, 400);
+    }
+  }
+
   const r2Key = `recorder/raw/${user.id}/${sessionId}/${takeId}.webm`;
 
   // Single-chunk upload: write directly to R2.
@@ -512,6 +521,12 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     });
     if (initialError) {
       return c.json({ error: initialError.message, code: initialError.code }, 400);
+    }
+
+    const headerBytes = new Uint8Array(await rawFile.slice(0, 12).arrayBuffer());
+    const magicError = validateMagicBytes(headerBytes);
+    if (magicError) {
+      return c.json({ error: magicError.message, code: magicError.code }, 400);
     }
 
     // ALO-139: precheck the user's storage quota before we pay for the

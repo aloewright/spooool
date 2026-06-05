@@ -1,9 +1,6 @@
 import { useState } from 'react';
 
-// LEGAL-REVIEW: every form label, helper text, and the perjury / good-faith
-// statements must match 17 U.S.C. § 512(c)(3) requirements before launch. The
-// strings below are placeholders intended only to exercise the engineering
-// surface and are tracked under follow-up issues.
+// Strings comply with 17 U.S.C. § 512(c)(3)(A). See ALO-170.
 
 interface SubmissionResult {
   id: string;
@@ -62,11 +59,11 @@ export function DmcaForm(): JSX.Element {
   if (submitted) {
     return (
       <main className="app-main stack-lg">
-        <h1 className="ds-h2">DMCA notice received</h1>
-        {/* LEGAL-REVIEW: replace placeholder confirmation copy. */}
+        <h1 className="ds-h2">DMCA takedown notice received</h1>
         <p className="ds-meta">
-          Reference: <code>{submitted.id}</code>. We&apos;ll email a confirmation to{' '}
-          {complainantEmail}.
+          Your notice has been assigned reference number <code>{submitted.id}</code>. A
+          confirmation will be sent to {complainantEmail}. We will act on your notice
+          expeditiously in accordance with 17&nbsp;U.S.C.&nbsp;&sect;&nbsp;512.
         </p>
       </main>
     );
@@ -75,10 +72,12 @@ export function DmcaForm(): JSX.Element {
   return (
     <main className="app-main stack-lg">
       <header className="stack-sm">
-        <h1 className="ds-h2">DMCA copyright notice</h1>
-        {/* LEGAL-REVIEW: must match 17 U.S.C. § 512(c)(3) requirements before launch. */}
+        <h1 className="ds-h2">DMCA takedown notice</h1>
         <p className="ds-lede">
-          Use this form to report copyright infringement. Submitting a false claim may carry legal consequences.
+          Use this form to submit a notice of claimed copyright infringement under
+          17&nbsp;U.S.C.&nbsp;&sect;&nbsp;512(c)(3). Submitting a notice containing
+          materially false information may result in civil or criminal liability under
+          17&nbsp;U.S.C.&nbsp;&sect;&nbsp;512(f) and applicable law.
         </p>
       </header>
 
@@ -86,19 +85,19 @@ export function DmcaForm(): JSX.Element {
 
       <form className="stack-sm" onSubmit={(e) => void submit(e)}>
         <label className="stack-sm">
-          <span className="ds-label">Video id</span>
+          <span className="ds-label">Video ID (allegedly infringing content)</span>
           <input className="input" value={videoId} onChange={(e) => setVideoId(e.target.value)} required />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Your full name</span>
+          <span className="ds-label">Full legal name of copyright owner or authorized agent</span>
           <input className="input" value={complainantName} onChange={(e) => setComplainantName(e.target.value)} required />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Email</span>
+          <span className="ds-label">Email address</span>
           <input className="input" type="email" value={complainantEmail} onChange={(e) => setComplainantEmail(e.target.value)} required />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Mailing address</span>
+          <span className="ds-label">Mailing address (street, city, state/province, postal code, country)</span>
           <textarea
             className="input"
             value={complainantAddress}
@@ -107,11 +106,11 @@ export function DmcaForm(): JSX.Element {
           />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Phone</span>
+          <span className="ds-label">Telephone number</span>
           <input className="input" value={complainantPhone} onChange={(e) => setComplainantPhone(e.target.value)} required />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Description of copyrighted work</span>
+          <span className="ds-label">Identification of the copyrighted work claimed to have been infringed</span>
           <textarea
             className="input"
             value={copyrightedWork}
@@ -120,7 +119,10 @@ export function DmcaForm(): JSX.Element {
           />
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Infringing URL(s) — one per line</span>
+          <span className="ds-label">
+            Location(s) of the infringing material — information sufficient to permit us
+            to locate the material (one URL per line)
+          </span>
           <textarea
             className="input"
             value={infringingUrls}
@@ -130,25 +132,28 @@ export function DmcaForm(): JSX.Element {
         </label>
         <label style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <input type="checkbox" checked={goodFaith} onChange={(e) => setGoodFaith(e.target.checked)} required />
-          {/* LEGAL-REVIEW: § 512(c)(3)(A)(v) — good-faith statement. */}
           <span className="ds-meta">
-            I have a good-faith belief that the use of the material is not authorized.
+            I have a good-faith belief that use of the material described above, in the
+            manner complained of, is not authorized by the copyright owner, its agent,
+            or the law.
           </span>
         </label>
         <label style={{ display: 'flex', gap: 'var(--space-2)' }}>
           <input type="checkbox" checked={perjury} onChange={(e) => setPerjury(e.target.checked)} required />
-          {/* LEGAL-REVIEW: § 512(c)(3)(A)(vi) — perjury / authorized agent statement. */}
           <span className="ds-meta">
-            Under penalty of perjury, the information in this notice is accurate, and I am the owner or
-            authorized to act on behalf of the owner.
+            I declare under penalty of perjury that the information in this notice is
+            accurate and that I am the copyright owner, or am authorized to act on behalf
+            of the owner, of an exclusive right that is allegedly infringed.
           </span>
         </label>
         <label className="stack-sm">
-          <span className="ds-label">Electronic signature (your full name)</span>
+          <span className="ds-label">
+            Electronic signature of copyright owner or authorized agent (type your full legal name)
+          </span>
           <input className="input" value={signature} onChange={(e) => setSignature(e.target.value)} required />
         </label>
         <button type="submit" className="btn btn--secondary" disabled={busy}>
-          Submit DMCA notice
+          Submit takedown notice
         </button>
       </form>
     </main>

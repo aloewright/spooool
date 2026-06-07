@@ -1,8 +1,8 @@
-# Unified Cross-Web Video Search (Discover) — Design
+# Unified Cross-Web Video Search + Inline Play (Discover) — Design
 
 **Date:** 2026-06-06
 **Status:** Approved (pending spec review)
-**Phase:** 2 of 3 in the "Cobalt-powered feed" initiative
+**Phase:** Initial phase of the "Cobalt-powered feed" initiative
 
 ## Context
 
@@ -12,139 +12,163 @@ currently aggregates read-only items from a fixed set of source kinds
 normalizing everything to a shared `FeedItem` (`src/workers/feed-item.ts`).
 Only YouTube items embed inline; everything else links out.
 
-This phase adds **unified video search across the web**: a user types a query
-and gets deduped results aggregated from multiple providers, normalized to the
-existing `FeedItem` schema. It is the first slice of a 3-phase initiative:
+This phase adds **unified video search across the web** AND **inline playback of
+any surfaced video**. The initiative originally split these (search = Phase 2,
+Cobalt playback = Phase 1); per decision, this initial phase ships **search +
+inline-play together**, and inline-play is the must-complete deliverable.
 
-- **Phase 1 (deferred):** Cobalt action layer — inline-play / import-to-spooool /
-  download on any feed item via the user's Cobalt instance.
-- **Phase 2 (this doc):** Unified discovery/search.
-- **Phase 3 (deferred):** Trends surface (incl. Google Trends / pytrends).
+Remaining deferred work:
+
+- **Cobalt import-to-spooool / download** actions (later phase).
+- **Trends surface** — "what's hot", Google Trends / pytrends, Metagraph API
+  (later phase).
 
 ## Goals
 
-- One search query → aggregated, deduped results across multiple providers.
-- Results normalized to the existing `FeedItem` schema and rendered with the
-  existing `FeedItemCard`.
+- One search query → aggregated, deduped results across multiple providers,
+  normalized to the existing `FeedItem` schema and rendered with `FeedItemCard`.
+- **Inline play of ANY surfaced video** — not just YouTube — without leaving spooool.
 - Two consuming surfaces: a dedicated `/discover` page, and a saveable
   `web_search` feed-source kind.
-- Provider failures are isolated and surfaced per-provider, never blanking the page.
+- Provider failures isolated and surfaced per-provider, never blanking the page.
 
 ## Non-Goals (explicitly deferred)
 
-- Cobalt inline-play / import / download (Phase 1).
-- Trends / "what's hot" surfaces, pytrends, Metagraph API (Phase 3).
-- Invidious provider (dropped: cannot run on Cloudflare Workers; YouTube API +
-  Brave/Firecrawl cover the need).
+- Cobalt import-to-spooool / download (later phase). Cobalt is used here **only**
+  to resolve a playable stream for inline playback.
+- Trends / "what's hot", pytrends, Metagraph API (later phase).
+- Invidious provider (dropped: cannot run on Cloudflare Workers).
+- Migrating native upload playback off `@cloudflare/stream-react`. Mantine Video
+  is introduced for **surfaced/external** videos only this phase; `Watch.tsx` /
+  `stream-player.tsx` are untouched (possible future unification).
 
-## Providers (v1)
+## Search Providers (v1)
 
-| Provider | Upstream | Key | `FeedItem.source` | Inline embed |
-|---|---|---|---|---|
-| YouTube | YouTube Data API v3 (existing `youtube.ts`, reuse `getYouTubeSearchItems`) | `YOUTUBE_API_KEY` (set) | `youtube` | yes (existing) |
-| DailyMotion | `GET api.dailymotion.com/videos?search=` | none | `dailymotion` | deferred (link-out in v1) |
-| Brave | `GET api.search.brave.com/res/v1/videos/search?q=` (`X-Subscription-Token`) | `BRAVE_SEARCH_API_KEY` (Doppler → secret) | `web` | no (link-out) |
-| Firecrawl | `POST https://firecrawl-cf.lazee.workers.dev/v1/search` (user's instance) | `FIRECRAWL_API_KEY` if required | `web` | no (link-out) |
+| Provider | Upstream | Key | `FeedItem.source` |
+|---|---|---|---|
+| YouTube | YouTube Data API v3 (existing `youtube.ts`, reuse `getYouTubeSearchItems`) | `YOUTUBE_API_KEY` (set) | `youtube` |
+| DailyMotion | `GET api.dailymotion.com/videos?search=` | none | `dailymotion` |
+| Brave | `GET api.search.brave.com/res/v1/videos/search?q=` (`X-Subscription-Token`) | `BRAVE_SEARCH_API_KEY` (Doppler → secret) | `web` |
+| Firecrawl | `POST https://firecrawl-cf.lazee.workers.dev/v1/search` (user's instance) | `FIRECRAWL_API_KEY` if required | `web` |
 
-DailyMotion fields: `id,title,owner.screenname,thumbnail_360_url,created_time,duration,embed_url`.
+DailyMotion fields: `id,title,owner.screenname,thumbnail_360_url,created_time,duration`.
+
+## Inline Playback (Cobalt + Mantine Video)
+
+Playback is decided **per item at play time**, not stored on the `FeedItem`:
+
+- **`source === 'youtube'`** → existing YouTube **iframe embed** (`embed:{kind:'youtube'}`).
+  Reliable, zero Cobalt load.
+- **everything else** (`dailymotion`, `web`, `tiktok`) → **Cobalt resolves the
+  item's canonical `url` to a muxed MP4**, played in a **Mantine Video** component.
+- **`source === 'spooool'`** → native uploads keep `@cloudflare/stream-react`
+  (unchanged; handled by the existing card link to `Watch.tsx`).
+
+### Cobalt client (`src/workers/cobalt.ts`)
+
+- User's instance: `COBALT_URL = https://cobalt-api.lazee.workers.dev` (Cobalt 11.7.1).
+- `resolvePlayable(env, url, fetcher?)`:
+  - `POST {COBALT_URL}/` with `Accept: application/json`,
+    `Content-Type: application/json`, optional `Authorization: Api-Key {COBALT_API_KEY}`,
+    body `{ url, downloadMode: "auto", videoQuality: "720" }`.
+  - Response handling by `status`:
+    - `tunnel` / `redirect` → `{ kind: 'mp4', url }`.
+    - `picker` → pick the first video entry → `{ kind: 'mp4', url }`.
+    - `error` → typed `CobaltError` (message surfaced to the card).
+  - Returns `{ kind: 'mp4' | 'hls', url }`.
+- **Ephemerality:** Cobalt tunnel/redirect URLs are short-lived, so they are
+  **resolved on demand at play time** and cached only briefly (KV, TTL ~5 min)
+  keyed by source URL hash. No long-lived caching of stream URLs.
+
+### API: resolve endpoint
+
+- `GET /api/discover/resolve?url=<canonical url>` (auth: logged-in users).
+  Returns `{ kind, url }` or `{ error }`. Called by the frontend when the user
+  hits play on a non-YouTube card.
+
+### Frontend player
+
+- **Add dependencies:** `@mantine/core`, `@mantine/hooks`, `@gfazioli/mantine-video`.
+  Wrap the app (or just the Discover/feed subtree) in `MantineProvider` + import
+  Mantine CSS. Mantine coexists with the existing Radix + custom CSS.
+- **`src/frontend/components/InlineVideoPlayer.tsx`:** given a `FeedItem`,
+  renders the YouTube iframe for YouTube, else calls `resolve`, then plays the
+  MP4 in Mantine Video. For HLS results, attach the existing **`hls.js`** to the
+  Mantine `<video>` ref via the `useVideo` headless hook.
+- Play happens inline in the card / in a lightweight modal over the grid.
 
 ## Architecture
 
 ```
-providers/                       aggregator              surfaces
-  youtube.ts   (exists, reuse) ─┐
-  dailymotion.ts ──────────────┤
-  brave.ts     ────────────────┼─► discover.ts ─► GET /api/discover/search ─┬─► /discover page
-  firecrawl.ts ────────────────┘    (fan-out,                               └─► web_search feed source
-                                      dedupe, merge)
+search providers/                 aggregator            surfaces            playback
+  youtube.ts   (reuse) ─┐
+  dailymotion.ts ───────┤                                                  ┌─ youtube → iframe
+  brave.ts     ─────────┼─► discover.ts ─► /api/discover/search ─► /discover ┤
+  firecrawl.ts ─────────┘    (fan-out,                          └─ web_search └─ else → /api/discover/resolve
+                              dedupe, merge)                       feed source     (cobalt.ts) → MP4 → Mantine Video
 ```
 
-### New provider clients (`src/workers/`)
+### New search provider clients (`src/workers/`)
 
-Each mirrors `youtube.ts`: a network client wrapping one upstream, with a
-read-through KV cache (`CACHE` binding) + 7-day "last-good" outage fallback, and
-pure normalizer functions (unit-tested in the node env). The `cached()` helper
-in `youtube.ts` is extracted to a shared module (`src/workers/cache.ts`) so all
-providers reuse it rather than duplicating the read-through + last-good logic.
+Each mirrors `youtube.ts`: a network client + read-through KV cache (`CACHE`) +
+7-day "last-good" outage fallback + pure normalizers (unit-tested in node env).
+The `cached()` helper in `youtube.ts` is extracted to `src/workers/cache.ts` and
+reused by all providers.
 
-- **`dailymotion.ts`** — `getDailyMotionSearchItems(env, query, fetcher?)`;
-  `normalizeDailyMotionItem(raw): FeedItem | null`. `source:'dailymotion'`.
-  No API key. Cache TTL 30 min.
-- **`brave.ts`** — `getBraveVideoSearchItems(env, query, fetcher?)`;
-  `normalizeBraveVideo(raw): FeedItem | null`. `source:'web'`, link-out.
-  Header `X-Subscription-Token: env.BRAVE_SEARCH_API_KEY`. TTL 30 min.
-  Throws a typed config error when the key is missing (mirrors
-  `YouTubeConfigError`) so the provider degrades to an error badge.
-- **`firecrawl.ts`** — `getFirecrawlVideoItems(env, query, fetcher?)`;
-  `normalizeFirecrawlResult(raw): FeedItem | null`. `source:'web'`, link-out.
-  Calls the user's instance at `FIRECRAWL_URL`. TTL 30 min. Filters results to
-  video-bearing pages; non-video results are dropped (`normalize` returns null).
+- **`dailymotion.ts`** — `getDailyMotionSearchItems`, `normalizeDailyMotionItem`.
+  `source:'dailymotion'`. No key. TTL 30 min.
+- **`brave.ts`** — `getBraveVideoSearchItems`, `normalizeBraveVideo`.
+  `source:'web'`. `X-Subscription-Token` header; typed config error when key
+  missing (mirrors `YouTubeConfigError`). TTL 30 min.
+- **`firecrawl.ts`** — `getFirecrawlVideoItems`, `normalizeFirecrawlResult`.
+  `source:'web'`. Filters to video-bearing pages (non-video → null). TTL 30 min.
 
 ### Schema change (`feed-item.ts`)
 
-- `FeedItemSource` extends to `'spooool' | 'youtube' | 'tiktok' | 'dailymotion' | 'web'`.
-- `FeedItem.embed` gains an optional `{ kind: 'dailymotion'; videoId: string }`
-  variant (populated but not yet consumed for inline play until Phase 1).
-- `FeedSourceKind` extends with `'web_search'`.
+- `FeedItemSource` → `'spooool' | 'youtube' | 'tiktok' | 'dailymotion' | 'web'`.
+- `FeedSourceKind` gains `'web_search'`.
+- `FeedItem` is otherwise unchanged; playback is resolved at play time, not stored.
 
 ### Aggregator (`src/workers/discover.ts`)
 
 - `aggregateSearch(env, { q, providers, order, cursor, limit }, fetcher?)`:
-  - Fans out to selected providers via `Promise.allSettled`. Each provider's
-    result becomes a `SourceResult` (reusing the existing type) carrying `items`,
-    optional `error`, optional `stale`.
-  - **Dedupe** across providers by canonical key: YouTube `videoId` when
-    `source==='youtube'`, else a normalized URL (lowercased host+path, tracking
-    params stripped). First occurrence wins; later duplicates merged away.
-  - **Ordering**:
-    - `relevance` (default for search): round-robin interleave preserving each
-      provider's returned rank — provider A item 1, provider B item 1, … then
-      A item 2, etc. Stable and deterministic.
-    - `date`: reuse the existing newest-first `compareDesc` from `feed-item.ts`.
-  - **Pagination**: cursor-based. For `date`, reuse `assembleFeed`. For
-    `relevance`, a parallel `assembleByRank` that encodes `(rank|providerKey|id)`
-    in the cursor. Both live in `feed-item.ts` and are unit-tested.
-  - Returns `{ items, nextCursor, providers: [{ key, error?, stale? }] }`.
+  fans out via `Promise.allSettled` (each → a `SourceResult`); **dedupes** across
+  providers by canonical key (YouTube `videoId`, else normalized URL with
+  tracking params stripped); orders by `relevance` (round-robin interleave
+  preserving each provider's rank — default) or `date` (existing `compareDesc`);
+  cursor-paginates. `relevance` adds `assembleByRank` in `feed-item.ts`; `date`
+  reuses `assembleFeed`. Returns `{ items, nextCursor, providers:[{key,error?,stale?}] }`.
 
 ### API router (Hono, mounted at `/api/discover` in `src/workers/index.ts`)
 
-- `GET /api/discover/search`
-  - Query params: `q` (required, non-empty), `providers` (CSV, default all),
-    `order` (`relevance`|`date`, default `relevance`), `cursor`, `limit`
-    (default 15, max 50).
-  - Auth: same middleware as feed routes (logged-in users).
-  - 400 on empty `q`. Provider-level failures are 200 with per-provider error
-    badges (never a hard failure when at least one provider succeeds).
+- `GET /api/discover/search?q=&providers=&order=&cursor=&limit=` — `q` required
+  (400 if empty); `providers` CSV (default all); `order` default `relevance`;
+  `limit` default 15 / max 50. Per-provider failures → 200 with error badges.
+- `GET /api/discover/resolve?url=` — Cobalt playback resolution (above).
+- Auth: same middleware as feed routes.
 
 ### Saved-search feed source
 
-- **Migration `0024_web_search_source.sql`**: SQLite cannot alter a CHECK
-  constraint in place, so recreate `feed_sources` with the CHECK extended to
-  include `'web_search'` (create new table, copy rows, drop old, rename), and
-  recreate `idx_feed_sources_feed`. `ref` stores JSON `{ "q": string,
-  "providers": string[] }` for `web_search` rows (other kinds keep their
-  existing `ref` meaning).
-- **`feeds.ts`** item-assembly: when a source `kind === 'web_search'`, parse
-  `ref` JSON and call `aggregateSearch`, producing a `SourceResult` that merges
-  into the feed alongside the other sources (existing merge path via
-  `assembleFeed`, `order:'date'` within the feed for chronological consistency).
-- **`feed-warm.ts`**: `web_search` sources are NOT pre-warmed in v1 (mirrors the
-  existing decision to exclude `youtube_search` from warming — search calls are
-  the most quota/cost-sensitive). Documented in the warmer.
+- **Migration `0024_web_search_source.sql`:** recreate `feed_sources` with the
+  `kind` CHECK extended to include `'web_search'` (create new table, copy, drop,
+  rename; recreate `idx_feed_sources_feed`). `ref` stores JSON
+  `{ "q": string, "providers": string[] }` for `web_search` rows.
+- **`feeds.ts`** item assembly: `kind==='web_search'` → parse `ref` → call
+  `aggregateSearch` → `SourceResult` merges via `assembleFeed` (`order:'date'`
+  within a feed). `feed-warm.ts` does NOT pre-warm `web_search` (mirrors the
+  existing `youtube_search` exclusion; documented in the warmer).
 
 ### Frontend
 
-- **`src/frontend/pages/Discover.tsx`** (`/discover` route, code-split like other
-  routes): search bar, provider filter chips (YouTube / DailyMotion / Web),
-  order toggle (Relevance / Newest), results grid reusing **`FeedItemCard`**,
-  cursor-based infinite scroll, per-provider status/error badges (reuse the
-  `FeedView` badge pattern), and a **"Save as feed source"** action that opens a
-  picker of the user's feeds and POSTs a `web_search` source.
-- **`src/frontend/lib/discover-client.ts`**: typed fetch client mirroring
-  `feeds-client.ts` (`searchDiscover(params): Promise<DiscoverResponse>`).
-- **`src/frontend/pages/FeedView.tsx`**: render the `web_search` source kind in
-  the source list and support adding one inline (query + provider selection).
-- Route registration in the frontend router + a nav entry to `/discover`.
+- **`Discover.tsx`** (`/discover`, code-split): search bar, provider filter chips,
+  order toggle, results grid reusing `FeedItemCard`, cursor infinite-scroll,
+  per-provider status badges, inline play via `InlineVideoPlayer`, and a
+  **"Save as feed source"** action.
+- **`discover-client.ts`:** typed client (`searchDiscover`, `resolvePlayable`).
+- **`InlineVideoPlayer.tsx`:** YouTube iframe vs. Cobalt-resolved Mantine Video.
+- **`FeedView.tsx`:** render + add the `web_search` source kind; inline play uses
+  the same `InlineVideoPlayer`.
+- Route registration + nav entry to `/discover`; `MantineProvider` setup.
 
 ## Config
 
@@ -152,42 +176,45 @@ providers reuse it rather than duplicating the read-through + last-good logic.
 |---|---|---|---|
 | `YOUTUBE_API_KEY` | secret | already set | reused |
 | `BRAVE_SEARCH_API_KEY` | secret | Doppler → `wrangler secret put` | Brave video search |
-| `FIRECRAWL_URL` | var (`wrangler.toml [vars]`) | `https://firecrawl-cf.lazee.workers.dev` | user's instance |
-| `FIRECRAWL_API_KEY` | secret | only if the instance requires auth | optional |
+| `FIRECRAWL_URL` | var (`[vars]`) | `https://firecrawl-cf.lazee.workers.dev` | user's instance |
+| `FIRECRAWL_API_KEY` | secret | only if instance requires auth | optional |
+| `COBALT_URL` | var (`[vars]`) | `https://cobalt-api.lazee.workers.dev` | user's instance |
+| `COBALT_API_KEY` | secret | only if instance requires auth | optional |
 
-The worker `Env` type (`src/workers/index.ts`) is extended with the new fields.
+Worker `Env` (`src/workers/index.ts`) extended with the new fields.
 
 ## Error Handling
 
-- Each provider isolated via `Promise.allSettled`; a throw/timeout becomes a
-  per-provider `error` badge, not a page failure.
-- Missing provider config → typed config error → provider reported as errored
-  while others still return (graceful degradation).
-- Read-through cache `last-good` fallback marks degraded providers `stale`.
+- Search providers isolated via `Promise.allSettled` → per-provider error badge.
+- Missing provider config → typed config error → that provider errors while
+  others still return.
+- Cache last-good fallback marks degraded providers `stale`.
+- Cobalt resolve failure → card shows a "couldn't play — open original" link-out.
 - Empty `q` → 400 before any upstream call.
 
 ## Testing
 
 - **Pure normalizers** (`normalizeDailyMotionItem`, `normalizeBraveVideo`,
-  `normalizeFirecrawlResult`) unit-tested in the node env, like
-  `youtube.test.ts`, against captured sample payloads.
-- **Dedupe + ordering** (`assembleByRank`, dedupe key) unit-tested with
-  synthetic `FeedItem[]`.
-- **Provider clients** tested with an injected `fetcher` (mock) covering success,
-  upstream error, missing-key config error, and cache last-good fallback.
-- **Aggregator** tested with mocked providers covering partial failure, dedupe
-  across providers, both order modes, and cursor pagination.
+  `normalizeFirecrawlResult`) + **dedupe/ordering** (`assembleByRank`) unit-tested
+  in node env, like `youtube.test.ts`.
+- **Provider clients** + **`cobalt.ts`** tested with injected `fetcher`: success,
+  upstream error, missing-key config error, cache last-good; Cobalt
+  tunnel/redirect/picker/error statuses.
+- **Aggregator** tested with mocked providers: partial failure, cross-provider
+  dedupe, both order modes, cursor pagination.
+- Frontend `InlineVideoPlayer` smoke-tested (YouTube branch vs. resolve branch).
 - CI runs Node 20 — test scripts MUST NOT use `--configLoader native`.
 
 ## Build Sequence
 
 1. Extract `cached()` → `src/workers/cache.ts`; repoint `youtube.ts`.
-2. Extend `feed-item.ts` types + add `assembleByRank` + dedupe helper (+ tests).
-3. `dailymotion.ts`, `brave.ts`, `firecrawl.ts` provider clients (+ tests).
-4. `discover.ts` aggregator (+ tests).
-5. `/api/discover` Hono router + `Env` additions + config in `wrangler.toml`.
-6. Migration `0024_web_search_source.sql`; `feeds.ts` web_search assembly;
+2. Extend `feed-item.ts` types + `assembleByRank` + dedupe helper (+ tests).
+3. `dailymotion.ts`, `brave.ts`, `firecrawl.ts` search clients (+ tests).
+4. `cobalt.ts` resolve client (+ tests).
+5. `discover.ts` aggregator (+ tests).
+6. `/api/discover` router (`search` + `resolve`) + `Env` additions + `wrangler.toml` vars.
+7. Migration `0024_web_search_source.sql`; `feeds.ts` web_search assembly;
    `feed-warm.ts` exclusion note.
-7. Frontend: `discover-client.ts`, `Discover.tsx`, route + nav, `FeedView.tsx`
-   web_search support.
-8. Set secrets (`BRAVE_SEARCH_API_KEY`), deploy config.
+8. Frontend: Mantine deps + `MantineProvider`, `InlineVideoPlayer.tsx`,
+   `discover-client.ts`, `Discover.tsx`, route + nav, `FeedView.tsx` web_search.
+9. Set secrets (`BRAVE_SEARCH_API_KEY`), deploy config.

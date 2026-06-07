@@ -16,6 +16,7 @@ const SOURCE_KINDS: Array<{ kind: FeedSourceKind; label: string; placeholder: st
   { kind: 'youtube_playlist', label: 'YouTube playlist', placeholder: 'playlist URL' },
   { kind: 'youtube_search', label: 'YouTube search', placeholder: 'search terms' },
   { kind: 'tiktok_video', label: 'TikTok video', placeholder: 'tiktok.com video URL' },
+  { kind: 'web_search', label: 'Web search', placeholder: 'Search query, e.g. lo-fi study beats' },
 ];
 
 type FeedSize = 'xs' | 'sm' | 'md' | 'ml' | 'lg';
@@ -87,7 +88,11 @@ export function FeedView(): JSX.Element {
     setAdding(true);
     setError(null);
     try {
-      await addSource(id, { kind, ref: ref.trim() });
+      const refValue =
+        kind === 'web_search'
+          ? JSON.stringify({ q: ref.trim(), providers: ['youtube', 'dailymotion', 'brave', 'firecrawl'] })
+          : ref.trim();
+      await addSource(id, { kind, ref: refValue });
       setRef('');
       await load();
     } catch (err) {

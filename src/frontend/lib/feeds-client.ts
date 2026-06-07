@@ -3,7 +3,7 @@
 // better-auth session cookie is sent.
 
 export type FeedSourceKind =
-  | 'spooool_channel' | 'youtube_channel' | 'youtube_playlist' | 'youtube_search' | 'tiktok_video';
+  | 'spooool_channel' | 'youtube_channel' | 'youtube_playlist' | 'youtube_search' | 'tiktok_video' | 'web_search';
 
 export interface Feed {
   id: string;
@@ -21,7 +21,7 @@ export interface FeedSource {
 }
 
 export interface FeedItem {
-  source: 'spooool' | 'youtube' | 'tiktok';
+  source: 'spooool' | 'youtube' | 'tiktok' | 'dailymotion' | 'web';
   id: string;
   title: string;
   author: string;
@@ -29,7 +29,7 @@ export interface FeedItem {
   publishedAt: number;
   durationSec: number | null;
   url: string;
-  embed?: { kind: 'youtube'; videoId: string };
+  embed?: { kind: 'youtube'; videoId: string } | { kind: 'dailymotion'; videoId: string };
 }
 
 export interface FeedItemsResponse {

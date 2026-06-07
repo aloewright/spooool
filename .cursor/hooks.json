@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "node .cursor/hooks/hindsight-recall.mjs",
+        "timeout": 15
+      }
+    ],
+    "stop": [
+      {
+        "command": "node .cursor/hooks/hindsight-retain-stop.mjs",
+        "timeout": 30
+      }
+    ]
+  }
+}

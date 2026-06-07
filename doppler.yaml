@@ -41,6 +41,12 @@
 #   VITE_POSTHOG_KEY              browser-side PostHog project API key
 #   VITE_POSTHOG_HOST             "https://us.i.posthog.com" (cloud) or self-hosted URL
 #
+#   # Hindsight agent memory (Cursor hooks + ~/.cursor/hindsight-mcp-spooool.sh):
+#   HINDSIGHT_BASE_URL            "https://hindsight.fly.pm"
+#   HINDSIGHT_API_KEY             tenant API key (= HINDSIGHT_API_TENANT_API_KEY on VM)
+#   HINDSIGHT_CF_ACCESS_CLIENT_ID Cloudflare Access service token (Client ID)
+#   HINDSIGHT_CF_ACCESS_CLIENT_SECRET
+#
 # Adding a new secret:
 #   - Add it under the appropriate config(s) in the Doppler dashboard.
 #   - No repo changes needed unless the prefix logic in

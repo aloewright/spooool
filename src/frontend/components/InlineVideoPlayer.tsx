@@ -42,7 +42,10 @@ function CobaltPlayer({ item }: { item: FeedItem }): JSX.Element {
     const video = videoRef.current;
     if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = playable.url;
-      return;
+      return () => {
+        video.removeAttribute('src');
+        video.load();
+      };
     }
     if (Hls.isSupported()) {
       const hls = new Hls();

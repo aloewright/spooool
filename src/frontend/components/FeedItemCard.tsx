@@ -1,9 +1,14 @@
 import { Link } from 'react-router-dom';
 import type { FeedItem } from '../lib/feeds-client';
-import { YouTubeEmbed } from './YouTubeEmbed';
+import { InlineVideoPlayer } from './InlineVideoPlayer';
 
 function SourceBadge({ source }: { source: FeedItem['source'] }): JSX.Element {
-  const label = source === 'spooool' ? 'spooool' : source === 'youtube' ? 'YouTube' : 'TikTok';
+  const label =
+    source === 'spooool' ? 'spooool'
+    : source === 'youtube' ? 'YouTube'
+    : source === 'tiktok' ? 'TikTok'
+    : source === 'dailymotion' ? 'DailyMotion'
+    : 'Web';
   return <span className={`feed-badge feed-badge--${source}`}>{label}</span>;
 }
 
@@ -34,26 +39,10 @@ export function FeedItemCard({ item }: { item: FeedItem }): JSX.Element {
     );
   }
 
-  // youtube: inline click-to-load embed.
-  if (item.source === 'youtube' && item.embed) {
-    return (
-      <article className="feed-card feed-card--youtube">
-        <YouTubeEmbed videoId={item.embed.videoId} title={item.title} thumbnailUrl={item.thumbnailUrl} />
-        <Meta item={item} />
-      </article>
-    );
-  }
-
-  // tiktok (and any non-embeddable item): card that links out.
+  // Everything else plays inline via InlineVideoPlayer (YouTube iframe, else Cobalt).
   return (
-    <article className="feed-card feed-card--tiktok">
-      <a href={item.url} target="_blank" rel="noopener noreferrer" className="feed-card__thumb-link">
-        {item.thumbnailUrl ? (
-          <img src={item.thumbnailUrl} alt="" className="feed-card__thumb" loading="lazy" />
-        ) : (
-          <div className="feed-card__thumb feed-card__thumb--empty" />
-        )}
-      </a>
+    <article className={`feed-card feed-card--${item.source}`}>
+      <InlineVideoPlayer item={item} />
       <Meta item={item} />
     </article>
   );

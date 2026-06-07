@@ -234,6 +234,12 @@ EMAIL_FROM_NAME = "Spooool"
 # adapter once it's smoke-verified on this account (see E11 AI Studio spec, App. B).
 AI_GATEWAY_MODE = "run-gateway"
 
+# Cross-web video search / playback (src/workers/discover.ts, src/workers/cobalt.ts).
+# Provider secrets (BRAVE_SEARCH_API_KEY, FIRECRAWL_API_KEY, COBALT_API_KEY) go in
+# Doppler-synced Worker secrets, not here.
+FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev"
+COBALT_URL = "https://cobalt-api.lazee.workers.dev"
+
 # Staging environment. Defined after the top-level [vars] table because TOML
 # treats [env.*] tables as terminal — any top-level table (like [vars]) must be
 # declared before the first [env.*] section or wrangler errors with

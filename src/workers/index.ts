@@ -43,6 +43,7 @@ import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './creat
 import { studioRoutes, type StudioEnv } from './studio';
 import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
+import { discoverRoutes } from './discover';
 import { runEmailDigestSweep } from './notification-email';
 import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
@@ -86,6 +87,13 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv 
   // Cloudflare *secret* (Doppler-synced), NOT a [vars] entry. Optional so the
   // worker still boots without it; YouTube sources just return an error result.
   YOUTUBE_API_KEY?: string;
+  // Cross-web video search providers (src/workers/discover.ts).
+  BRAVE_SEARCH_API_KEY?: string; // secret (Doppler-synced)
+  FIRECRAWL_URL?: string; // [vars] — user's Firecrawl instance
+  FIRECRAWL_API_KEY?: string; // secret (optional, only if the instance requires auth)
+  // Cobalt playback resolver (src/workers/cobalt.ts).
+  COBALT_URL?: string; // [vars] — user's Cobalt instance
+  COBALT_API_KEY?: string; // secret (optional)
 };
 
 type Variables = {
@@ -253,6 +261,7 @@ app.route('/', oembedRoutes);
 app.route('/', statusRoutes);
 app.route('/', tagRoutes);
 app.route('/', feedRoutes);
+app.route('/', discoverRoutes);
 // /watch/:id is intercepted to inject per-video OG tags before falling
 // through to the SPA HTML (ALO-158). Mounted last so /api/* and other
 // dynamic routes always win.

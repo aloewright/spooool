@@ -25,7 +25,7 @@ export function Discover(): JSX.Element {
   }
 
   async function run(reset: boolean) {
-    if (!q.trim()) return;
+    if (!q.trim() || providers.length === 0) return;
     setLoading(true);
     setError(null);
     try {
@@ -35,7 +35,11 @@ export function Discover(): JSX.Element {
         order,
         cursor: reset ? undefined : cursor ?? undefined,
       });
-      setItems((cur) => (reset ? res.items : [...cur, ...res.items]));
+      setItems((cur) => {
+        if (reset) return res.items;
+        const seen = new Set(cur.map((i) => `${i.source}:${i.id}`));
+        return [...cur, ...res.items.filter((i) => !seen.has(`${i.source}:${i.id}`))];
+      });
       setCursor(res.nextCursor);
       setStatus(res.providers);
     } catch (err) {
@@ -62,7 +66,7 @@ export function Discover(): JSX.Element {
           placeholder="Search videos across the web…"
           aria-label="Search query"
         />
-        <button type="submit" disabled={loading || !q.trim()}>
+        <button type="submit" disabled={loading || !q.trim() || providers.length === 0}>
           Search
         </button>
       </form>
@@ -95,6 +99,7 @@ export function Discover(): JSX.Element {
         </ul>
       )}
 
+      {providers.length === 0 && <p className="discover__error">Select at least one source.</p>}
       {error && <p className="discover__error">{error}</p>}
 
       <div className="feed-grid">

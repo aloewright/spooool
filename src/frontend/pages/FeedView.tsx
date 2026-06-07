@@ -8,6 +8,7 @@ import {
   type FeedItemsResponse,
   type FeedSourceKind,
 } from '../lib/feeds-client';
+import { ALL_PROVIDERS } from '../lib/discover-client';
 import { FeedItemCard } from '../components/FeedItemCard';
 
 const SOURCE_KINDS: Array<{ kind: FeedSourceKind; label: string; placeholder: string }> = [
@@ -90,7 +91,7 @@ export function FeedView(): JSX.Element {
     try {
       const refValue =
         kind === 'web_search'
-          ? JSON.stringify({ q: ref.trim(), providers: ['youtube', 'dailymotion', 'brave', 'firecrawl'] })
+          ? JSON.stringify({ q: ref.trim(), providers: [...ALL_PROVIDERS] })
           : ref.trim();
       await addSource(id, { kind, ref: refValue });
       setRef('');

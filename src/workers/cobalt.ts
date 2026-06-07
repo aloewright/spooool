@@ -17,7 +17,7 @@ export interface Playable {
 
 export class CobaltError extends Error {}
 
-const TTL = 5 * 60; // resolved stream URLs expire quickly
+const TTL = 120; // 2 min — resolved tunnel URLs are ephemeral; keep the reuse window small to avoid serving a near-expired URL.
 
 interface CobaltResponse {
   status?: string;
@@ -28,7 +28,13 @@ interface CobaltResponse {
 }
 
 function classify(url: string): Playable {
-  return { kind: url.includes('.m3u8') ? 'hls' : 'mp4', url };
+  let isHls = url.includes('.m3u8');
+  try {
+    isHls = new URL(url).pathname.toLowerCase().endsWith('.m3u8');
+  } catch {
+    // keep substring fallback for non-absolute URLs
+  }
+  return { kind: isHls ? 'hls' : 'mp4', url };
 }
 
 export async function resolvePlayable(
@@ -47,16 +53,18 @@ export async function resolvePlayable(
     body: JSON.stringify({ url: sourceUrl, downloadMode: 'auto', videoQuality: '720' }),
   });
   const body = (await res.json().catch(() => ({}))) as CobaltResponse;
+  // Cobalt v11 statuses: tunnel | redirect | picker | error | local-processing. We handle tunnel/redirect/picker;
+  // local-processing (client-side remux, different payload shape) intentionally falls through to the error branch
+  // so the caller link-out fallback kicks in.
   switch (body.status) {
     case 'tunnel':
     case 'redirect':
-    case 'stream':
       if (!body.url) throw new CobaltError('Cobalt returned no url');
       return classify(body.url);
     case 'picker': {
-      const first = body.picker?.find((p) => p.type === 'video') ?? body.picker?.[0];
-      if (!first?.url) throw new CobaltError('Cobalt picker had no playable');
-      return classify(first.url);
+      const video = body.picker?.find((p) => p.type === 'video');
+      if (!video?.url) throw new CobaltError('Cobalt picker had no video item');
+      return classify(video.url);
     }
     default:
       throw new CobaltError(body.error?.code ?? body.text ?? `cobalt status ${body.status ?? res.status}`);

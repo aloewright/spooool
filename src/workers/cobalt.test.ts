@@ -32,12 +32,22 @@ describe('resolvePlayable', () => {
     }));
     expect(r.url).toBe('https://cdn/pick.mp4');
   });
+  it('throws CobaltError when picker has no video item', async () => {
+    await expect(
+      resolvePlayable(env(), 'https://x/y', ok({ status: 'picker', picker: [{ type: 'photo', url: 'p' }] })),
+    ).rejects.toBeInstanceOf(CobaltError);
+  });
+  it('throws CobaltError on local-processing status (link-out fallback path)', async () => {
+    await expect(
+      resolvePlayable(env(), 'https://x/y', ok({ status: 'local-processing', url: 'https://x/y.mp4' })),
+    ).rejects.toBeInstanceOf(CobaltError);
+  });
   it('throws CobaltError on error status', async () => {
     await expect(
       resolvePlayable(env(), 'https://x/y', ok({ status: 'error', error: { code: 'fetch.fail' } })),
     ).rejects.toBeInstanceOf(CobaltError);
   });
-  it('throws when COBALT_URL missing', async () => {
+  it('throws when COBALT_URL is empty or missing', async () => {
     await expect(resolvePlayable(env(''), 'https://x/y', ok({}))).rejects.toBeInstanceOf(CobaltError);
   });
 });

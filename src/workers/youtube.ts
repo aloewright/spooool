@@ -4,6 +4,7 @@
 // direct (server-side) with env.YOUTUBE_API_KEY.
 
 import { kvHash, type FeedItem } from './feed-item';
+import { cachedItems } from './cache';
 
 const UC_ID_RE = /^UC[\w-]{22}$/;
 const PLAYLIST_ID_RE = /^(PL|UU|OL|FL|RD|LL)[\w-]+$/;
@@ -147,7 +148,6 @@ const MAX_RESULTS = 15;
 const TTL_ITEMS = 15 * 60; // channel/playlist item lists
 const TTL_SEARCH = 30 * 60; // search is 100 quota units — cache longer
 const TTL_UPLOADS = 7 * 24 * 60 * 60; // channelId -> uploads playlist mapping is ~static
-const TTL_LASTGOOD = 7 * 24 * 60 * 60; // outage fallback
 
 function keyChannel(channelId: string): string {
   return `yt:channel:${channelId}`;
@@ -187,27 +187,6 @@ async function ytFetch(
   return res.json();
 }
 
-// Read-through cache with a long-lived "last good" copy for outage/quota fallback.
-async function cached(
-  env: YouTubeEnv,
-  key: string,
-  ttl: number,
-  produce: () => Promise<FeedItem[]>,
-): Promise<YouTubeFetchResult> {
-  const fresh = await env.CACHE.get(key);
-  if (fresh !== null) return { items: JSON.parse(fresh) as FeedItem[] };
-  try {
-    const items = await produce();
-    const json = JSON.stringify(items);
-    await env.CACHE.put(key, json, { expirationTtl: ttl });
-    await env.CACHE.put(`${key}:lg`, json, { expirationTtl: TTL_LASTGOOD });
-    return { items };
-  } catch (err) {
-    const lastGood = await env.CACHE.get(`${key}:lg`);
-    if (lastGood !== null) return { items: JSON.parse(lastGood) as FeedItem[], stale: true };
-    return { items: [], error: err instanceof Error ? err.message : 'youtube fetch failed' };
-  }
-}
 
 async function uploadsPlaylistFor(env: YouTubeEnv, channelId: string, fetcher: typeof fetch): Promise<string> {
   const cachedId = await env.CACHE.get(keyUploads(channelId));
@@ -242,7 +221,7 @@ export async function getYouTubeChannelItems(
 ): Promise<YouTubeFetchResult> {
   const key = keyChannel(channelId);
   if (force) await env.CACHE.delete(key);
-  return cached(env, key, TTL_ITEMS, async () => {
+  return cachedItems(env, key, TTL_ITEMS, async () => {
     const uploads = await uploadsPlaylistFor(env, channelId, fetcher);
     return listPlaylistItems(env, uploads, fetcher);
   });
@@ -256,7 +235,7 @@ export async function getYouTubePlaylistItems(
 ): Promise<YouTubeFetchResult> {
   const key = `yt:playlist:${playlistId}`;
   if (force) await env.CACHE.delete(key);
-  return cached(env, key, TTL_ITEMS, () => listPlaylistItems(env, playlistId, fetcher));
+  return cachedItems(env, key, TTL_ITEMS, () => listPlaylistItems(env, playlistId, fetcher));
 }
 
 export async function getYouTubeSearchItems(
@@ -264,7 +243,7 @@ export async function getYouTubeSearchItems(
   query: string,
   fetcher: typeof fetch = fetch,
 ): Promise<YouTubeFetchResult> {
-  return cached(env, keySearch(query), TTL_SEARCH, async () => {
+  return cachedItems(env, keySearch(query), TTL_SEARCH, async () => {
     const data = (await ytFetch(
       env,
       'search',

@@ -82,6 +82,35 @@ export async function aggregateSearch(
   return { items: ranked.items, nextCursor: ranked.nextCursor, providers };
 }
 
+// SSRF guard: only allow http(s) URLs to public hosts. Blocks localhost,
+// link-local, and private IP ranges so a logged-in user can't make the Cobalt
+// instance probe internal services.
+export function isResolvableUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.internal')) {
+    return false;
+  }
+  // IPv6 loopback / unique-local
+  if (host === '::1' || host.startsWith('fc') || host.startsWith('fd') || host.startsWith('fe80')) return false;
+  // IPv4 private / loopback / link-local ranges
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 10 || a === 127 || a === 0) return false;
+    if (a === 169 && b === 254) return false; // link-local incl. cloud metadata
+    if (a === 192 && b === 168) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+  }
+  return true;
+}
+
 const searchSchema = z.object({
   q: z.string().trim().min(1).max(256),
   providers: z.string().optional(),
@@ -117,6 +146,7 @@ discoverRoutes.get('/api/discover/resolve', async (c) => {
   if (!c.get('user')) return c.json({ error: 'Unauthorized' }, 401);
   const url = c.req.query('url');
   if (!url) return c.json({ error: 'Missing url' }, 400);
+  if (!isResolvableUrl(url)) return c.json({ error: 'URL not allowed' }, 400);
   try {
     const playable = await resolvePlayableCached(c.env, url);
     return c.json(playable);

@@ -26,7 +26,6 @@ export default defineConfig({
       'container/render/src/**/*.test.ts',
     ],
     exclude: ['src/**/*.workers.test.ts'],
-    restoreMocks: true,
     // cloudflare:workers is a Cloudflare-runtime-only module; stub it out so
     // unit tests that transitively import @cloudflare/containers can still run.
     alias: {

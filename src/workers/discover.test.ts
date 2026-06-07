@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as yt from './youtube';
 import * as dm from './dailymotion';
 import * as brave from './brave';
 import * as fc from './firecrawl';
-import { aggregateSearch } from './discover';
+import { aggregateSearch, isResolvableUrl } from './discover';
 import type { FeedItem } from './feed-item';
 
 function item(source: FeedItem['source'], id: string, url: string): FeedItem {
@@ -12,6 +12,7 @@ function item(source: FeedItem['source'], id: string, url: string): FeedItem {
 const env = { CACHE: {} as KVNamespace } as never;
 
 describe('aggregateSearch', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
   it('fans out, interleaves, and reports provider status (relevance)', async () => {
     vi.spyOn(yt, 'getYouTubeSearchItems').mockResolvedValue({ items: [item('youtube', 'y1', 'https://youtu.be/y1')] });
     vi.spyOn(dm, 'getDailyMotionSearchItems').mockResolvedValue({ items: [item('dailymotion', 'd1', 'https://dm/d1')] });
@@ -28,5 +29,40 @@ describe('aggregateSearch', () => {
     vi.spyOn(yt, 'getYouTubeSearchItems').mockResolvedValue({ items: [] });
     await aggregateSearch(env, { q: 'x', providers: ['youtube'], order: 'relevance', cursor: null, limit: 10 });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe('isResolvableUrl', () => {
+  it('allows public video hosts', () => {
+    expect(isResolvableUrl('https://www.youtube.com/watch?v=x')).toBe(true);
+    expect(isResolvableUrl('https://vimeo.com/123')).toBe(true);
+  });
+
+  it('blocks localhost and loopback', () => {
+    expect(isResolvableUrl('http://localhost/x')).toBe(false);
+    expect(isResolvableUrl('https://127.0.0.1/')).toBe(false);
+  });
+
+  it('blocks cloud metadata endpoint (link-local)', () => {
+    expect(isResolvableUrl('https://169.254.169.254/latest/meta-data/')).toBe(false);
+  });
+
+  it('blocks private IP ranges', () => {
+    expect(isResolvableUrl('https://10.0.0.5/')).toBe(false);
+    expect(isResolvableUrl('https://192.168.1.1/')).toBe(false);
+    expect(isResolvableUrl('https://172.16.0.1/')).toBe(false);
+  });
+
+  it('blocks .internal and .local hostnames', () => {
+    expect(isResolvableUrl('https://foo.internal/')).toBe(false);
+    expect(isResolvableUrl('https://myservice.local/')).toBe(false);
+  });
+
+  it('returns false for non-URL string', () => {
+    expect(isResolvableUrl('not a url')).toBe(false);
+  });
+
+  it('returns false for non-http protocols', () => {
+    expect(isResolvableUrl('file:///etc/passwd')).toBe(false);
   });
 });

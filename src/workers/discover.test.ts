@@ -65,4 +65,25 @@ describe('isResolvableUrl', () => {
   it('returns false for non-http protocols', () => {
     expect(isResolvableUrl('file:///etc/passwd')).toBe(false);
   });
+
+  it('blocks alternate IP encodings (decimal, hex, octal)', () => {
+    expect(isResolvableUrl('http://2130706433/')).toBe(false);   // 127.0.0.1 as bare decimal
+    expect(isResolvableUrl('http://0x7f.0.0.1/')).toBe(false);   // hex octet
+    expect(isResolvableUrl('http://0177.0.0.1/')).toBe(false);   // octal-style leading-zero
+  });
+});
+
+describe('aggregateSearch date-order deduplication', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('dedupes the same video returned by two providers in date order', async () => {
+    const shared = item('youtube', 'dup1', 'https://youtu.be/dup1');
+    vi.spyOn(yt, 'getYouTubeSearchItems').mockResolvedValue({ items: [shared] });
+    vi.spyOn(dm, 'getDailyMotionSearchItems').mockResolvedValue({ items: [shared] });
+    vi.spyOn(brave, 'getBraveVideoSearchItems').mockResolvedValue({ items: [] });
+    vi.spyOn(fc, 'getFirecrawlVideoItems').mockResolvedValue({ items: [] });
+
+    const r = await aggregateSearch(env, { q: 'dup', providers: ['youtube', 'dailymotion', 'brave', 'firecrawl'], order: 'date', cursor: null, limit: 10 });
+    expect(r.items.filter((i) => i.id === 'dup1')).toHaveLength(1);
+  });
 });

@@ -22,6 +22,8 @@ export function Discover(): JSX.Element {
 
   function toggleProvider(p: ProviderKey) {
     setProviders((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
+    setCursor(null);
+    setItems([]);
   }
 
   async function run(reset: boolean) {
@@ -80,7 +82,7 @@ export function Discover(): JSX.Element {
         ))}
         <label className="discover__chip">
           Order:
-          <select value={order} onChange={(e) => setOrder(e.target.value as 'relevance' | 'date')}>
+          <select value={order} onChange={(e) => { setOrder(e.target.value as 'relevance' | 'date'); setCursor(null); setItems([]); }}>
             <option value="relevance">Relevance</option>
             <option value="date">Newest</option>
           </select>

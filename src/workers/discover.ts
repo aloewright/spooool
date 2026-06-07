@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   assembleByRank,
   assembleFeed,
+  canonicalKey,
   type FeedItem,
   type SourceResult,
 } from './feed-item';
@@ -69,11 +70,16 @@ export async function aggregateSearch(
   const providers = perProvider.map(({ key, error, stale }) => ({ key, ...(error ? { error } : {}), ...(stale ? { stale: true } : {}) }));
 
   if (opts.order === 'date') {
-    const results: SourceResult[] = perProvider.map((p) => ({
-      sourceId: p.key,
-      kind: 'web_search' as const,
-      items: p.items,
-    }));
+    const seen = new Set<string>();
+    const results: SourceResult[] = perProvider.map((p) => {
+      const items = p.items.filter((it) => {
+        const k = canonicalKey(it);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      return { sourceId: p.key, kind: 'web_search' as const, items };
+    });
     const assembled = assembleFeed(results, opts.cursor, opts.limit);
     return { items: assembled.items, nextCursor: assembled.nextCursor, providers };
   }
@@ -94,6 +100,11 @@ export function isResolvableUrl(raw: string): boolean {
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return false;
   const host = u.hostname.toLowerCase();
+  // Reject non-DNS host forms that bypass the dotted-decimal private-range check:
+  // bare decimal IP (e.g. 2130706433), hex (0x7f...), or octal (0177...) octets.
+  if (/^\d+$/.test(host)) return false; // bare decimal integer IP
+  if (/^0x/i.test(host) || /\.0x/i.test(host)) return false; // hex
+  if (/(^|\.)0\d+/.test(host)) return false; // octal-style leading-zero octets
   if (host === 'localhost' || host === '0.0.0.0' || host.endsWith('.local') || host.endsWith('.internal')) {
     return false;
   }

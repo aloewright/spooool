@@ -18,8 +18,9 @@ import {
   type YouTubeEnv,
 } from './youtube';
 import { getTikTokItem, isTikTokVideoUrl, type TikTokEnv } from './tiktok';
+import { aggregateSearch, ALL_PROVIDERS, type DiscoverEnv, type ProviderKey } from './discover';
 
-export interface FeedsEnv extends YouTubeEnv, TikTokEnv {
+export interface FeedsEnv extends YouTubeEnv, TikTokEnv, DiscoverEnv {
   DB: D1Database;
   CACHE: KVNamespace;
 }
@@ -51,7 +52,7 @@ const FEED_SELECT =
   'SELECT id, user_id, name, description, is_public, last_viewed_at, created_at, updated_at FROM feeds';
 
 const addSourceSchema = z.object({
-  kind: z.enum(['spooool_channel', 'youtube_channel', 'youtube_playlist', 'youtube_search', 'tiktok_video']),
+  kind: z.enum(['spooool_channel', 'youtube_channel', 'youtube_playlist', 'youtube_search', 'tiktok_video', 'web_search']),
   ref: z.string().min(1).max(2048),
 });
 const itemsQuerySchema = z.object({
@@ -83,6 +84,21 @@ function publicFeed(f: FeedRow) {
 
 async function loadFeed(env: FeedsEnv, id: string): Promise<FeedRow | null> {
   return env.DB.prepare(`${FEED_SELECT} WHERE id = ?`).bind(id).first<FeedRow>();
+}
+
+export function parseWebSearchRef(ref: string): { q: string; providers: ProviderKey[] } {
+  try {
+    const parsed = JSON.parse(ref) as { q?: string; providers?: string[] };
+    const providers = (parsed.providers ?? []).filter((p): p is ProviderKey =>
+      (ALL_PROVIDERS as string[]).includes(p),
+    );
+    if (typeof parsed.q === 'string' && parsed.q.trim().length > 0) {
+      return { q: parsed.q, providers: providers.length ? providers : [...ALL_PROVIDERS] };
+    }
+  } catch {
+    // not JSON — treat the whole ref as the query
+  }
+  return { q: ref, providers: [...ALL_PROVIDERS] };
 }
 
 const YT_PER_SOURCE = 15;
@@ -127,6 +143,12 @@ async function fetchSourceItems(env: FeedsEnv, s: SourceRow): Promise<SourceResu
     if (s.kind === 'youtube_search') {
       const r = await getYouTubeSearchItems(env, s.ref);
       return { ...base, items: r.items, error: r.error, stale: r.stale };
+    }
+    if (s.kind === 'web_search') {
+      const { q, providers } = parseWebSearchRef(s.ref);
+      const r = await aggregateSearch(env, { q, providers, order: 'date', cursor: null, limit: 15 });
+      const error = r.providers.find((p) => p.error)?.error;
+      return { ...base, items: r.items, error };
     }
     // tiktok_video
     const r = await getTikTokItem(env, s.ref, parseSqliteTimestamp(s.added_at));
@@ -173,6 +195,10 @@ async function resolveSource(
   }
   if (kind === 'youtube_search') {
     return { ref, label: `Search: ${ref}` };
+  }
+  if (kind === 'web_search') {
+    const { q, providers } = parseWebSearchRef(ref);
+    return { ref: JSON.stringify({ q, providers }), label: `Web search: ${q}` };
   }
   // tiktok_video
   if (!isTikTokVideoUrl(ref)) throw new Error('Not a TikTok video URL');

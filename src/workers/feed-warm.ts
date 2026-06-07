@@ -18,7 +18,8 @@ export async function warmFeedCaches(env: FeedWarmEnv, fetcher: typeof fetch = f
     `SELECT DISTINCT fs.kind, fs.ref
      FROM feed_sources fs JOIN feeds f ON f.id = fs.feed_id
      WHERE f.last_viewed_at IS NOT NULL AND f.last_viewed_at > ?
-       AND fs.kind IN ('youtube_channel','youtube_playlist')`,
+       AND fs.kind IN ('youtube_channel','youtube_playlist')
+       -- web_search is the most cost-sensitive kind (multi-provider fan-out) — not pre-warmed, matching youtube_search.`,
   )
     .bind(since)
     .all<{ kind: string; ref: string }>();

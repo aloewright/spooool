@@ -41,11 +41,11 @@ describe('FeedItemCard', () => {
     expect(container!.querySelector('button[aria-label^="Play"]')).not.toBeNull();
   });
 
-  it('renders a tiktok item as an external link that opens in a new tab', () => {
+  it('renders a non-youtube item with an inline play button (Cobalt), not a link-out', () => {
     mount(<FeedItemCard item={item({ source: 'tiktok', url: 'https://www.tiktok.com/@u/video/7' })} />);
-    const a = container!.querySelector('a[target="_blank"]');
-    expect(a).not.toBeNull();
-    expect(a!.getAttribute('rel')).toContain('noopener');
-    expect(a!.getAttribute('href')).toBe('https://www.tiktok.com/@u/video/7');
+    // Non-spooool/non-youtube items play inline via Cobalt: a Play button is
+    // shown and there is no external link-out in the default (pre-resolve) state.
+    expect(container!.querySelector('button.feed-card__play')).not.toBeNull();
+    expect(container!.querySelector('a[target="_blank"]')).toBeNull();
   });
 });

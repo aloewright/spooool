@@ -6,9 +6,10 @@ export type FeedSourceKind =
   | 'youtube_channel'
   | 'youtube_playlist'
   | 'youtube_search'
-  | 'tiktok_video';
+  | 'tiktok_video'
+  | 'web_search';
 
-export type FeedItemSource = 'spooool' | 'youtube' | 'tiktok';
+export type FeedItemSource = 'spooool' | 'youtube' | 'tiktok' | 'dailymotion' | 'web';
 
 export interface FeedItem {
   source: FeedItemSource;
@@ -19,7 +20,7 @@ export interface FeedItem {
   publishedAt: number; // epoch ms; sort key
   durationSec: number | null;
   url: string; // canonical watch/link-out URL
-  embed?: { kind: 'youtube'; videoId: string }; // present only for inline-embeddable items
+  embed?: { kind: 'youtube'; videoId: string } | { kind: 'dailymotion'; videoId: string }; // present only for inline-embeddable items
 }
 
 export interface SourceResult {
@@ -111,4 +112,73 @@ export function assembleFeed(
   });
 
   return { items: page, nextCursor, sources };
+}
+
+// Stable cross-provider identity for dedupe + relevance-cursor.
+// Best-effort: does not normalize platform short-URLs (e.g. dai.ly) — those may not dedupe against canonical URLs.
+export function canonicalKey(item: FeedItem): string {
+  if (item.source === 'youtube' && item.embed?.kind === 'youtube') {
+    return `yt:${item.embed.videoId}`;
+  }
+  try {
+    const u = new URL(item.url);
+    return `${u.hostname.replace(/^www\./, '')}${u.pathname}`.toLowerCase();
+  } catch {
+    return `${item.source}:${item.id}`;
+  }
+}
+
+export function dedupeItems(items: FeedItem[]): FeedItem[] {
+  const seen = new Set<string>();
+  const out: FeedItem[] = [];
+  for (const it of items) {
+    const k = canonicalKey(it);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(it);
+  }
+  return out;
+}
+
+// Round-robin interleave of per-provider ranked lists, preserving each list's order.
+export function interleaveRanked(lists: FeedItem[][]): FeedItem[] {
+  const out: FeedItem[] = [];
+  const max = lists.reduce((m, l) => Math.max(m, l.length), 0);
+  for (let i = 0; i < max; i++) {
+    for (const l of lists) {
+      if (i < l.length) out.push(l[i]);
+    }
+  }
+  return out;
+}
+
+export interface RankedAssembly {
+  items: FeedItem[];
+  nextCursor: string | null;
+}
+
+// Relevance ordering: interleave provider ranks, dedupe, then page by a cursor
+// that encodes the canonicalKey of the last returned item.
+export function assembleByRank(
+  lists: FeedItem[][],
+  cursor: string | null,
+  limit: number,
+): RankedAssembly {
+  const ordered = dedupeItems(interleaveRanked(lists));
+  let start = 0;
+  if (cursor) {
+    let key: string;
+    try {
+      key = atob(cursor);
+    } catch {
+      key = '';
+    }
+    const idx = ordered.findIndex((i) => canonicalKey(i) === key);
+    // Cursor key gone (results churned since last page) -> stop, don't restart at page 1.
+    start = idx >= 0 ? idx + 1 : ordered.length;
+  }
+  const page = ordered.slice(start, start + limit);
+  const hasMore = start + limit < ordered.length;
+  const nextCursor = hasMore && page.length > 0 ? btoa(canonicalKey(page[page.length - 1])) : null;
+  return { items: page, nextCursor };
 }

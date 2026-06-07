@@ -244,8 +244,10 @@ COBALT_URL = "https://cobalt-api.lazee.workers.dev"
 # treats [env.*] tables as terminal — any top-level table (like [vars]) must be
 # declared before the first [env.*] section or wrangler errors with
 # "trying to redefine an already defined table".
+# NOTE: an [env.*] `vars` table does NOT inherit/merge top-level [vars] —
+# wrangler replaces it wholesale, so the discover/cobalt URLs must be repeated here.
 [env.staging]
-vars = { ALLOWED_ORIGINS = "" }
+vars = { ALLOWED_ORIGINS = "", FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev", COBALT_URL = "https://cobalt-api.lazee.workers.dev" }
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "spooool-staging"

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
+import { Video } from '@gfazioli/mantine-video';
+import '@gfazioli/mantine-video/styles.css';
 import type { FeedItem } from '../lib/feeds-client';
 import { resolvePlayable, type Playable } from '../lib/discover-client';
 import { YouTubeEmbed } from './YouTubeEmbed';
@@ -76,5 +78,5 @@ function CobaltPlayer({ item }: { item: FeedItem }): JSX.Element {
   if (playable.kind === 'hls') {
     return <video ref={videoRef} className="feed-card__video" controls autoPlay playsInline />;
   }
-  return <video src={playable.url} className="feed-card__video" controls autoPlay playsInline />;
+  return <Video src={playable.url} controls autoPlay />;
 }

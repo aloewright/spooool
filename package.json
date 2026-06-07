@@ -61,6 +61,7 @@
     "@remotion/studio": "^4.0.467",
     "@sentry/cloudflare": "^10.50.0",
     "@sentry/react": "^10.50.0",
+    "@tabler/icons-react": "^3.44.0",
     "@tanstack/ai": "^0.26.1",
     "@tanstack/ai-react": "^0.15.1",
     "better-auth": "^1.6.11",

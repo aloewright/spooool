@@ -53,6 +53,7 @@ export async function getBraveVideoSearchItems(
   if (!env.BRAVE_SEARCH_API_KEY) {
     return { items: [], error: 'BRAVE_SEARCH_API_KEY is not configured' };
   }
+  const token = env.BRAVE_SEARCH_API_KEY;
   const key = `brave:search:${kvHash(query.trim().toLowerCase())}`;
   return cachedItems(env, key, TTL, async () => {
     const url = new URL(API);
@@ -61,7 +62,7 @@ export async function getBraveVideoSearchItems(
     const res = await fetcher(url.toString(), {
       headers: {
         Accept: 'application/json',
-        'X-Subscription-Token': env.BRAVE_SEARCH_API_KEY,
+        'X-Subscription-Token': token,
       },
     });
     if (!res.ok) throw new Error(`brave ${res.status}`);

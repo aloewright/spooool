@@ -3,12 +3,17 @@ import { cachedItems } from './cache';
 import type { FeedItem } from './feed-item';
 
 function fakeKV(store = new Map<string, string>()) {
+  const ttls = new Map<string, number>();
   return {
     store,
+    ttls,
     get: async (k: string) => (store.has(k) ? store.get(k)! : null),
-    put: async (k: string, v: string) => void store.set(k, v),
+    put: async (k: string, v: string, opts?: { expirationTtl?: number }) => {
+      store.set(k, v);
+      ttls.set(k, opts?.expirationTtl ?? 0);
+    },
     delete: async (k: string) => void store.delete(k),
-  } as unknown as KVNamespace & { store: Map<string, string> };
+  } as unknown as KVNamespace & { store: Map<string, string>; ttls: Map<string, number> };
 }
 
 const item: FeedItem = {
@@ -23,6 +28,8 @@ describe('cachedItems', () => {
     expect(r.items).toEqual([item]);
     expect(CACHE.store.get('k')).toBe(JSON.stringify([item]));
     expect(CACHE.store.get('k:lg')).toBe(JSON.stringify([item]));
+    expect(CACHE.ttls.get('k')).toBe(60);
+    expect(CACHE.ttls.get('k:lg')).toBe(7 * 24 * 60 * 60);
   });
 
   it('returns fresh cache without calling produce', async () => {

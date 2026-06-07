@@ -13,7 +13,7 @@ const TTL = 30 * 60;
 
 // Hosts/paths that indicate a watchable video page.
 const VIDEO_URL_RE =
-  /(youtube\.com\/watch|youtu\.be\/|tiktok\.com\/.+\/video\/|vimeo\.com\/\d|dailymotion\.com\/video\/|twitter\.com\/.+\/status\/|x\.com\/.+\/status\/|\/watch\b|\.(mp4|m3u8|webm)(\?|$))/i;
+  /(youtube\.com\/watch\?|youtu\.be\/|tiktok\.com\/.+\/video\/|vimeo\.com\/\d|dailymotion\.com\/video\/|twitter\.com\/.+\/status\/|x\.com\/.+\/status\/|\.(mp4|m3u8|webm)(\?|$))/i;
 
 interface RawFC {
   url?: string;
@@ -27,7 +27,7 @@ export function normalizeFirecrawlResult(raw: RawFC): FeedItem | null {
   const thumb = raw.metadata?.ogImage ?? raw.metadata?.['og:image'] ?? null;
   return {
     source: 'web',
-    id: raw.url,
+    id: kvHash(raw.url),
     title: raw.title ?? 'Untitled',
     author: 'Web',
     thumbnailUrl: thumb,
@@ -37,15 +37,17 @@ export function normalizeFirecrawlResult(raw: RawFC): FeedItem | null {
   };
 }
 
-export function getFirecrawlVideoItems(
+export async function getFirecrawlVideoItems(
   env: FirecrawlEnv,
   query: string,
   fetcher: typeof fetch = fetch,
 ): Promise<CachedItemsResult> {
+  if (!env.FIRECRAWL_URL) {
+    return { items: [], error: 'FIRECRAWL_URL is not configured' };
+  }
   const key = `fc:search:${kvHash(query.trim().toLowerCase())}`;
   return cachedItems(env, key, TTL, async () => {
-    if (!env.FIRECRAWL_URL) throw new Error('FIRECRAWL_URL is not configured');
-    const res = await fetcher(`${env.FIRECRAWL_URL.replace(/\/$/, '')}/v1/search`, {
+    const res = await fetcher(`${env.FIRECRAWL_URL!.replace(/\/$/, '')}/v1/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

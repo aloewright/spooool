@@ -46,4 +46,21 @@ describe('getFirecrawlVideoItems', () => {
     }) as unknown as typeof fetch);
     expect(r.error).toBe('FIRECRAWL_URL is not configured');
   });
+
+  it('serves the second call from cache', async () => {
+    const store = new Map<string, string>();
+    const CACHE = {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => void store.set(k, v),
+      delete: async () => {},
+    } as unknown as KVNamespace;
+    let calls = 0;
+    const fetcher = (async () => {
+      calls++;
+      return new Response(JSON.stringify({ data: [videoResult] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await getFirecrawlVideoItems({ FIRECRAWL_URL: 'https://fc', CACHE }, 'q', fetcher);
+    await getFirecrawlVideoItems({ FIRECRAWL_URL: 'https://fc', CACHE }, 'q', fetcher);
+    expect(calls).toBe(1);
+  });
 });

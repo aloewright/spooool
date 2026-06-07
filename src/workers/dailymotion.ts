@@ -30,6 +30,7 @@ export function normalizeDailyMotionItem(raw: RawDM): FeedItem | null {
     publishedAt: raw.created_time ? raw.created_time * 1000 : 0,
     durationSec: typeof raw.duration === 'number' ? raw.duration : null,
     url: `https://www.dailymotion.com/video/${raw.id}`,
+    embed: { kind: 'dailymotion', videoId: raw.id },
   };
 }
 

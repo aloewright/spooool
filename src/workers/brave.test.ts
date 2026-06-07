@@ -55,3 +55,22 @@ describe('BraveConfigError', () => {
     expect(new BraveConfigError('x')).toBeInstanceOf(Error);
   });
 });
+
+describe('getBraveVideoSearchItems cache', () => {
+  it('serves the second call from cache', async () => {
+    const store = new Map<string, string>();
+    const CACHE = {
+      get: async (k: string) => store.get(k) ?? null,
+      put: async (k: string, v: string) => void store.set(k, v),
+      delete: async () => {},
+    } as unknown as KVNamespace;
+    let calls = 0;
+    const fetcher = (async () => {
+      calls++;
+      return new Response(JSON.stringify({ results: [raw] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    await getBraveVideoSearchItems({ BRAVE_SEARCH_API_KEY: 'k', CACHE }, 'q', fetcher);
+    await getBraveVideoSearchItems({ BRAVE_SEARCH_API_KEY: 'k', CACHE }, 'q', fetcher);
+    expect(calls).toBe(1);
+  });
+});

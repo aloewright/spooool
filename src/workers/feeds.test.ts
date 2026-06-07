@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Hono, type Context, type Next } from 'hono';
-import { feedRoutes, type FeedsEnv } from './feeds';
+import { feedRoutes, parseWebSearchRef, type FeedsEnv } from './feeds';
 
 // ---- compact in-memory D1 + KV doubles (shared by all feeds tests) ----------
 
@@ -358,5 +358,17 @@ describe('feed items assembly', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('parseWebSearchRef', () => {
+  it('parses q + providers JSON', () => {
+    expect(parseWebSearchRef('{"q":"cats","providers":["youtube","brave"]}')).toEqual({
+      q: 'cats',
+      providers: ['youtube', 'brave'],
+    });
+  });
+  it('falls back to all providers + raw string on bad JSON', () => {
+    expect(parseWebSearchRef('cats')).toEqual({ q: 'cats', providers: ['youtube', 'dailymotion', 'brave', 'firecrawl'] });
   });
 });

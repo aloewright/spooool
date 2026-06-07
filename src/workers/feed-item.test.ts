@@ -3,6 +3,10 @@ import {
   assembleFeed,
   kvHash,
   parseSqliteTimestamp,
+  canonicalKey,
+  dedupeItems,
+  interleaveRanked,
+  assembleByRank,
   type FeedItem,
   type SourceResult,
 } from './feed-item';
@@ -80,6 +84,7 @@ describe('assembleFeed', () => {
   });
 
   it('surfaces per-source error/stale flags without dropping other items', () => {
+
     const out = assembleFeed(
       [result('ok', [item('youtube', 'a', 100)]),
        result('bad', [], { error: 'quota' }),
@@ -93,5 +98,54 @@ describe('assembleFeed', () => {
       { sourceId: 'bad', kind: 'youtube_channel', error: 'quota' },
       { sourceId: 'old', kind: 'youtube_channel', stale: true },
     ]);
+  });
+});
+
+function yt(videoId: string): FeedItem {
+  return {
+    source: 'youtube', id: videoId, title: videoId, author: 'a',
+    thumbnailUrl: null, publishedAt: 0, durationSec: null,
+    url: `https://www.youtube.com/watch?v=${videoId}`, embed: { kind: 'youtube', videoId },
+  };
+}
+function web(id: string, url: string): FeedItem {
+  return {
+    source: 'web', id, title: id, author: 'a',
+    thumbnailUrl: null, publishedAt: 0, durationSec: null, url,
+  };
+}
+
+describe('canonicalKey', () => {
+  it('keys youtube by videoId', () => {
+    expect(canonicalKey(yt('abc'))).toBe('yt:abc');
+  });
+  it('keys web by host+path lowercased, www stripped', () => {
+    expect(canonicalKey(web('1', 'https://WWW.Example.com/Watch?utm=x'))).toBe('example.com/watch');
+  });
+});
+
+describe('dedupeItems', () => {
+  it('drops later duplicates by canonical key', () => {
+    const out = dedupeItems([yt('a'), web('1', 'https://e.com/x'), yt('a')]);
+    expect(out.map((i) => i.id)).toEqual(['a', '1']);
+  });
+});
+
+describe('interleaveRanked', () => {
+  it('round-robins provider lists preserving rank', () => {
+    const out = interleaveRanked([[yt('a1'), yt('a2')], [web('b1', 'https://e.com/b1')]]);
+    expect(out.map((i) => i.id)).toEqual(['a1', 'b1', 'a2']);
+  });
+});
+
+describe('assembleByRank', () => {
+  it('interleaves, dedupes, paginates with a key cursor', () => {
+    const lists = [[yt('a'), yt('c')], [yt('b'), yt('a')]];
+    const p1 = assembleByRank(lists, null, 2);
+    expect(p1.items.map((i) => i.id)).toEqual(['a', 'b']);
+    expect(p1.nextCursor).not.toBeNull();
+    const p2 = assembleByRank(lists, p1.nextCursor, 2);
+    expect(p2.items.map((i) => i.id)).toEqual(['c']);
+    expect(p2.nextCursor).toBeNull();
   });
 });

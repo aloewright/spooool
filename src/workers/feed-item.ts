@@ -115,6 +115,7 @@ export function assembleFeed(
 }
 
 // Stable cross-provider identity for dedupe + relevance-cursor.
+// Best-effort: does not normalize platform short-URLs (e.g. dai.ly) — those may not dedupe against canonical URLs.
 export function canonicalKey(item: FeedItem): string {
   if (item.source === 'youtube' && item.embed?.kind === 'youtube') {
     return `yt:${item.embed.videoId}`;
@@ -173,7 +174,8 @@ export function assembleByRank(
       key = '';
     }
     const idx = ordered.findIndex((i) => canonicalKey(i) === key);
-    start = idx >= 0 ? idx + 1 : 0;
+    // Cursor key gone (results churned since last page) -> stop, don't restart at page 1.
+    start = idx >= 0 ? idx + 1 : ordered.length;
   }
   const page = ordered.slice(start, start + limit);
   const hasMore = start + limit < ordered.length;

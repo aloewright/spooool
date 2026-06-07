@@ -148,4 +148,25 @@ describe('assembleByRank', () => {
     expect(p2.items.map((i) => i.id)).toEqual(['c']);
     expect(p2.nextCursor).toBeNull();
   });
+
+  it('returns empty page + null nextCursor when cursor key is not in the list (results churned)', () => {
+    const lists = [[yt('a'), yt('b')]];
+    const staleCursor = btoa('yt:nonexistent');
+    const result = assembleByRank(lists, staleCursor, 10);
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('returns empty page + null nextCursor for a malformed (non-base64) cursor', () => {
+    const lists = [[yt('a'), yt('b')]];
+    const result = assembleByRank(lists, '!!!not-base64!!!', 10);
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
+
+  it('returns empty page + null nextCursor for empty input lists', () => {
+    const result = assembleByRank([], null, 10);
+    expect(result.items).toEqual([]);
+    expect(result.nextCursor).toBeNull();
+  });
 });

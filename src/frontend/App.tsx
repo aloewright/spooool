@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Moon, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
+import { MantineProvider } from '@mantine/core';
+import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
@@ -58,6 +60,7 @@ const AdminStatus = lazy(() =>
 );
 const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
+const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -253,6 +256,9 @@ function HeaderNav(): JSX.Element {
       </Link>
       <Link to="/feeds">
         <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
+      </Link>
+      <Link to="/discover">
+        <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
       <Link to="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
@@ -718,6 +724,7 @@ export default function App(): JSX.Element {
     return <Splash onDone={splash.dismiss} />;
   }
   return (
+    <MantineProvider>
     <div className="app-shell">
       <AppHeader />
       <Suspense fallback={<RouteFallback />}>
@@ -826,6 +833,14 @@ export default function App(): JSX.Element {
           />
           <Route path="/feeds/:id" element={<FeedView />} />
           <Route
+            path="/discover"
+            element={
+              <RequireAuth>
+                <Discover />
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/onboarding"
             element={
               <RequireAuth>
@@ -855,5 +870,6 @@ export default function App(): JSX.Element {
       </Suspense>
       <SiteFooter />
     </div>
+    </MantineProvider>
   );
 }

@@ -371,4 +371,9 @@ describe('parseWebSearchRef', () => {
   it('falls back to all providers + raw string on bad JSON', () => {
     expect(parseWebSearchRef('cats')).toEqual({ q: 'cats', providers: ['youtube', 'dailymotion', 'brave', 'firecrawl'] });
   });
+  it('does not treat the raw JSON as the query when q is empty', () => {
+    const out = parseWebSearchRef('{"q":"","providers":["youtube"]}');
+    expect(out.q).toBe('{"q":"","providers":["youtube"]}');
+    expect(out.providers).toEqual(['youtube', 'dailymotion', 'brave', 'firecrawl']);
+  });
 });

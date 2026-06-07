@@ -92,7 +92,9 @@ export function parseWebSearchRef(ref: string): { q: string; providers: Provider
     const providers = (parsed.providers ?? []).filter((p): p is ProviderKey =>
       (ALL_PROVIDERS as string[]).includes(p),
     );
-    if (parsed.q) return { q: parsed.q, providers: providers.length ? providers : [...ALL_PROVIDERS] };
+    if (typeof parsed.q === 'string' && parsed.q.trim().length > 0) {
+      return { q: parsed.q, providers: providers.length ? providers : [...ALL_PROVIDERS] };
+    }
   } catch {
     // not JSON — treat the whole ref as the query
   }

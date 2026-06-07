@@ -1,6 +1,9 @@
 -- Add the 'web_search' source kind. SQLite cannot alter a CHECK constraint in
 -- place, so recreate feed_sources with the extended CHECK and copy rows.
 -- For web_search rows, `ref` holds JSON: {"q": string, "providers": string[]}.
+-- NOTE: wrangler/D1 wraps each migration file in a transaction automatically,
+-- so the DROP+RENAME is atomic without an explicit BEGIN/COMMIT (which D1's
+-- migration runner rejects as a nested transaction).
 CREATE TABLE feed_sources_new (
   id TEXT PRIMARY KEY,
   feed_id TEXT NOT NULL,

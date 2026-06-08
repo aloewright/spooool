@@ -321,6 +321,20 @@ const workerHandlers = {
           // Daily 02:00 UTC heavy sweeps
           // ALO-132: hard-delete users whose 30-day grace window has elapsed.
           // The cron is configured in wrangler.toml under [triggers] crons.
+
+          // Clean up DB rows left in `uploading` state by uploads that never
+          // finished (KV session TTL is 24h, so anything older than 25h is
+          // definitively abandoned and will never transition to queued).
+          const { meta: uploadCleanupMeta } = await env.DB.prepare(
+            `DELETE FROM videos
+             WHERE status = 'uploading'
+               AND updated_at < datetime('now', '-25 hours')`,
+          ).run();
+          const abandonedUploads = (uploadCleanupMeta?.changes as number | undefined) ?? 0;
+          if (abandonedUploads > 0) {
+            console.log('[upload-cleanup]', { abandoned: abandonedUploads });
+          }
+
           const stats = await runDeletionSweep(env);
           if (stats.length > 0) {
             console.log('[deletion-sweep]', { cron: controller.cron, deleted: stats });

@@ -16,6 +16,16 @@ interface ChannelHeader {
   totalViewCount: number;
 }
 
+interface ChannelProduct {
+  id: string;
+  kind: 'membership' | 'tip';
+  name: string;
+  description: string | null;
+  amount_cents: number | null;
+  currency: string;
+  billing_interval: string | null;
+}
+
 interface ChannelVideo {
   id: string;
   title: string;
@@ -40,6 +50,10 @@ export function Channel(): JSX.Element {
   const [sub, setSub] = useState<{ subscribed: boolean; subscriberCount: number } | null>(null);
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
+  const [products, setProducts] = useState<ChannelProduct[]>([]);
+  const [membershipBusy, setMembershipBusy] = useState<string | null>(null);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [membershipSuccess, setMembershipSuccess] = useState(false);
 
   useEffect(() => {
     if (!username) return;
@@ -111,6 +125,50 @@ export function Channel(): JSX.Element {
       cancelled = true;
     };
   }, [username]);
+
+  const [searchParams, setSearchParams] = useState(() => new URLSearchParams(window.location.search));
+
+  useEffect(() => {
+    if (!username) return;
+    void fetch(`/api/channels/${encodeURIComponent(username)}/products`)
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = await r.json() as { products: ChannelProduct[] };
+        setProducts(data.products.filter((p) => p.kind === 'membership'));
+      })
+      .catch(() => undefined);
+  }, [username]);
+
+  useEffect(() => {
+    if (searchParams.get('membership_success') === '1') {
+      setMembershipSuccess(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('membership_success');
+      window.history.replaceState(null, '', `?${next}`);
+      setSearchParams(next);
+    }
+  }, []); // run once on mount
+
+  const joinMembership = useCallback(async (productId: string): Promise<void> => {
+    if (!username || membershipBusy) return;
+    setMembershipBusy(productId);
+    setMembershipError(null);
+    try {
+      const r = await fetch(`/api/channels/${encodeURIComponent(username)}/membership`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ product_id: productId }),
+      });
+      const data = await r.json() as { checkout_url?: string; error?: string };
+      if (!r.ok) throw new Error(data.error ?? 'Failed');
+      if (data.checkout_url) window.location.href = data.checkout_url;
+    } catch (err) {
+      setMembershipError(err instanceof Error ? err.message : 'Failed to start checkout');
+    } finally {
+      setMembershipBusy(null);
+    }
+  }, [username, membershipBusy]);
 
   const toggleSubscribe = useCallback(async (): Promise<void> => {
     if (!username || subBusy) return;
@@ -237,6 +295,62 @@ export function Channel(): JSX.Element {
 
       {subError ? <p className="status-error">{subError}</p> : null}
       {header.bio ? <p style={{ maxWidth: 720 }}>{header.bio}</p> : null}
+
+      {membershipSuccess && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            padding: 'var(--space-2) var(--space-3)',
+            border: '1px solid color-mix(in oklch, var(--success, green), transparent 60%)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'color-mix(in oklch, var(--success, green), transparent 90%)',
+          }}
+        >
+          Membership activated — thank you for supporting this channel!
+        </div>
+      )}
+
+      {!isOwner && products.length > 0 && (
+        <section className="stack-sm" aria-label="Membership tiers">
+          <h2 className="ds-h3">Membership</h2>
+          <p className="ds-meta">Support this creator with a recurring membership.</p>
+          {membershipError && <p className="status-error">{membershipError}</p>}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+              gap: 'var(--space-3)',
+            }}
+          >
+            {products.map((product) => (
+              <div key={product.id} className="card stack-sm" style={{ padding: 'var(--space-3)' }}>
+                <div style={{ fontWeight: 700 }}>{product.name}</div>
+                {product.description && (
+                  <p className="ds-meta" style={{ margin: 0 }}>{product.description}</p>
+                )}
+                <div className="ds-meta">
+                  {product.amount_cents != null
+                    ? new Intl.NumberFormat('en-US', {
+                        style: 'currency',
+                        currency: product.currency.toUpperCase(),
+                      }).format(product.amount_cents / 100)
+                    : 'Custom price'}
+                  {product.billing_interval ? `/${product.billing_interval}` : ''}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn--sm"
+                  disabled={membershipBusy === product.id}
+                  onClick={() => { void joinMembership(product.id); }}
+                >
+                  {membershipBusy === product.id ? 'Redirecting…' : 'Join'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="stack-sm" aria-label="Videos">
         <h2 className="ds-h3">Videos</h2>

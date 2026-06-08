@@ -112,6 +112,10 @@ const polarDataSchema = z
     // customer / user references
     customer_id: z.string().optional(),
     user_id: z.string().optional(),
+    // for payout events: which payout account received the funds
+    account_id: z.string().optional(),
+    // metadata we attach when creating checkouts
+    metadata: z.record(z.string()).optional(),
   })
   .passthrough();
 
@@ -193,6 +197,113 @@ export interface PolarWebhookDeps {
 
 function generateId(): string {
   return crypto.randomUUID();
+}
+
+// ---------------------------------------------------------------------------
+// Post-insert earnings processing
+// ---------------------------------------------------------------------------
+
+// After a new ledger row lands, attempt to credit creator_earnings or
+// creator_payouts. Failures are logged but never bubble up — we must not
+// return a non-2xx to Polar or it will re-deliver the webhook indefinitely.
+
+const PLATFORM_FEE_RATE = 0.10; // 10% Spooool cut
+
+async function processEarningsEvent(
+  db: D1Database,
+  eventType: string,
+  amountCents: number | null,
+  currency: string | null,
+  polarObjectId: string | null,
+  data: z.infer<typeof polarDataSchema>,
+  nowMs: number,
+): Promise<void> {
+  const et = eventType.toLowerCase();
+  const meta = data.metadata ?? {};
+
+  // order.paid → tip or membership earning
+  if (et === 'order.paid') {
+    const creatorUserId = meta.creator_user_id;
+    if (!creatorUserId || !amountCents || !currency) return;
+
+    const kind = (meta.kind === 'tip' || meta.kind === 'membership' || meta.kind === 'gift')
+      ? (meta.kind as 'tip' | 'membership' | 'gift')
+      : 'tip';
+    const feeCents = Math.round(amountCents * PLATFORM_FEE_RATE);
+
+    let description: string | null = null;
+    if (kind === 'tip' && meta.video_id) {
+      description = `Tip on video ${meta.video_id}`;
+      if (meta.message) description += `: ${meta.message}`;
+    } else if (kind === 'membership') {
+      description = 'Membership payment';
+    }
+
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO creator_earnings
+           (id, user_id, kind, amount_cents, platform_fee_cents, currency,
+            polar_order_id, description, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        creatorUserId,
+        kind,
+        amountCents,
+        feeCents,
+        currency.toLowerCase(),
+        polarObjectId,
+        description,
+        nowMs,
+      )
+      .run()
+      .catch((err: unknown) => {
+        console.error('[polar-webhook] creator_earnings insert failed', { err });
+      });
+    return;
+  }
+
+  // payout.created / payout.paid → creator_payouts
+  if (et === 'payout.created' || et === 'payout.paid') {
+    if (!amountCents || !currency || !polarObjectId) return;
+
+    // Find the creator by their polar_account_id.
+    const accountId = data.account_id;
+    if (!accountId) return;
+
+    const user = await db
+      .prepare('SELECT id FROM user WHERE polar_account_id = ?')
+      .bind(accountId)
+      .first<{ id: string }>()
+      .catch(() => null);
+    if (!user) return;
+
+    const status = et === 'payout.paid' ? 'paid' : 'pending';
+    const paidAt = et === 'payout.paid' ? nowMs : null;
+
+    await db
+      .prepare(
+        `INSERT OR IGNORE INTO creator_payouts
+           (id, user_id, amount_cents, currency, polar_payout_id, status, paid_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        crypto.randomUUID(),
+        user.id,
+        amountCents,
+        currency.toLowerCase(),
+        polarObjectId,
+        status,
+        paidAt,
+        nowMs,
+      )
+      .run()
+      .catch((err: unknown) => {
+        console.error('[polar-webhook] creator_payouts insert failed', { err });
+      });
+    return;
+  }
 }
 
 export const handlePolarWebhook =
@@ -290,6 +401,19 @@ export const handlePolarWebhook =
       polar_object_id: polarObjectId,
       ledger_id: id,
     });
+
+    // Best-effort: credit earnings/payouts from actionable events.
+    // Runs after the ledger write so the webhook is always acknowledged
+    // even if the secondary write fails.
+    await processEarningsEvent(
+      c.env.DB,
+      eventType,
+      amountCents,
+      currency,
+      polarObjectId,
+      data,
+      createdAt,
+    );
 
     return c.json({ ok: true, inserted: true, event_type: eventType, ledger_id: id });
   };

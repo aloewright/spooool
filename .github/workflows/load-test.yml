@@ -1,0 +1,93 @@
+name: Load test · on demand
+
+# ALO-174 / ALO-E7: Manual k6 load test runner. Never runs automatically —
+# load at 1,000 VUs will consume significant Worker invocations and D1 quota.
+# Run against staging only; never target spooool-prod without coordination.
+#
+# Usage:
+#   gh workflow run load-test.yml \
+#     -f target=watch \
+#     -f base_url=https://spooool-staging.workers.dev
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which load test to run
+        required: true
+        default: watch
+        type: choice
+        options:
+          - watch
+          - upload
+          - all
+      base_url:
+        description: Base URL to target (staging only — never prod)
+        required: true
+        default: 'https://spooool-staging.workers.dev'
+      video_id:
+        description: 'watch test: known-good video id (leave blank to auto-detect from trending)'
+        required: false
+        default: ''
+
+concurrency:
+  group: load-test
+  cancel-in-progress: false
+
+jobs:
+  load-test:
+    name: k6 (${{ inputs.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: staging
+
+    steps:
+      - name: Refuse prod targets
+        run: |
+          if echo "${{ inputs.base_url }}" | grep -qv "staging\|preview\|localhost"; then
+            echo "::error ::Load tests must target a staging or preview environment. Got: ${{ inputs.base_url }}"
+            # Warn but don't hard-fail — allow previews with non-standard names.
+          fi
+
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install k6
+        run: |
+          curl -fsSL https://dl.k6.io/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] https://dl.k6.io/deb stable main" \
+            | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq
+          sudo apt-get install -y k6
+
+      - name: Run watch load test
+        if: inputs.target == 'watch' || inputs.target == 'all'
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+          VIDEO_ID: ${{ inputs.video_id }}
+        run: |
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            ${{ inputs.video_id != '' && format('-e VIDEO_ID={0}', inputs.video_id) || '' }} \
+            tests/load/watch.k6.js
+
+      - name: Run upload load test
+        if: inputs.target == 'upload' || inputs.target == 'all'
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          k6 run \
+            -e BASE_URL="$BASE_URL" \
+            tests/load/upload.k6.js
+
+      - name: Upload k6 summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary-${{ github.run_id }}
+          path: |
+            k6-summary*.json
+            k6-summary*.html
+          retention-days: 30
+          if-no-files-found: ignore

@@ -10,16 +10,15 @@ const querySchema = z.object({
   format: z.enum(['json']).optional().default('json'),
 });
 
-// oEmbed `type: "link"` is intentional. The site-wide CSP sets
-// `frame-ancestors 'none'` and X-Frame-Options DENY, so embedding /watch/:id
-// in an iframe would be blocked. Switching to `type: "video"` with HTML
-// requires shipping a dedicated /embed/:id page with relaxed framing.
-const OEMBED_TYPE = 'link';
+// /embed/:id ships a dedicated frameable player page (relaxed CSP), so oEmbed
+// can return type:"video" with an iframe and rich embeds work on Slack/Discord.
 const OEMBED_VERSION = '1.0';
 const OEMBED_PROVIDER_NAME = 'spooool';
 const OEMBED_CACHE_SECONDS = 300;
 const THUMBNAIL_WIDTH = 1280;
 const THUMBNAIL_HEIGHT = 720;
+const EMBED_WIDTH = 1280;
+const EMBED_HEIGHT = 720;
 
 interface VideoRow {
   id: string;
@@ -60,14 +59,17 @@ export function extractWatchId(rawUrl: string, expectedHost: string): string | n
   return id;
 }
 
-export interface OembedLinkResponse {
-  type: 'link';
+export interface OembedVideoResponse {
+  type: 'video';
   version: '1.0';
   provider_name: string;
   provider_url: string;
   title: string;
   author_name: string;
   author_url: string;
+  html: string;
+  width: number;
+  height: number;
   thumbnail_url?: string;
   thumbnail_width?: number;
   thumbnail_height?: number;
@@ -76,21 +78,27 @@ export interface OembedLinkResponse {
 
 export function buildOembedLinkResponse(args: {
   origin: string;
+  videoId: string;
   video: Pick<VideoRow, 'title' | 'thumbnail_url' | 'channel_name' | 'channel_username'>;
-}): OembedLinkResponse {
-  const { origin, video } = args;
+}): OembedVideoResponse {
+  const { origin, videoId, video } = args;
   const authorUrl = video.channel_username
     ? `${origin}/channel/${encodeURIComponent(video.channel_username)}`
     : origin;
+  const embedUrl = `${origin}/embed/${encodeURIComponent(videoId)}`;
+  const html = `<iframe src="${embedUrl}" width="${EMBED_WIDTH}" height="${EMBED_HEIGHT}" frameborder="0" allowfullscreen allow="autoplay; picture-in-picture"></iframe>`;
 
-  const response: OembedLinkResponse = {
-    type: OEMBED_TYPE,
+  const response: OembedVideoResponse = {
+    type: 'video',
     version: OEMBED_VERSION,
     provider_name: OEMBED_PROVIDER_NAME,
     provider_url: origin,
     title: video.title,
     author_name: video.channel_name ?? '',
     author_url: authorUrl,
+    html,
+    width: EMBED_WIDTH,
+    height: EMBED_HEIGHT,
     cache_age: OEMBED_CACHE_SECONDS,
   };
   if (video.thumbnail_url) {
@@ -136,7 +144,7 @@ oembedRoutes.get('/api/oembed', async (c) => {
     return c.json({ error: 'Video not found' }, 404);
   }
 
-  const body = buildOembedLinkResponse({ origin: reqUrl.origin, video });
+  const body = buildOembedLinkResponse({ origin: reqUrl.origin, videoId, video });
   return c.json(body, 200, {
     'Cache-Control': `public, max-age=${OEMBED_CACHE_SECONDS}`,
   });

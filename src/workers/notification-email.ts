@@ -2,27 +2,36 @@
 // Fail-open — email failures never block the calling request path.
 
 import { send, type EmailEnv, type EmailResult } from './email';
+import { generateUnsubToken } from './account';
 
 export interface NotificationDbEnv extends EmailEnv {
   DB: D1Database;
+  EMAIL_UNSUBSCRIBE_SECRET?: string;
 }
 
 export function buildNewUploadEmail(args: {
   channelName: string;
   videoTitle: string;
   watchUrl: string;
+  unsubscribeUrl?: string;
 }): { subject: string; html: string; text: string } {
+  const unsubLine = args.unsubscribeUrl
+    ? `\n\nUnsubscribe from new upload emails: ${args.unsubscribeUrl}`
+    : '\n\nManage notification preferences in your account settings.';
+  const unsubHtml = args.unsubscribeUrl
+    ? `<p style="font-size:12px;color:#666"><a href="${args.unsubscribeUrl}">Unsubscribe</a> from new upload emails.</p>`
+    : `<p style="font-size:12px;color:#666">Manage notification preferences in account settings.</p>`;
   return {
     subject: `${args.channelName} uploaded a new video`,
     text:
       `${args.channelName} just uploaded "${args.videoTitle}".\n\n` +
-      `Watch it here: ${args.watchUrl}\n\n` +
-      `Manage notification preferences in your account settings.`,
+      `Watch it here: ${args.watchUrl}` +
+      unsubLine,
     html:
       `<p><strong>${escapeHtml(args.channelName)}</strong> just uploaded ` +
       `<em>${escapeHtml(args.videoTitle)}</em>.</p>` +
       `<p><a href="${args.watchUrl}">Watch now</a></p>` +
-      `<p style="font-size:12px;color:#666">Manage notification preferences in account settings.</p>`,
+      unsubHtml,
   };
 }
 
@@ -31,17 +40,26 @@ export function buildCommentEmail(args: {
   videoTitle: string;
   watchUrl: string;
   excerpt: string;
+  unsubscribeUrl?: string;
 }): { subject: string; html: string; text: string } {
+  const unsubLine = args.unsubscribeUrl
+    ? `\n\nUnsubscribe from comment emails: ${args.unsubscribeUrl}`
+    : '';
+  const unsubHtml = args.unsubscribeUrl
+    ? `<p style="font-size:12px;color:#666"><a href="${args.unsubscribeUrl}">Unsubscribe</a> from comment emails.</p>`
+    : '';
   return {
     subject: `New comment on "${args.videoTitle}"`,
     text:
       `${args.commenterName} commented on your video "${args.videoTitle}":\n` +
-      `${args.excerpt}\n\nWatch: ${args.watchUrl}`,
+      `${args.excerpt}\n\nWatch: ${args.watchUrl}` +
+      unsubLine,
     html:
       `<p><strong>${escapeHtml(args.commenterName)}</strong> commented on ` +
       `<em>${escapeHtml(args.videoTitle)}</em>:</p>` +
       `<blockquote>${escapeHtml(args.excerpt)}</blockquote>` +
-      `<p><a href="${args.watchUrl}">View comment</a></p>`,
+      `<p><a href="${args.watchUrl}">View comment</a></p>` +
+      unsubHtml,
   };
 }
 
@@ -104,7 +122,7 @@ export async function sendNewUploadEmails(
   args: { videoId: string; channelUserId: string; channelName: string; videoTitle: string; origin: string },
 ): Promise<number> {
   const { results } = await env.DB.prepare(
-    `SELECT u.email
+    `SELECT u.id, u.email
      FROM subscriptions s
      JOIN user u ON u.id = s.subscriber_user_id
      WHERE s.channel_user_id = ?
@@ -112,19 +130,29 @@ export async function sendNewUploadEmails(
        AND u.email IS NOT NULL`,
   )
     .bind(args.channelUserId)
-    .all<{ email: string }>();
+    .all<{ id: string; email: string }>();
 
-  const watchUrl = `${args.origin.replace(/\/$/, '')}/watch/${args.videoId}`;
-  const template = buildNewUploadEmail({
-    channelName: args.channelName,
-    videoTitle: args.videoTitle,
-    watchUrl,
-  });
+  const origin = args.origin.replace(/\/$/, '');
+  const watchUrl = `${origin}/watch/${args.videoId}`;
+  const secret = env.EMAIL_UNSUBSCRIBE_SECRET;
 
   const sendResults = await mapWithConcurrency(
     results ?? [],
     EMAIL_SEND_CONCURRENCY,
-    (row) => send(env, { to: row.email, ...template }),
+    async (row) => {
+      let unsubscribeUrl: string | undefined;
+      if (secret) {
+        const tok = await generateUnsubToken(secret, row.id, 'uploads');
+        unsubscribeUrl = `${origin}/api/account/unsubscribe?uid=${encodeURIComponent(row.id)}&tok=${tok}&pref=uploads`;
+      }
+      const template = buildNewUploadEmail({
+        channelName: args.channelName,
+        videoTitle: args.videoTitle,
+        watchUrl,
+        unsubscribeUrl,
+      });
+      return send(env, { to: row.email, ...template });
+    },
   );
   return sendResults.filter((r) => r.ok).length;
 }
@@ -150,7 +178,15 @@ export async function sendCommentNotificationEmail(
     return { ok: false, skipped: true, reason: 'comments email disabled' };
   }
 
-  const watchUrl = `${args.origin.replace(/\/$/, '')}/watch/${args.videoId}`;
+  const origin = args.origin.replace(/\/$/, '');
+  const watchUrl = `${origin}/watch/${args.videoId}`;
+  const secret = env.EMAIL_UNSUBSCRIBE_SECRET;
+  let unsubscribeUrl: string | undefined;
+  if (secret) {
+    const tok = await generateUnsubToken(secret, args.ownerUserId, 'comments');
+    unsubscribeUrl = `${origin}/api/account/unsubscribe?uid=${encodeURIComponent(args.ownerUserId)}&tok=${tok}&pref=comments`;
+  }
+
   return send(env, {
     to: owner.email,
     ...buildCommentEmail({
@@ -158,6 +194,7 @@ export async function sendCommentNotificationEmail(
       videoTitle: args.videoTitle,
       watchUrl,
       excerpt: args.excerpt.slice(0, 280),
+      unsubscribeUrl,
     }),
   });
 }

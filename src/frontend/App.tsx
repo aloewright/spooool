@@ -61,6 +61,7 @@ const AdminStatus = lazy(() =>
 const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
+const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -719,7 +720,19 @@ function useSplash(): { show: boolean; dismiss: () => void } {
 }
 
 export default function App(): JSX.Element {
+  const location = useLocation();
   const splash = useSplash();
+
+  // Embed pages render as a bare player with no app shell so they can be
+  // iframed into third-party sites without nav chrome.
+  if (location.pathname.startsWith('/embed/')) {
+    return (
+      <Suspense fallback={<div style={{ background: '#000', height: '100dvh' }} />}>
+        <Embed />
+      </Suspense>
+    );
+  }
+
   if (splash.show) {
     return <Splash onDone={splash.dismiss} />;
   }

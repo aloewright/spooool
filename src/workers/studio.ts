@@ -5,6 +5,8 @@
 // POST /api/studio/image generates an image via flux-1-schnell and stores it
 // in R2 as a generated_asset; POST /api/videos/:id/thumbnail/from-asset
 // copies a generated image asset into the thumbnail namespace.
+// POST /api/studio/metadata uses gatewayChat+outputSchema for structured title/
+// description/tags/chapters generation (ALO-649).
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { chat, generateImage, generateTranscription, toServerSentEventsResponse } from '@tanstack/ai';
@@ -262,6 +264,104 @@ studioRoutes.post('/api/studio/video', async (c) => {
   }
 
   return c.json({ assetId, status: 'queued' }, 202);
+});
+
+const metadataBodySchema = z.object({
+  videoId: z.string().min(1),
+  projectId: z.string().min(1).optional(),
+  additionalContext: z.string().max(1000).optional(),
+});
+
+const metadataOutputSchema = z.object({
+  title: z.string().max(200),
+  description: z.string().max(5000),
+  tags: z.array(z.string().max(100)).max(30),
+  chapters: z.array(z.object({
+    startSeconds: z.number().nonnegative(),
+    title: z.string().max(100),
+  })).max(20),
+});
+
+export type VideoMetadata = z.infer<typeof metadataOutputSchema>;
+
+const METADATA_SYSTEM_PROMPT =
+  "You are a video metadata expert. Given context about a video, generate SEO-optimised metadata. " +
+  'Return ONLY the JSON object matching the schema — no commentary outside the JSON. ' +
+  'Tags should be lowercase, relevant keywords. Chapters should only be included when the video ' +
+  'has distinct sections (omit chapters array or leave it empty for short/undivided content). ' +
+  'Description should be 2-4 engaging sentences suitable for a video platform.';
+
+const EST_USD_PER_METADATA = 0.001;   // order-of-magnitude placeholder (tokens → USD)
+const METADATA_TOKENS_ESTIMATE = 1000; // approximate input+output token count
+
+studioRoutes.post('/api/studio/metadata', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user.emailVerified) return c.json({ error: 'Email verification required' }, 403);
+
+  const rl = await rateLimit({ ns: c.env.RATE_LIMITER, bucket: STUDIO_GEN_BUCKET, identity: user.id });
+  if (!rl.allowed) return c.json({ error: 'Too many studio requests. Try again shortly.' }, 429, rateLimitHeaders(rl));
+
+  if (!(await withinDailyGenCap(c.env, user.id))) {
+    return c.json({ error: 'Daily generation limit reached. Try again tomorrow.' }, 429);
+  }
+
+  const raw = await c.req.json().catch(() => null);
+  const parsed = metadataBodySchema.safeParse(raw);
+  if (!parsed.success) return c.json({ error: 'Invalid body', details: parsed.error.flatten() }, 400);
+
+  const video = await c.env.DB.prepare(
+    `SELECT id, user_id, title, description FROM videos WHERE id = ? AND deleted_at IS NULL`,
+  )
+    .bind(parsed.data.videoId)
+    .first<{ id: string; user_id: string; title: string | null; description: string | null }>();
+  if (!video) return c.json({ error: 'Video not found' }, 404);
+  if (video.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
+
+  const contextParts: string[] = [];
+  if (video.title) contextParts.push(`Current title: ${video.title}`);
+  if (video.description) contextParts.push(`Current description: ${video.description}`);
+  if (parsed.data.additionalContext) contextParts.push(`Additional context: ${parsed.data.additionalContext}`);
+  const contextText = contextParts.join('\n') || 'No context provided — generate generic placeholder metadata.';
+
+  let metadata: VideoMetadata;
+  try {
+    metadata = await chat({
+      adapter: gatewayChat(c.env as unknown as AiGatewayEnv),
+      systemPrompts: [METADATA_SYSTEM_PROMPT],
+      messages: [{ role: 'user', content: contextText }],
+      outputSchema: metadataOutputSchema,
+    });
+  } catch (err) {
+    return c.json({ error: 'Metadata generation failed', detail: err instanceof Error ? err.message : String(err) }, 502);
+  }
+
+  const assetId = `a_${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}`;
+  const now = Date.now();
+  const specJson = JSON.stringify({
+    videoId: video.id,
+    model: '@cf/google/gemma-4-26b-a4b-it',
+    metadata,
+  });
+
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      `INSERT INTO generated_assets (id, user_id, kind, source, r2_key, stream_video_id, bytes, status, spec_json, error_message, project_id, created_at, updated_at)
+       VALUES (?, ?, 'metadata', 'text_gen', NULL, NULL, 0, 'ready', ?, NULL, ?, ?, ?)`,
+    ).bind(assetId, user.id, specJson, parsed.data.projectId ?? null, now, now),
+    aiCostStatement(c.env.DB, {
+      userId: user.id,
+      op: 'metadata_gen',
+      route: 'dynamic/text_gen',
+      model: '@cf/google/gemma-4-26b-a4b-it',
+      units: METADATA_TOKENS_ESTIMATE,
+      unitKind: 'tokens',
+      estUsd: EST_USD_PER_METADATA,
+      projectId: parsed.data.projectId ?? null,
+    }),
+  ]);
+
+  return c.json({ assetId, ...metadata }, 201);
 });
 
 studioRoutes.post('/api/videos/:id/thumbnail/from-asset', async (c) => {

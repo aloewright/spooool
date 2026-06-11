@@ -112,6 +112,17 @@ export function partition(secrets) {
   return { worker, vite, cloudflare };
 }
 
+// Cloudflare's secrets-bulk API rejects more than 100 secrets per request
+// (error code 100160). This shared Doppler config carries far more (200+), so
+// the upload must be chunked. 90 leaves headroom under the hard limit.
+export const BULK_SECRET_LIMIT = 90;
+
+export function chunk(items, size) {
+  const out = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
 async function syncWorkerSecrets(flags) {
   const secrets = await fetchSecrets();
   const { worker } = partition(secrets);
@@ -121,18 +132,31 @@ async function syncWorkerSecrets(flags) {
     return;
   }
 
-  // wrangler secret bulk reads JSON: { name: value }
+  // wrangler secret bulk reads JSON: { name: value }. We split into batches of
+  // <=BULK_SECRET_LIMIT because the Cloudflare API caps secrets-bulk at 100 per
+  // request. `secret bulk` merges (it never deletes unlisted secrets), so
+  // sequential batches accumulate into the same worker safely.
   const dir = mkdtempSync(join(tmpdir(), 'doppler-sync-'));
-  const file = join(dir, 'secrets.json');
-  writeFileSync(file, JSON.stringify(worker), { mode: 0o600 });
+  const batches = chunk(keys, BULK_SECRET_LIMIT);
+  console.log(
+    `uploading ${keys.length} secret(s) to wrangler in ${batches.length} batch(es) of <=${BULK_SECRET_LIMIT}:`,
+    keys.join(', '),
+  );
 
-  const args = ['wrangler', 'secret', 'bulk', file];
-  if (flags.env) args.splice(2, 0, '--env', String(flags.env));
-  console.log(`uploading ${keys.length} secret(s) to wrangler:`, keys.join(', '));
-  const result = spawnSync('npx', args, { stdio: 'inherit' });
-  if (result.status !== 0) {
-    console.error('error: wrangler secret bulk failed');
-    process.exit(3);
+  for (let i = 0; i < batches.length; i += 1) {
+    const batchKeys = batches[i];
+    const payload = Object.fromEntries(batchKeys.map((key) => [key, worker[key]]));
+    const file = join(dir, `secrets-${i}.json`);
+    writeFileSync(file, JSON.stringify(payload), { mode: 0o600 });
+
+    const args = ['wrangler', 'secret', 'bulk', file];
+    if (flags.env) args.splice(2, 0, '--env', String(flags.env));
+    console.log(`  batch ${i + 1}/${batches.length}: ${batchKeys.length} secret(s)`);
+    const result = spawnSync('npx', args, { stdio: 'inherit' });
+    if (result.status !== 0) {
+      console.error(`error: wrangler secret bulk failed on batch ${i + 1}/${batches.length}`);
+      process.exit(3);
+    }
   }
 }
 

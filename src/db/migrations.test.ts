@@ -124,4 +124,22 @@ describe('D1 migrations', () => {
     expect(sql).toMatch(/polar_user_id TEXT/);
     expect(sql).not.toMatch(/FOREIGN KEY \(user_id\) REFERENCES user\(id\)/);
   });
+
+  it('0032_query_indexes adds four partial/compound indexes for hot-path queries', () => {
+    const sql = readFileSync(join(MIGRATIONS_DIR, '0032_query_indexes.sql'), 'utf8');
+    expect(sql).toMatch(/idx_videos_browse\s+ON\s+videos\(created_at DESC\)/i);
+    expect(sql).toMatch(/WHERE deleted_at IS NULL AND hidden_at IS NULL/i);
+    expect(sql).toMatch(/idx_comments_replies\s+ON\s+comments\(parent_comment_id,\s*created_at ASC\)/i);
+    expect(sql).toMatch(/idx_generated_assets_user_kind_status\s+ON\s+generated_assets\(user_id,\s*kind,\s*status\)/i);
+    expect(sql).toMatch(/idx_inbox_unseen\s+ON\s+subscription_inbox\(subscriber_user_id,\s*added_at DESC\)/i);
+    expect(sql).toMatch(/WHERE seen_at IS NULL/i);
+  });
+
+  it('schema.sql mirrors the new indexes from 0032', () => {
+    const schema = readFileSync(SCHEMA_PATH, 'utf8');
+    expect(schema).toContain('idx_videos_browse');
+    expect(schema).toContain('idx_comments_replies');
+    expect(schema).toContain('idx_generated_assets_user_kind_status');
+    expect(schema).toContain('idx_inbox_unseen');
+  });
 });

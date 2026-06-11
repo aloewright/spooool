@@ -206,3 +206,18 @@ CREATE TABLE IF NOT EXISTS feed_sources (
 CREATE INDEX IF NOT EXISTS idx_feeds_user ON feeds(user_id);
 CREATE INDEX IF NOT EXISTS idx_feeds_last_viewed ON feeds(last_viewed_at);
 CREATE INDEX IF NOT EXISTS idx_feed_sources_feed ON feed_sources(feed_id);
+
+CREATE INDEX IF NOT EXISTS idx_videos_browse
+  ON videos(created_at DESC)
+  WHERE deleted_at IS NULL AND hidden_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_comments_replies
+  ON comments(parent_comment_id, created_at ASC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_generated_assets_user_kind_status
+  ON generated_assets(user_id, kind, status);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_unseen
+  ON subscription_inbox(subscriber_user_id, added_at DESC)
+  WHERE seen_at IS NULL;

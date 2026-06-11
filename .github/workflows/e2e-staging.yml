@@ -34,6 +34,11 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          # For workflow_run events, test the exact SHA that was deployed to
+          # staging rather than whatever HEAD happens to be. Falls back to
+          # github.sha for workflow_dispatch runs (no head_sha available).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4

@@ -10,7 +10,7 @@ import { expect, test, type Route } from '@playwright/test';
 //   2. Form surface: authenticated users see the file picker and metadata
 //      fields; the upload area is reachable and labelled.
 //   3. Rate-limit response: the page surfaces a human-readable error when
-//      the upload-init endpoint returns 429.
+//      the upload endpoint (/api/videos/upload) returns 429.
 //
 // All backend calls are stubbed via page.route so the spec is isolated
 // from D1 / R2 / Stream state.
@@ -38,16 +38,47 @@ async function stubAuthedSession(page: import('@playwright/test').Page): Promise
   await page.route('**/api/auth/get-session', jsonRoute(AUTHED_SESSION));
 }
 
+// The staging bundle bakes in VITE_TURNSTILE_SITE_KEY (hydrated from Doppler at
+// build time), so the Upload form renders a real Cloudflare Turnstile widget
+// and the submit guard blocks until a captcha token is set. Replace the
+// Turnstile API script with a shim whose render() immediately fires the success
+// callback, so onSubmit can reach the real /api/videos/upload request
+// deterministically — without depending on a live challenge.
+async function stubTurnstile(page: import('@playwright/test').Page): Promise<void> {
+  await page.route('**/turnstile/v0/api.js*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/javascript',
+      body: `
+        window.turnstile = {
+          render: function (container, options) {
+            if (options && typeof options.callback === 'function') {
+              options.callback('e2e-turnstile-token');
+            }
+            return 'e2e-turnstile-widget';
+          },
+          reset: function () {},
+          remove: function () {},
+          getResponse: function () { return 'e2e-turnstile-token'; },
+        };
+        if (typeof window.onloadTurnstileCallback === 'function') {
+          window.onloadTurnstileCallback();
+        }
+      `,
+    }),
+  );
+}
+
 async function stubUploadApis(page: import('@playwright/test').Page): Promise<void> {
   await stubAuthedSession(page);
-  // Stub the Stream upload-url endpoint (POST).
+  await stubTurnstile(page);
+  // The chunked uploader (src/frontend/lib/chunked-upload.ts) POSTs every chunk
+  // to /api/videos/upload as multipart/form-data. A successful single-chunk
+  // upload returns 201 with `{ id }` — the uploader reads `body.id` as the
+  // videoId. Mock a success so the form can submit without touching D1/R2/Stream.
   await page.route(
-    '**/api/stream/upload-url',
-    jsonRoute({ uploadURL: 'https://upload.example.dev/stub', uid: 'stub-uid' }),
-  );
-  // Stub the multipart upload init endpoint if the page probes it.
-  await page.route('**/api/videos/multipart/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+    '**/api/videos/upload',
+    jsonRoute({ id: 'e2e-video-123', status: 'queued' }, 201),
   );
 }
 
@@ -56,14 +87,18 @@ test.describe('/upload auth gate', () => {
     // Explicitly return no session — the default stub.
     await page.route('**/api/auth/get-session', jsonRoute(null));
     await page.goto('/upload');
-    // The page may either redirect immediately or render a "sign in" prompt.
-    const isLoginPage = page.url().includes('/login');
-    const hasSignInPrompt = await page
-      .getByRole('link', { name: /sign in/i })
-      .or(page.getByText(/sign in to upload/i))
-      .isVisible()
-      .catch(() => false);
-    expect(isLoginPage || hasSignInPrompt).toBe(true);
+    // The redirect / prompt resolves after the session fetch settles, so poll
+    // rather than reading the URL synchronously right after goto. The page may
+    // either redirect to /login or render an inline "sign in" prompt.
+    await expect(async () => {
+      const isLoginPage = page.url().includes('/login');
+      const hasSignInPrompt = await page
+        .getByRole('link', { name: /sign in/i })
+        .or(page.getByText(/sign in to upload/i))
+        .isVisible()
+        .catch(() => false);
+      expect(isLoginPage || hasSignInPrompt).toBe(true);
+    }).toPass();
   });
 });
 
@@ -95,37 +130,41 @@ test.describe('/upload form surface', () => {
 });
 
 test.describe('/upload rate-limit response', () => {
-  test('shows a human-readable error when upload init is rate-limited', async ({ page }) => {
+  test('shows a human-readable error when the upload is rate-limited', async ({ page }) => {
     await stubAuthedSession(page);
-    // Return 429 from the Stream upload-url endpoint.
+    await stubTurnstile(page);
+
+    // The real upload posts every chunk to /api/videos/upload (see
+    // src/frontend/lib/chunked-upload.ts). The server rate-limits the init
+    // chunk and returns 429 with this exact body (src/workers/videos.ts).
+    const RATE_LIMIT_MESSAGE = 'Upload rate limit exceeded. Try again shortly.';
     await page.route(
-      '**/api/stream/upload-url',
-      jsonRoute({ error: 'Rate limit exceeded' }, 429),
+      '**/api/videos/upload',
+      jsonRoute({ error: RATE_LIMIT_MESSAGE }, 429),
     );
+
     await page.goto('/upload');
 
-    // Trigger upload by selecting a fake file.
-    const fileInput = page.locator('input[type="file"]');
-    await fileInput
+    // Fill the required fields: a title and a video file. The Upload button is
+    // disabled until a valid file is selected, so set the file first.
+    await page
+      .locator('input[type="file"]')
       .setInputFiles({
         name: 'test.mp4',
         mimeType: 'video/mp4',
         buffer: Buffer.from('fake-video-content'),
-      })
-      .catch(() => {
-        // If the file input is not yet visible, the test will not be
-        // meaningful — skip the 429 path rather than fail hard.
       });
+    await page.getByLabel(/title/i).fill('E2E rate-limit upload');
 
-    // If the upload was initiated, the UI must surface a non-technical message.
-    const errorVisible = await page
-      .getByText(/too many|rate limit|try again/i)
-      .isVisible()
-      .catch(() => false);
-    // If the input wasn't visible (file-picker not rendered yet), that's
-    // caught by the "renders file picker" test above — don't double-fail here.
-    if (errorVisible) {
-      await expect(page.getByText(/too many|rate limit|try again/i)).toBeVisible();
-    }
+    // Submit the real upload and confirm the request actually fired, so the
+    // assertion below can never pass without the upload being attempted.
+    const uploadRequest = page.waitForRequest('**/api/videos/upload');
+    await page.getByRole('button', { name: /^upload$/i }).click();
+    await uploadRequest;
+
+    // On a 429 the chunk uploader throws and the page surfaces the message via
+    // setError(). The visible text embeds the server's human-readable string.
+    // Always assert it — no conditional guard.
+    await expect(page.getByText(/upload rate limit exceeded/i)).toBeVisible();
   });
 });

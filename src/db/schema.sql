@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS comments (
   user_id TEXT NOT NULL,
   parent_comment_id TEXT,
   body TEXT NOT NULL,
+  deleted_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (video_id) REFERENCES videos(id),
@@ -206,6 +207,48 @@ CREATE TABLE IF NOT EXISTS feed_sources (
 CREATE INDEX IF NOT EXISTS idx_feeds_user ON feeds(user_id);
 CREATE INDEX IF NOT EXISTS idx_feeds_last_viewed ON feeds(last_viewed_at);
 CREATE INDEX IF NOT EXISTS idx_feed_sources_feed ON feed_sources(feed_id);
+
+-- subscription_inbox (from 0009): subscriber fan-out inbox. Defined here so the
+-- idx_inbox_unseen partial index below has its target table in this snapshot.
+CREATE TABLE IF NOT EXISTS subscription_inbox (
+  subscriber_user_id TEXT NOT NULL,
+  video_id TEXT NOT NULL,
+  channel_user_id TEXT NOT NULL,
+  added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  seen_at TEXT,
+  PRIMARY KEY (subscriber_user_id, video_id),
+  FOREIGN KEY (subscriber_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (video_id) REFERENCES videos(id),
+  FOREIGN KEY (channel_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_inbox_user_added
+  ON subscription_inbox(subscriber_user_id, added_at DESC);
+
+-- generated_assets (from 0022): studio AI artefacts. Defined here so the
+-- idx_generated_assets_user_kind_status index below has its target table.
+-- The studio subtree (edit_projects, render_jobs, ai_costs) is intentionally
+-- omitted from this reference snapshot, so the project_id FK to edit_projects is
+-- dropped here (the column is kept). See migration 0022 for the full definition.
+CREATE TABLE IF NOT EXISTS generated_assets (
+  id TEXT PRIMARY KEY NOT NULL,
+  user_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('image','video','audio','caption','metadata','clip')),
+  source TEXT NOT NULL CHECK (source IN ('image_gen','video_gen','audio_gen','stt_gen','text_gen','stream_clip')),
+  r2_key TEXT,
+  stream_video_id TEXT,
+  bytes INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL CHECK (status IN ('queued','processing','ready','failed')),
+  spec_json TEXT,
+  error_message TEXT,
+  project_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_generated_assets_user_kind ON generated_assets(user_id, kind);
+CREATE INDEX IF NOT EXISTS idx_generated_assets_stream_video ON generated_assets(stream_video_id);
 
 CREATE INDEX IF NOT EXISTS idx_videos_browse
   ON videos(created_at DESC)

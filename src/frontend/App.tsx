@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { LogOut, Moon, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
+import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
@@ -269,6 +269,9 @@ function HeaderNav(): JSX.Element {
       </Link>
       <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
+      </Link>
+      <Link to="/settings/account" aria-label="Account settings" title="Account settings" style={iconBtn}>
+        <Settings aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
         type="button"
@@ -794,6 +797,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
           <Route
             path="/settings/account"
             element={

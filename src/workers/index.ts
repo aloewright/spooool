@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { purgeTrendingEdgeCache } from './edge-cache';
+import { bumpTrendingCacheVersion } from './trending-cache';
+import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
@@ -169,6 +172,11 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   )
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
+
+  // Invalidate caches: the video is now ready with a thumbnail, so both the
+  // trending list and any cached video-metadata KV entries are stale.
+  waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  purgeTrendingEdgeCache(c);
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { purgeEdgeCache } from './edge-cache';
 
 export interface SubscriptionsEnv {
   DB: D1Database;
@@ -74,6 +75,7 @@ subscriptionRoutes.post('/api/channels/:username/subscribe', async (c) => {
     .bind(crypto.randomUUID(), user.id, channel.id)
     .run();
 
+  await purgeEdgeCache([`/api/channels/${username}`], new URL(c.req.url).origin);
   return c.json({ subscribed: true });
 });
 
@@ -91,6 +93,7 @@ subscriptionRoutes.delete('/api/channels/:username/subscribe', async (c) => {
     .bind(user.id, channel.id)
     .run();
 
+  await purgeEdgeCache([`/api/channels/${username}`], new URL(c.req.url).origin);
   return c.json({ subscribed: false });
 });
 

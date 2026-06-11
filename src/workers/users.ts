@@ -1,8 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { purgeEdgeCachePath } from './edge-cache';
-import { waitUntilBackground } from './wait-until';
+import { purgeEdgeCache } from './edge-cache';
 
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_IMAGE_EXT: Record<string, string> = {
@@ -114,13 +113,8 @@ userRoutes.put('/api/users/me', async (c) => {
     .first<UserProfileRow>();
 
   if (refreshed?.username) {
-    const origin = new URL(c.req.url).origin;
-    waitUntilBackground(
-      c,
-      purgeEdgeCachePath(origin, `/api/channels/${refreshed.username}`),
-    );
+    await purgeEdgeCache([`/api/channels/${refreshed.username}`], new URL(c.req.url).origin);
   }
-
   return c.json(refreshed);
 });
 
@@ -166,11 +160,7 @@ async function uploadProfileImage(
     .bind(user.id)
     .first<{ username: string | null }>();
   if (usernameRow?.username) {
-    const origin = new URL(c.req.url).origin;
-    waitUntilBackground(
-      c,
-      purgeEdgeCachePath(origin, `/api/channels/${usernameRow.username}`),
-    );
+    await purgeEdgeCache([`/api/channels/${usernameRow.username}`], new URL(c.req.url).origin);
   }
 
   return c.json({ url: publicUrl }, 201);

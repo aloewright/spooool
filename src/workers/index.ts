@@ -107,7 +107,6 @@ const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
 
 app.use('*', securityHeaders());
 app.use('*', cors({ origin: (origin) => origin, credentials: true }));
-app.use('*', edgeCacheMiddleware());
 
 app.use('/api/*', async (c, next) => {
   const allowedOrigins = parseAllowedOrigins(c.env.ALLOWED_ORIGINS);
@@ -212,6 +211,10 @@ app.all('/api/auth/*', async (c) => {
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
+
+// Mount edge cache before session loading so cache hits skip the expensive
+// auth.api.getSession() round-trip entirely.
+app.use('/api/*', edgeCacheMiddleware());
 
 app.use('/api/*', async (c, next) => {
   const auth = createAuth(c.env);

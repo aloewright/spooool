@@ -1,8 +1,8 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
+import { purgeEdgeCache } from './edge-cache';
 import { triggerFanOut } from './channel-do';
-import { purgeTrendingEdgeCache } from './edge-cache';
 import { sendNewUploadEmails } from './notification-email';
 import { waitUntilBackground } from './wait-until';
 import {
@@ -646,6 +646,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       console.warn('new-upload email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
     }));
     await bumpTrendingCacheVersion(env.CACHE);
+    await purgeEdgeCache(['/api/videos/trending', '/api/tags'], new URL(c.req.url).origin);
 
     return c.json({ id: videoId, status: 'queued' }, 201);
   }
@@ -785,6 +786,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     console.warn('new-upload email failed', { videoId: uploadMeta.videoId, error: err instanceof Error ? err.message : String(err) });
   }));
   await bumpTrendingCacheVersion(env.CACHE);
+  await purgeEdgeCache(['/api/videos/trending', '/api/tags'], new URL(c.req.url).origin);
 
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
@@ -817,7 +819,10 @@ videoRoutes.delete('/api/videos/:id', async (c) => {
   await c.env.VIDEOS.delete(video.r2_key);
   await c.env.CACHE.delete(videoMetaCacheKey(id));
   await bumpTrendingCacheVersion(c.env.CACHE);
-  waitUntilBackground(c, purgeTrendingEdgeCache(new URL(c.req.url).origin));
+  await purgeEdgeCache(
+    [`/api/videos/${id}/related`, `/api/videos/${id}/tags`, '/api/videos/trending', '/api/tags'],
+    new URL(c.req.url).origin,
+  );
 
   return c.json({ success: true });
 });

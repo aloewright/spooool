@@ -193,7 +193,7 @@ tagRoutes.put('/api/videos/:id/tags', async (c) => {
 
   // Purge the video's tag list and the global top-tags list from the edge cache.
   const origin = new URL(c.req.url).origin;
-  await purgeEdgeCache([`/api/videos/${id}/tags`, '/api/tags'], origin);
+  purgeEdgeCache(c, `${origin}/api/videos/${id}/tags`, `${origin}/api/tags`);
 
   return c.json({ tags });
 });

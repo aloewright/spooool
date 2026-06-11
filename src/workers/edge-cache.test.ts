@@ -1,241 +1,197 @@
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  getEdgeCacheConfig,
-  edgeCacheMiddleware,
-  purgeEdgeCachePath,
-  purgeTrendingEdgeCache,
-} from './edge-cache';
+import { edgeCache, purgeEdgeCache, purgeTrendingEdgeCache, type EdgeCacheOptions } from './edge-cache';
 
-// ---------------------------------------------------------------------------
-// getEdgeCacheConfig
-// ---------------------------------------------------------------------------
-describe('getEdgeCacheConfig', () => {
-  it('matches /api/videos/trending', () => {
-    const p = getEdgeCacheConfig('/api/videos/trending');
-    expect(p).not.toBeNull();
-    expect(p!.maxAge).toBe(300);
-    expect(p!.swr).toBe(900);
+// Minimal in-memory stand-in for caches.default. The middleware only relies
+// on match/put/delete, keyed by request URL.
+class FakeCache {
+  store = new Map<string, Response>();
+  match = vi.fn(async (req: Request): Promise<Response | undefined> => {
+    const found = this.store.get(req.url);
+    return found ? found.clone() : undefined;
   });
+  put = vi.fn(async (req: Request, res: Response): Promise<void> => {
+    this.store.set(req.url, res);
+  });
+  delete = vi.fn(async (req: Request): Promise<boolean> => this.store.delete(req.url));
+}
 
-  it('matches /api/videos/trending with query string', () => {
-    expect(getEdgeCacheConfig('/api/videos/trending?limit=24')).not.toBeNull();
-  });
+const globals = globalThis as { caches?: unknown };
+let fake: FakeCache;
 
-  it('matches /api/channels/:username', () => {
-    const p = getEdgeCacheConfig('/api/channels/johndoe');
-    expect(p).not.toBeNull();
-    expect(p!.maxAge).toBe(120);
-    expect(p!.swr).toBe(1200);
-  });
+// waitUntilBackground falls back to a floating promise outside the Workers
+// runtime — yield to the macrotask queue so cache.put/delete settle.
+async function flush(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
 
-  it('matches /api/channels/:username/videos', () => {
-    const p = getEdgeCacheConfig('/api/channels/johndoe/videos');
-    expect(p).not.toBeNull();
-    expect(p!.maxAge).toBe(120);
-    expect(p!.swr).toBe(600);
-  });
-
-  it('matches /api/tags', () => {
-    const p = getEdgeCacheConfig('/api/tags');
-    expect(p).not.toBeNull();
-    expect(p!.maxAge).toBe(300);
-  });
-
-  it('matches /api/tags/:slug', () => {
-    expect(getEdgeCacheConfig('/api/tags/music')).not.toBeNull();
-  });
-
-  it('matches /api/videos/:id/related', () => {
-    expect(getEdgeCacheConfig('/api/videos/abc123/related')).not.toBeNull();
-  });
-
-  it('matches /api/videos/:id/tags', () => {
-    expect(getEdgeCacheConfig('/api/videos/abc123/tags')).not.toBeNull();
-  });
-
-  it('returns null for /api/videos/:id (intentionally excluded)', () => {
-    expect(getEdgeCacheConfig('/api/videos/abc123')).toBeNull();
-  });
-
-  it('returns null for /api/users/me', () => {
-    expect(getEdgeCacheConfig('/api/users/me')).toBeNull();
-  });
-
-  it('returns null for /api/auth/session', () => {
-    expect(getEdgeCacheConfig('/api/auth/session')).toBeNull();
-  });
-
-  it('does not match /api/channels/:username/settings (extra segment)', () => {
-    expect(getEdgeCacheConfig('/api/channels/johndoe/settings')).toBeNull();
-  });
+beforeEach(() => {
+  fake = new FakeCache();
+  globals.caches = { default: fake };
 });
 
-// ---------------------------------------------------------------------------
-// edgeCacheMiddleware
-// ---------------------------------------------------------------------------
+afterEach(() => {
+  delete globals.caches;
+});
 
-type MockCache = {
-  match: ReturnType<typeof vi.fn>;
-  put: ReturnType<typeof vi.fn>;
-  delete: ReturnType<typeof vi.fn>;
-};
-
-function buildTestApp(mockCache: MockCache) {
-  // Inject the mock cache directly via the openCacheStore factory parameter so
-  // tests don't need to stub the `caches` global (which is a Workers-only API).
-  const openCacheStore = () => Promise.resolve(mockCache as unknown as Cache);
-
+function makeApp(opts: EdgeCacheOptions = { ttl: 60, swr: 300 }) {
   const app = new Hono();
-  app.use('*', edgeCacheMiddleware(openCacheStore));
-  app.get('/api/videos/trending', (c) =>
-    c.json({ videos: [{ id: '1', title: 'Test' }] }),
-  );
-  app.get('/api/channels/johndoe', (c) => c.json({ username: 'johndoe' }));
-  app.get('/api/videos/abc123', (c) => c.json({ id: 'abc123' }));
-  return app;
+  const handler = vi.fn();
+  app.get('/api/test', edgeCache(opts), (c) => {
+    handler();
+    return c.json({ ok: true });
+  });
+  return { app, handler };
 }
 
-/** Build a mock cached Response with an in-date freshness header. */
-function freshCachedResponse(body: unknown, maxAgeSec = 300): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: {
-      'Content-Type': 'application/json',
-      'CF-Edge-Cache': 'HIT',
-      'Cache-Control': `public, max-age=${maxAgeSec + 900}`,
-      // Set freshUntil ~5 minutes in the future so the hit path triggers.
-      'x-edge-fresh-until': String(Date.now() + maxAgeSec * 1000),
-    },
-  });
-}
+describe('edgeCache middleware', () => {
+  it('MISS: runs the handler, tags the response, and stores it', async () => {
+    const { app, handler } = makeApp();
+    const res = await app.request('https://x.test/api/test');
+    await flush();
 
-describe('edgeCacheMiddleware', () => {
-  let mockCache: MockCache;
-
-  beforeEach(() => {
-    mockCache = {
-      match: vi.fn().mockResolvedValue(undefined),
-      put: vi.fn().mockResolvedValue(undefined),
-      delete: vi.fn().mockResolvedValue(true),
-    };
-  });
-
-  it('skips non-GET methods', async () => {
-    const app = buildTestApp(mockCache);
-    app.post('/api/videos/trending', (c) => c.json({ ok: true }));
-    const res = await app.request('/api/videos/trending', { method: 'POST' });
+    expect(handler).toHaveBeenCalledTimes(1);
     expect(res.status).toBe(200);
-    expect(mockCache.match).not.toHaveBeenCalled();
-  });
-
-  it('skips routes not in cache rules', async () => {
-    const app = buildTestApp(mockCache);
-    await app.request('/api/videos/abc123');
-    expect(mockCache.match).not.toHaveBeenCalled();
-  });
-
-  it('returns cached response on HIT with CF-Edge-Cache: HIT header', async () => {
-    mockCache.match.mockResolvedValue(freshCachedResponse({ videos: [], cached: true }));
-    const app = buildTestApp(mockCache);
-    const res = await app.request('/api/videos/trending');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('CF-Edge-Cache')).toBe('HIT');
-    expect(mockCache.put).not.toHaveBeenCalled();
-  });
-
-  it('stores response in cache on MISS and sets Cache-Control', async () => {
-    const app = buildTestApp(mockCache);
-    const res = await app.request('/api/videos/trending');
-    expect(res.status).toBe(200);
-    expect(res.headers.get('Cache-Control')).toBe(
-      'public, s-maxage=300, stale-while-revalidate=900',
-    );
     expect(res.headers.get('CF-Edge-Cache')).toBe('MISS');
-    await vi.waitFor(() => expect(mockCache.put).toHaveBeenCalledOnce());
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=60, stale-while-revalidate=300');
+    expect(await res.json()).toEqual({ ok: true });
+    expect(fake.put).toHaveBeenCalledTimes(1);
+    expect(fake.store.has('https://x.test/api/test')).toBe(true);
   });
 
-  it('stored entry carries x-edge-fresh-until for SWR tracking', async () => {
-    const app = buildTestApp(mockCache);
-    const before = Date.now();
-    await app.request('/api/videos/trending');
-    await vi.waitFor(() => expect(mockCache.put).toHaveBeenCalledOnce());
-    const [, storedResponse] = mockCache.put.mock.calls[0] as [Request, Response];
-    const freshUntil = parseInt(storedResponse.headers.get('x-edge-fresh-until') ?? '0');
-    expect(freshUntil).toBeGreaterThan(before);
+  it('HIT: serves the stored response without invoking the handler', async () => {
+    const { app, handler } = makeApp();
+    await app.request('https://x.test/api/test');
+    await flush();
+
+    const res = await app.request('https://x.test/api/test');
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(res.headers.get('CF-Edge-Cache')).toBe('HIT');
+    expect(await res.json()).toEqual({ ok: true });
   });
 
-  it('uses the correct cache config for channel profiles', async () => {
-    const app = buildTestApp(mockCache);
-    const res = await app.request('/api/channels/johndoe');
-    expect(res.headers.get('Cache-Control')).toBe(
-      'public, s-maxage=120, stale-while-revalidate=1200',
-    );
+  it('keys the cache by full URL including query string', async () => {
+    const { app, handler } = makeApp();
+    await app.request('https://x.test/api/test?limit=12');
+    await flush();
+    await app.request('https://x.test/api/test?limit=24');
+    await flush();
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(fake.store.has('https://x.test/api/test?limit=12')).toBe(true);
+    expect(fake.store.has('https://x.test/api/test?limit=24')).toBe(true);
   });
 
-  it('serves stale response and evicts on STALE', async () => {
-    // Fresh-until in the past (stale) but cache entry still exists (within SWR window).
-    const staleResponse = new Response(JSON.stringify({ stale: true }), {
-      status: 200,
-      headers: {
-        'x-edge-fresh-until': String(Date.now() - 1000), // expired 1s ago
-        'Cache-Control': 'public, max-age=1200',
-      },
+  it('bypasses non-GET requests entirely', async () => {
+    const app = new Hono();
+    app.post('/api/test', edgeCache({ ttl: 60 }), (c) => c.json({ ok: true }));
+    const res = await app.request('https://x.test/api/test', { method: 'POST' });
+    await flush();
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('CF-Edge-Cache')).toBeNull();
+    expect(fake.match).not.toHaveBeenCalled();
+    expect(fake.put).not.toHaveBeenCalled();
+  });
+
+  it('does not store non-2xx responses', async () => {
+    const app = new Hono();
+    app.get('/api/missing', edgeCache({ ttl: 60 }), (c) => c.json({ error: 'nope' }, 404));
+    const res = await app.request('https://x.test/api/missing');
+    await flush();
+
+    expect(res.status).toBe(404);
+    expect(fake.put).not.toHaveBeenCalled();
+  });
+
+  it('strips Set-Cookie from the stored copy but keeps it on the client response', async () => {
+    const app = new Hono();
+    app.get('/api/test', edgeCache({ ttl: 60 }), (c) => {
+      c.header('Set-Cookie', 'anon_session=abc; Path=/');
+      return c.json({ ok: true });
     });
-    mockCache.match.mockResolvedValue(staleResponse);
-    const app = buildTestApp(mockCache);
-    const res = await app.request('/api/videos/trending');
-    expect(res.headers.get('CF-Edge-Cache')).toBe('STALE');
-    await vi.waitFor(() => expect(mockCache.delete).toHaveBeenCalledOnce());
+    const res = await app.request('https://x.test/api/test');
+    await flush();
+
+    expect(res.headers.get('Set-Cookie')).toBe('anon_session=abc; Path=/');
+    const stored = fake.store.get('https://x.test/api/test');
+    expect(stored).toBeDefined();
+    expect(stored!.headers.get('Set-Cookie')).toBeNull();
+  });
+
+  it('appends immutable for content-addressed assets', async () => {
+    const { app } = makeApp({ ttl: 31536000, immutable: true });
+    const res = await app.request('https://x.test/api/test');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+  });
+
+  it('omits stale-while-revalidate when swr is not set', async () => {
+    const { app } = makeApp({ ttl: 30 });
+    const res = await app.request('https://x.test/api/test');
+    expect(res.headers.get('Cache-Control')).toBe('public, max-age=30');
+  });
+
+  it('passes through untouched when the caches global is absent', async () => {
+    delete globals.caches;
+    const { app, handler } = makeApp();
+    const res = await app.request('https://x.test/api/test');
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('CF-Edge-Cache')).toBeNull();
   });
 });
 
-// ---------------------------------------------------------------------------
-// purgeEdgeCachePath / purgeTrendingEdgeCache
-// ---------------------------------------------------------------------------
-
-describe('purgeEdgeCachePath', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('calls cache.delete with the constructed URL', async () => {
-    const mockDelete = vi.fn().mockResolvedValue(true);
-    vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue({ delete: mockDelete }) });
-
-    await purgeEdgeCachePath('https://example.com', '/api/channels/johndoe');
-
-    expect(mockDelete).toHaveBeenCalledOnce();
-    const req = mockDelete.mock.calls[0][0] as Request;
-    expect(req.url).toBe('https://example.com/api/channels/johndoe');
-  });
-
-  it('does nothing when caches throws', async () => {
-    vi.stubGlobal('caches', {
-      open: vi.fn().mockRejectedValue(new Error('unavailable')),
+describe('purgeEdgeCache', () => {
+  function purgeApp(urls: string[]) {
+    const app = new Hono();
+    app.post('/api/mutate', (c) => {
+      purgeEdgeCache(c, ...urls);
+      return c.json({ ok: true });
     });
-    await expect(
-      purgeEdgeCachePath('https://example.com', '/api/channels/johndoe'),
-    ).resolves.toBeUndefined();
+    return app;
+  }
+
+  it('deletes every given URL from the edge cache', async () => {
+    const app = purgeApp(['https://x.test/api/channels/jo', 'https://x.test/api/tags']);
+    await app.request('https://x.test/api/mutate', { method: 'POST' });
+    await flush();
+
+    expect(fake.delete).toHaveBeenCalledTimes(2);
+    const deleted = fake.delete.mock.calls.map(([req]) => req.url);
+    expect(deleted).toEqual(['https://x.test/api/channels/jo', 'https://x.test/api/tags']);
+  });
+
+  it('is a no-op with no URLs', async () => {
+    const app = purgeApp([]);
+    await app.request('https://x.test/api/mutate', { method: 'POST' });
+    await flush();
+    expect(fake.delete).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the caches global is absent', async () => {
+    delete globals.caches;
+    const app = purgeApp(['https://x.test/api/tags']);
+    const res = await app.request('https://x.test/api/mutate', { method: 'POST' });
+    await flush();
+    expect(res.status).toBe(200);
   });
 });
 
 describe('purgeTrendingEdgeCache', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  it('purges the bare and default-limit trending variants for the request origin', async () => {
+    const app = new Hono();
+    app.post('/api/webhooks/encode', (c) => {
+      purgeTrendingEdgeCache(c);
+      return c.json({ ok: true });
+    });
+    await app.request('https://x.test/api/webhooks/encode', { method: 'POST' });
+    await flush();
 
-  it('purges the bare URL and all limit= variants', async () => {
-    const mockDelete = vi.fn().mockResolvedValue(true);
-    vi.stubGlobal('caches', { open: vi.fn().mockResolvedValue({ delete: mockDelete }) });
-
-    await purgeTrendingEdgeCache('https://example.com');
-
-    // bare + 2 limit variants = 3 calls
-    expect(mockDelete).toHaveBeenCalledTimes(3);
-    const urls = (mockDelete.mock.calls as Array<[Request]>).map(([r]) => r.url);
-    expect(urls).toContain('https://example.com/api/videos/trending');
-    expect(urls).toContain('https://example.com/api/videos/trending?limit=12');
-    expect(urls).toContain('https://example.com/api/videos/trending?limit=24');
+    const deleted = fake.delete.mock.calls.map(([req]) => req.url);
+    expect(deleted).toEqual([
+      'https://x.test/api/videos/trending',
+      'https://x.test/api/videos/trending?limit=12',
+    ]);
   });
 });

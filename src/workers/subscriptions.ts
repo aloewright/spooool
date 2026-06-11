@@ -75,7 +75,7 @@ subscriptionRoutes.post('/api/channels/:username/subscribe', async (c) => {
     .bind(crypto.randomUUID(), user.id, channel.id)
     .run();
 
-  await purgeEdgeCache([`/api/channels/${username}`], new URL(c.req.url).origin);
+  purgeEdgeCache(c, `${new URL(c.req.url).origin}/api/channels/${username}`);
   return c.json({ subscribed: true });
 });
 
@@ -93,7 +93,7 @@ subscriptionRoutes.delete('/api/channels/:username/subscribe', async (c) => {
     .bind(user.id, channel.id)
     .run();
 
-  await purgeEdgeCache([`/api/channels/${username}`], new URL(c.req.url).origin);
+  purgeEdgeCache(c, `${new URL(c.req.url).origin}/api/channels/${username}`);
   return c.json({ subscribed: false });
 });
 

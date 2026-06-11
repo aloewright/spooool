@@ -25,6 +25,13 @@ export interface EdgeCacheOptions {
   immutable?: boolean;
 }
 
+// The DOM lib's CacheStorage (pulled in via tsconfig `lib`) shadows the
+// workers-types declaration, which is the one that carries `default`.
+function defaultCache(): Cache | undefined {
+  if (typeof caches === 'undefined') return undefined;
+  return (caches as unknown as { default: Cache }).default;
+}
+
 /**
  * Hono middleware that serves GET responses from the Workers Cache API
  * (caches.default). On a cache miss the handler runs normally; the 2xx
@@ -53,12 +60,12 @@ export function edgeCache(opts: EdgeCacheOptions): MiddlewareHandler {
 
     // caches.default is only available in the Workers runtime; degrade
     // gracefully in unit-test environments where the global is absent.
-    if (typeof caches === 'undefined') {
+    const cache = defaultCache();
+    if (!cache) {
       await next();
       return;
     }
 
-    const cache = caches.default;
     const cacheKey = new Request(c.req.url);
 
     const hit = await cache.match(cacheKey);
@@ -97,8 +104,8 @@ export function edgeCache(opts: EdgeCacheOptions): MiddlewareHandler {
  * never delays the mutation response.
  */
 export function purgeEdgeCache(c: Context, ...urls: string[]): void {
-  if (urls.length === 0 || typeof caches === 'undefined') return;
-  const cache = caches.default;
+  const cache = defaultCache();
+  if (urls.length === 0 || !cache) return;
   waitUntilBackground(
     c,
     Promise.all(urls.map((url) => cache.delete(new Request(url)))).then(() => undefined),

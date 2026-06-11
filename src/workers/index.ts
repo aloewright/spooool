@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { edgeCacheMiddleware, purgeTrendingEdgeCache } from './edge-cache';
+import { purgeTrendingEdgeCache } from './edge-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
 import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
@@ -163,14 +163,8 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
 
   // Invalidate caches: the video is now ready with a thumbnail, so both the
   // trending list and any cached video-metadata KV entries are stale.
-  const origin = new URL(c.req.url).origin;
-  waitUntilBackground(
-    c,
-    Promise.all([
-      bumpTrendingCacheVersion(c.env.CACHE),
-      purgeTrendingEdgeCache(origin),
-    ]),
-  );
+  waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  purgeTrendingEdgeCache(c);
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });
@@ -211,10 +205,6 @@ app.all('/api/auth/*', async (c) => {
   const auth = createAuth(c.env);
   return auth.handler(c.req.raw);
 });
-
-// Mount edge cache before session loading so cache hits skip the expensive
-// auth.api.getSession() round-trip entirely.
-app.use('/api/*', edgeCacheMiddleware());
 
 app.use('/api/*', async (c, next) => {
   const auth = createAuth(c.env);

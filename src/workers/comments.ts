@@ -65,16 +65,19 @@ commentRoutes.get('/api/videos/:id/comments', async (c) => {
       ? 'reply_count DESC, c.created_at DESC'
       : 'c.created_at DESC';
 
-  // Top-level comments + each one's reply_count.
+  // Top-level comments with reply counts aggregated via a single LEFT JOIN.
+  // The correlated subquery approach fired one COUNT query per row (N+1); the
+  // join + GROUP BY collapses this into a single pass covered by idx_comments_replies.
   const top = await c.env.DB.prepare(
     `SELECT c.id, c.video_id, c.user_id, c.parent_comment_id, c.body,
             c.created_at, c.updated_at, c.deleted_at,
             u.name AS author_name, u.username AS author_username,
-            (SELECT COUNT(*) FROM comments r
-              WHERE r.parent_comment_id = c.id AND r.deleted_at IS NULL) AS reply_count
+            COUNT(r.id) AS reply_count
      FROM comments c
      LEFT JOIN user u ON u.id = c.user_id
+     LEFT JOIN comments r ON r.parent_comment_id = c.id AND r.deleted_at IS NULL
      WHERE c.video_id = ? AND c.parent_comment_id IS NULL AND c.deleted_at IS NULL
+     GROUP BY c.id
      ORDER BY ${orderClause}
      LIMIT ? OFFSET ?`,
   )

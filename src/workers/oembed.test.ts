@@ -4,6 +4,7 @@ import {
   extractWatchId,
   oembedRoutes,
   type OembedEnv,
+  type OembedVideoResponse,
 } from './oembed';
 
 describe('extractWatchId', () => {
@@ -53,9 +54,10 @@ describe('extractWatchId', () => {
 });
 
 describe('buildOembedLinkResponse', () => {
-  it('shapes a complete response when all fields exist', () => {
-    const out = buildOembedLinkResponse({
+  it('shapes a complete video response when all fields exist', () => {
+    const out: OembedVideoResponse = buildOembedLinkResponse({
       origin: 'https://spooool.com',
+      videoId: 'abc123',
       video: {
         title: 'My Video',
         thumbnail_url: 'https://thumbs.example/abc.jpg',
@@ -63,24 +65,27 @@ describe('buildOembedLinkResponse', () => {
         channel_username: 'alice',
       },
     });
-    expect(out).toEqual({
-      type: 'link',
-      version: '1.0',
-      provider_name: 'spooool',
-      provider_url: 'https://spooool.com',
-      title: 'My Video',
-      author_name: 'Alice',
-      author_url: 'https://spooool.com/channel/alice',
-      thumbnail_url: 'https://thumbs.example/abc.jpg',
-      thumbnail_width: 1280,
-      thumbnail_height: 720,
-      cache_age: 300,
-    });
+    expect(out.type).toBe('video');
+    expect(out.version).toBe('1.0');
+    expect(out.provider_name).toBe('spooool');
+    expect(out.provider_url).toBe('https://spooool.com');
+    expect(out.title).toBe('My Video');
+    expect(out.author_name).toBe('Alice');
+    expect(out.author_url).toBe('https://spooool.com/channel/alice');
+    expect(out.html).toContain('https://spooool.com/embed/abc123');
+    expect(out.html).toContain('<iframe');
+    expect(out.width).toBe(1280);
+    expect(out.height).toBe(720);
+    expect(out.thumbnail_url).toBe('https://thumbs.example/abc.jpg');
+    expect(out.thumbnail_width).toBe(1280);
+    expect(out.thumbnail_height).toBe(720);
+    expect(out.cache_age).toBe(300);
   });
 
   it('omits thumbnail fields when no thumbnail is set', () => {
     const out = buildOembedLinkResponse({
       origin: 'https://spooool.com',
+      videoId: 'abc123',
       video: {
         title: 'My Video',
         thumbnail_url: null,
@@ -96,6 +101,7 @@ describe('buildOembedLinkResponse', () => {
   it('falls back to provider origin when channel username is missing', () => {
     const out = buildOembedLinkResponse({
       origin: 'https://spooool.com',
+      videoId: 'abc123',
       video: {
         title: 'V',
         thumbnail_url: null,
@@ -110,6 +116,7 @@ describe('buildOembedLinkResponse', () => {
   it('percent-encodes the channel username in author_url', () => {
     const out = buildOembedLinkResponse({
       origin: 'https://spooool.com',
+      videoId: 'abc123',
       video: {
         title: 'V',
         thumbnail_url: null,
@@ -242,7 +249,7 @@ describe('oembedRoutes — /api/oembed', () => {
     expect(res.status).toBe(400);
   });
 
-  it('returns a link-type oEmbed payload for a public video', async () => {
+  it('returns a video-type oEmbed payload for a public video', async () => {
     const env: OembedEnv = {
       DB: fakeDB({
         id: 'abc',
@@ -264,12 +271,14 @@ describe('oembedRoutes — /api/oembed', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('cache-control')).toContain('max-age=300');
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body.type).toBe('link');
+    expect(body.type).toBe('video');
     expect(body.version).toBe('1.0');
     expect(body.provider_name).toBe('spooool');
     expect(body.title).toBe('Hello');
     expect(body.author_name).toBe('Alice');
     expect(body.author_url).toBe('http://localhost/channel/alice');
     expect(body.thumbnail_url).toBe('https://thumbs.example/abc.jpg');
+    expect(typeof body.html).toBe('string');
+    expect((body.html as string)).toContain('/embed/abc');
   });
 });

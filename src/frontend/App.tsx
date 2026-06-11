@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { LogOut, Moon, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
+import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
@@ -61,6 +61,7 @@ const AdminStatus = lazy(() =>
 const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
+const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -269,6 +270,9 @@ function HeaderNav(): JSX.Element {
       </Link>
       <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
+      </Link>
+      <Link to="/settings/account" aria-label="Account settings" title="Account settings" style={iconBtn}>
+        <Settings aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
         type="button"
@@ -719,7 +723,25 @@ function useSplash(): { show: boolean; dismiss: () => void } {
 }
 
 export default function App(): JSX.Element {
+  const location = useLocation();
   const splash = useSplash();
+
+  // Embed pages render as a bare player with no app shell so they can be
+  // iframed into third-party sites without nav chrome. They still go through
+  // React Router (so Embed's useParams() resolves :id) and MantineProvider,
+  // but skip the header/nav/footer shell.
+  if (location.pathname.startsWith('/embed/')) {
+    return (
+      <MantineProvider>
+        <Suspense fallback={<div style={{ background: '#000', height: '100dvh' }} />}>
+          <Routes>
+            <Route path="/embed/:id" element={<Embed />} />
+          </Routes>
+        </Suspense>
+      </MantineProvider>
+    );
+  }
+
   if (splash.show) {
     return <Splash onDone={splash.dismiss} />;
   }
@@ -794,6 +816,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
           <Route
             path="/settings/account"
             element={

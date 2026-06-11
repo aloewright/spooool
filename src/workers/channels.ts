@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { edgeCache } from './edge-cache';
 
 export interface ChannelEnv {
   DB: D1Database;
@@ -26,7 +27,7 @@ interface ChannelHeaderRow {
 
 export const channelRoutes = new Hono<{ Bindings: ChannelEnv }>();
 
-channelRoutes.get('/api/channels/:username', async (c) => {
+channelRoutes.get('/api/channels/:username', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const username = c.req.param('username');
   const header = await c.env.DB.prepare(
     `SELECT u.id, u.email, u.name, u.username, u.displayName, u.bio, u.avatarUrl, u.bannerUrl,
@@ -53,7 +54,7 @@ channelRoutes.get('/api/channels/:username', async (c) => {
   });
 });
 
-channelRoutes.get('/api/channels/:username/videos', async (c) => {
+channelRoutes.get('/api/channels/:username/videos', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const username = c.req.param('username');
   const parsed = pageQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
@@ -62,21 +63,22 @@ channelRoutes.get('/api/channels/:username/videos', async (c) => {
   const { page, limit } = parsed.data;
   const offset = (page - 1) * limit;
 
-  const owner = await c.env.DB.prepare('SELECT id FROM user WHERE username = ?')
-    .bind(username)
-    .first<{ id: string }>();
+  // D1 batch sends both statements in a single HTTP round-trip. The second
+  // query re-looks up the user by username via subquery so it doesn't depend
+  // on the first result — both execute concurrently on D1's side.
+  const [ownerResult, videosResult] = await c.env.DB.batch([
+    c.env.DB.prepare('SELECT id FROM user WHERE username = ?').bind(username),
+    c.env.DB.prepare(
+      `SELECT id, title, description, stream_video_id, status, view_count,
+              thumbnail_url, created_at
+       FROM videos
+       WHERE user_id = (SELECT id FROM user WHERE username = ?) AND deleted_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT ? OFFSET ?`,
+    ).bind(username, limit, offset),
+  ]);
+
+  const owner = (ownerResult.results as Array<{ id: string }>)[0];
   if (!owner) return c.json({ error: 'Channel not found' }, 404);
-
-  const { results } = await c.env.DB.prepare(
-    `SELECT id, title, description, stream_video_id, status, view_count,
-            thumbnail_url, created_at
-     FROM videos
-     WHERE user_id = ? AND deleted_at IS NULL
-     ORDER BY created_at DESC
-     LIMIT ? OFFSET ?`,
-  )
-    .bind(owner.id, limit, offset)
-    .all();
-
-  return c.json({ page, limit, videos: results });
+  return c.json({ page, limit, videos: videosResult.results });
 });

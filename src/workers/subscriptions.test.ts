@@ -45,6 +45,20 @@ function fakeDB(spec: FakeDBSpec): D1Database {
         return stmt;
       },
       first: async () => {
+        // Merged subscription-check query (subscriptions.ts GET /subscription).
+        // bound[0] = subscriber_user_id (may be null), bound[1] = username.
+        if (sql.includes('AS channel_id') && sql.includes('AS subscriber_count')) {
+          const subscriberId = bound[0] as string | null;
+          const username = bound[1] as string;
+          const channel = spec.channels?.[username];
+          if (!channel) return null;
+          const count = spec.subscriberCount ?? subscriptions.size;
+          const isSubscribed =
+            subscriberId !== null && subscriptions.has(subscriptionKey(subscriberId, channel.id))
+              ? 1
+              : 0;
+          return { channel_id: channel.id, subscriber_count: count, is_subscribed: isSubscribed } as never;
+        }
         if (sql.startsWith('SELECT id FROM user')) {
           const username = bound[0] as string;
           return (spec.channels?.[username] ?? null) as never;

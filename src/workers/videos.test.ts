@@ -475,6 +475,153 @@ describe('upload storage-quota gate', () => {
   });
 });
 
+// Multi-chunk video upload: DB row created at chunk 0 with status='uploading'
+describe('POST /api/videos/upload multi-chunk (target=video)', () => {
+  const USER_ID = 'u_mc';
+
+  function multiChunkEnv() {
+    const dbInserts: { sql: string; bound: unknown[] }[] = [];
+    const dbUpdates: { sql: string; bound: unknown[] }[] = [];
+    const r2Parts: Record<string, { partNumber: number }[]> = {};
+    const r2Completed: string[] = [];
+    const kv: Record<string, string> = {};
+    const queueSends: unknown[] = [];
+
+    const DB = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        const stmt = {
+          bind(...v: unknown[]) { bound = v; return stmt; },
+          async run() {
+            if (sql.includes('INSERT INTO videos')) dbInserts.push({ sql, bound: [...bound] });
+            if (sql.includes('UPDATE videos') && sql.includes('SET status')) dbUpdates.push({ sql, bound: [...bound] });
+            return { success: true, meta: { changes: 1 } };
+          },
+          async first() {
+            if (sql.includes('SUM(bytes)')) return { used: 0 };
+            if (sql.includes('storage_bytes_quota')) return { quota: 10 * 1024 * 1024 * 1024 };
+            return null;
+          },
+          async all() { return { results: [] }; },
+        };
+        void bound;
+        return stmt;
+      },
+    } as unknown as D1Database;
+
+    const VIDEOS = {
+      put: async () => {},
+      createMultipartUpload: async (key: string) => {
+        r2Parts[key] = [];
+        return {
+          uploadId: `mpid-${key}`,
+          uploadPart: async (partNumber: number) => {
+            r2Parts[key]!.push({ partNumber });
+            return { etag: `etag-${partNumber}` };
+          },
+        };
+      },
+      resumeMultipartUpload: (key: string) => ({
+        uploadPart: async (partNumber: number) => {
+          if (!r2Parts[key]) r2Parts[key] = [];
+          r2Parts[key]!.push({ partNumber });
+          return { etag: `etag-${partNumber}` };
+        },
+        complete: async () => { r2Completed.push(key); },
+        abort: async () => {},
+      }),
+    } as unknown as R2Bucket;
+
+    const SESSIONS = {
+      put: async (k: string, v: string) => { kv[k] = v; },
+      get: async (k: string) => kv[k] ?? null,
+      delete: async (k: string) => { delete kv[k]; },
+    } as unknown as KVNamespace;
+
+    const VIDEO_ENCODING = {
+      send: async (msg: unknown) => { queueSends.push(msg); },
+    } as unknown as Queue;
+
+    const CACHE = {
+      get: async () => null,
+      put: async () => {},
+      delete: async () => {},
+    } as unknown as KVNamespace;
+
+    const env = { DB, VIDEOS, SESSIONS, CACHE, VIDEO_ENCODING } as unknown as VideoRoutesEnv;
+    return { env, dbInserts, dbUpdates, r2Parts, r2Completed, kv, queueSends };
+  }
+
+  const MP4_MAGIC = new Uint8Array([0, 0, 0, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
+
+  it('chunk 0 creates a DB row with status=uploading and returns videoId', async () => {
+    const { env, dbInserts } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    const fd = new FormData();
+    fd.set('title', 'my video');
+    fd.set('description', 'desc');
+    fd.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'video.mp4');
+    fd.set('chunkIndex', '0');
+    fd.set('chunkCount', '2');
+
+    const res = await fetcher('/api/videos/upload', { method: 'POST', body: fd });
+    expect(res.status).toBe(202);
+    const body = (await res.json()) as { status: string; videoId: string; uploadId: string };
+    expect(body.status).toBe('chunk_received');
+    expect(typeof body.videoId).toBe('string');
+    expect(typeof body.uploadId).toBe('string');
+
+    // DB INSERT with status='uploading'
+    expect(dbInserts).toHaveLength(1);
+    const [insert] = dbInserts;
+    expect(insert!.sql).toContain('uploading');
+    // bound: [videoId, userId, title, description, r2Key]
+    expect(insert!.bound[1]).toBe(USER_ID);
+    expect(insert!.bound[2]).toBe('my video');
+  });
+
+  it('final chunk transitions existing row to queued, returns same videoId', async () => {
+    const { env, dbInserts, dbUpdates, queueSends } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    // chunk 0
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '2');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    expect(res0.status).toBe(202);
+    const { videoId, uploadId } = (await res0.json()) as { videoId: string; uploadId: string };
+
+    // chunk 1 (final)
+    const fd1 = new FormData();
+    fd1.set('title', 'vid');
+    fd1.set('description', '');
+    fd1.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1.set('chunkIndex', '1');
+    fd1.set('chunkCount', '2');
+    fd1.set('uploadId', uploadId);
+    const res1 = await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
+    expect(res1.status).toBe(201);
+    const body1 = (await res1.json()) as { id: string; status: string };
+    // Returns the same videoId that was created at chunk 0
+    expect(body1.id).toBe(videoId);
+    expect(body1.status).toBe('queued');
+
+    // INSERT at chunk 0, UPDATE at final chunk (no second INSERT)
+    expect(dbInserts).toHaveLength(1);
+    expect(dbUpdates).toHaveLength(1);
+    expect(dbUpdates[0]!.sql).toContain("SET status = 'queued'");
+
+    // Encoding queue received the job
+    expect(queueSends).toHaveLength(1);
+    expect((queueSends[0] as { videoId: string }).videoId).toBe(videoId);
+  });
+});
+
 describe('DELETE /api/videos/:id cache invalidation (ALO-431)', () => {
   it('deletes videoMetaCacheKey from KV when the owner deletes their video', async () => {
     const cacheDeletes: string[] = [];

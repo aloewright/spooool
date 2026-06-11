@@ -108,6 +108,7 @@ async function spoooolChannelItems(env: FeedsEnv, userId: string): Promise<FeedI
     `SELECT v.id, v.title, v.thumbnail_url, v.created_at, COALESCE(u.displayName, u.name) AS author
      FROM videos v LEFT JOIN user u ON u.id = v.user_id
      WHERE v.user_id = ? AND v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.dmca_status IS NULL
+       AND v.status != 'uploading'
      ORDER BY v.created_at DESC LIMIT ?`,
   )
     .bind(userId, YT_PER_SOURCE)

@@ -422,4 +422,28 @@ describe('handlePolarWebhook', () => {
     );
     expect(rows[0].polar_user_id).toBe('polar_usr_abc');
   });
+
+  it('accepts metadata with non-string values (numbers/booleans)', async () => {
+    // Polar echoes metadata back with original JSON types; the schema must not
+    // reject numbers/booleans or it 400s and Polar retries the webhook forever.
+    const app = buildApp(NOW);
+    const { rows, binding } = makeFakeDB();
+    const data = {
+      id: 'ord_meta',
+      amount: 500,
+      currency: 'usd',
+      metadata: { creator_user_id: 'u_1', kind: 'tip', video_id: 42, gift: true },
+    };
+    const payload = JSON.stringify({ type: 'order.paid', data });
+    const headers = await makeHeaders(payload);
+    const res = await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(res.status).toBe(200);
+    const json = await res.json() as { inserted: boolean };
+    expect(json.inserted).toBe(true);
+    expect(JSON.parse(rows[0].meta_json).metadata).toMatchObject({ video_id: 42, gift: true });
+  });
 });

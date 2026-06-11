@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
@@ -12,6 +12,17 @@ interface AccountInfo {
   notifyEmailNewUpload: boolean;
   notifyEmailComments: boolean;
   storage: { used: number; quota: number; remaining: number };
+}
+
+interface ChannelProduct {
+  id: string;
+  kind: 'membership' | 'tip';
+  name: string;
+  description: string | null;
+  amount_cents: number | null;
+  currency: string;
+  billing_interval: string | null;
+  active: number;
 }
 
 interface EarningsSummary {
@@ -98,6 +109,20 @@ export function AccountSettings(): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [polarError, setPolarError] = useState<string | null>(null);
 
+  // Product management
+  const [products, setProducts] = useState<ChannelProduct[] | null>(null);
+  const [productBusy, setProductBusy] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+  const [productInfo, setProductInfo] = useState<string | null>(null);
+  const [newProductKind, setNewProductKind] = useState<'tip' | 'membership'>('tip');
+  const [newProductName, setNewProductName] = useState('');
+  const [newProductDesc, setNewProductDesc] = useState('');
+  const [newProductPolarId, setNewProductPolarId] = useState('');
+  const [newProductPriceId, setNewProductPriceId] = useState('');
+  const [newProductAmount, setNewProductAmount] = useState('');
+  const [newProductInterval, setNewProductInterval] = useState<'' | 'month' | 'year'>('');
+  const [showAddProduct, setShowAddProduct] = useState(false);
+
   useEffect(() => {
     if (!session) return;
     let cancelled = false;
@@ -126,6 +151,80 @@ export function AccountSettings(): JSX.Element {
       cancelled = true;
     };
   }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    void fetch('/api/account/products', { credentials: 'include' })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = await r.json() as { products: ChannelProduct[] };
+        setProducts(data.products);
+      })
+      .catch(() => undefined);
+  }, [session]);
+
+  const reloadProducts = async (): Promise<void> => {
+    const r = await fetch('/api/account/products', { credentials: 'include' });
+    if (r.ok) {
+      const data = await r.json() as { products: ChannelProduct[] };
+      setProducts(data.products);
+    }
+  };
+
+  const addProduct = async (e: FormEvent): Promise<void> => {
+    e.preventDefault();
+    setProductError(null);
+    setProductInfo(null);
+    setProductBusy(true);
+    try {
+      const body: Record<string, unknown> = {
+        kind: newProductKind,
+        name: newProductName,
+        polar_product_id: newProductPolarId,
+        polar_price_id: newProductPriceId,
+      };
+      if (newProductDesc) body.description = newProductDesc;
+      if (newProductAmount) body.amount_cents = Math.round(parseFloat(newProductAmount) * 100);
+      if (newProductInterval) body.billing_interval = newProductInterval;
+      const r = await fetch('/api/account/products', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
+      setProductInfo('Product linked.');
+      setShowAddProduct(false);
+      setNewProductName('');
+      setNewProductDesc('');
+      setNewProductPolarId('');
+      setNewProductPriceId('');
+      setNewProductAmount('');
+      setNewProductInterval('');
+      await reloadProducts();
+    } catch (err) {
+      setProductError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setProductBusy(false);
+    }
+  };
+
+  const removeProduct = async (id: string): Promise<void> => {
+    setProductError(null);
+    setProductBusy(true);
+    try {
+      const r = await fetch(`/api/account/products/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
+      await reloadProducts();
+    } catch (err) {
+      setProductError(err instanceof Error ? err.message : 'Failed');
+    } finally {
+      setProductBusy(false);
+    }
+  };
 
   // Handle redirect params from the Polar OAuth callback.
   useEffect(() => {
@@ -532,6 +631,205 @@ export function AccountSettings(): JSX.Element {
           </p>
         )}
       </section>
+
+      {earnings?.polar.accountStatus === 'active' && (
+        <section className="stack-sm" aria-label="Monetization products">
+          <span className="ds-label">Tips &amp; memberships</span>
+          <p className="ds-meta">
+            Link your Polar products to enable tipping and channel memberships. Create products in
+            your{' '}
+            <a href="https://polar.sh/dashboard" target="_blank" rel="noopener noreferrer">
+              Polar dashboard
+            </a>
+            , then paste the product ID and price ID below. Tips use &ldquo;pay what you want&rdquo;
+            Polar products; memberships use recurring subscription products.
+          </p>
+
+          {productError && <p className="status-error">{productError}</p>}
+          {productInfo && <p className="ds-meta">{productInfo}</p>}
+
+          {products && products.filter((p) => p.active).length > 0 && (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="info-table" style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th>Type</th>
+                    <th>Name</th>
+                    <th>Amount</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.filter((p) => p.active).map((p) => (
+                    <tr key={p.id}>
+                      <td className="ds-meta">{p.kind}</td>
+                      <td>{p.name}</td>
+                      <td className="ds-meta">
+                        {p.amount_cents != null
+                          ? new Intl.NumberFormat('en-US', {
+                              style: 'currency',
+                              currency: p.currency.toUpperCase(),
+                            }).format(p.amount_cents / 100)
+                          : 'Custom'}
+                        {p.billing_interval ? `/${p.billing_interval}` : ''}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          disabled={productBusy}
+                          onClick={() => { void removeProduct(p.id); }}
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!showAddProduct ? (
+            <button
+              type="button"
+              className="btn btn--secondary btn--sm"
+              onClick={() => { setShowAddProduct(true); setProductError(null); setProductInfo(null); }}
+            >
+              Add product
+            </button>
+          ) : (
+            <form className="stack-sm" onSubmit={(e) => { void addProduct(e); }}>
+              <fieldset style={{ border: 'none', padding: 0, margin: 0 }}>
+                <legend className="ds-label" style={{ marginBottom: 'var(--space-2)' }}>
+                  New product
+                </legend>
+
+                <div className="stack-sm">
+                  <div>
+                    <label className="ds-label" htmlFor="np-kind">Type</label>
+                    <select
+                      id="np-kind"
+                      className="input"
+                      value={newProductKind}
+                      onChange={(e) => setNewProductKind(e.target.value as 'tip' | 'membership')}
+                      style={{ marginTop: 'var(--space-1)' }}
+                    >
+                      <option value="tip">Tip (one-time, custom amount)</option>
+                      <option value="membership">Membership (recurring)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="ds-label" htmlFor="np-name">Display name</label>
+                    <input
+                      id="np-name"
+                      type="text"
+                      className="input"
+                      required
+                      maxLength={200}
+                      placeholder="e.g. Fan tier · $5/month"
+                      value={newProductName}
+                      onChange={(e) => setNewProductName(e.target.value)}
+                      style={{ marginTop: 'var(--space-1)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="ds-label" htmlFor="np-desc">Description (optional)</label>
+                    <input
+                      id="np-desc"
+                      type="text"
+                      className="input"
+                      maxLength={1000}
+                      placeholder="What does this membership include?"
+                      value={newProductDesc}
+                      onChange={(e) => setNewProductDesc(e.target.value)}
+                      style={{ marginTop: 'var(--space-1)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="ds-label" htmlFor="np-polar-product">Polar product ID</label>
+                    <input
+                      id="np-polar-product"
+                      type="text"
+                      className="input"
+                      required
+                      maxLength={200}
+                      placeholder="prod_xxxxxxxxxxxxxxxxxxxxxxxx"
+                      value={newProductPolarId}
+                      onChange={(e) => setNewProductPolarId(e.target.value)}
+                      style={{ marginTop: 'var(--space-1)' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="ds-label" htmlFor="np-polar-price">Polar price ID</label>
+                    <input
+                      id="np-polar-price"
+                      type="text"
+                      className="input"
+                      required
+                      maxLength={200}
+                      placeholder="price_xxxxxxxxxxxxxxxxxxxxxxxx"
+                      value={newProductPriceId}
+                      onChange={(e) => setNewProductPriceId(e.target.value)}
+                      style={{ marginTop: 'var(--space-1)' }}
+                    />
+                  </div>
+
+                  {newProductKind === 'membership' && (
+                    <>
+                      <div>
+                        <label className="ds-label" htmlFor="np-amount">Price (USD)</label>
+                        <input
+                          id="np-amount"
+                          type="number"
+                          className="input"
+                          min="1"
+                          step="0.01"
+                          placeholder="5.00"
+                          value={newProductAmount}
+                          onChange={(e) => setNewProductAmount(e.target.value)}
+                          style={{ marginTop: 'var(--space-1)' }}
+                        />
+                      </div>
+                      <div>
+                        <label className="ds-label" htmlFor="np-interval">Billing interval</label>
+                        <select
+                          id="np-interval"
+                          className="input"
+                          value={newProductInterval}
+                          onChange={(e) => setNewProductInterval(e.target.value as '' | 'month' | 'year')}
+                          style={{ marginTop: 'var(--space-1)' }}
+                        >
+                          <option value="">— select —</option>
+                          <option value="month">Monthly</option>
+                          <option value="year">Yearly</option>
+                        </select>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </fieldset>
+
+              <div style={{ display: 'flex', gap: 'var(--space-2)' }}>
+                <button type="submit" className="btn btn--secondary btn--sm" disabled={productBusy}>
+                  Save product
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  onClick={() => setShowAddProduct(false)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
 
       {!scheduledDate && (
         <section className="stack-sm" aria-label="Delete account">

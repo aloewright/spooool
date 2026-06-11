@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 // ALO-283: keep Comments (459 LoC) + ReportButton + VideoTags out of the
@@ -30,6 +30,155 @@ import { formatCount } from '../lib/format';
 
 // Persist tick frequency. Pause/visibility/pagehide also force a save.
 const POSITION_SAVE_INTERVAL_MS = 5000;
+
+const TIP_PRESETS = [200, 500, 1000, 2000]; // cents
+
+function TipButton({ videoId, creatorUsername }: { videoId: string; creatorUsername: string | null }): JSX.Element | null {
+  const { data: session } = useSession();
+  const [hasTipProduct, setHasTipProduct] = useState<boolean | null>(null);
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState<number>(500);
+  const [custom, setCustom] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!creatorUsername) return;
+    void fetch(`/api/channels/${encodeURIComponent(creatorUsername)}/products`)
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = await r.json() as { products: Array<{ kind: string }> };
+        setHasTipProduct(data.products.some((p) => p.kind === 'tip'));
+      })
+      .catch(() => undefined);
+  }, [creatorUsername]);
+
+  if (!hasTipProduct) return null;
+
+  const resolvedAmount = custom ? Math.round(parseFloat(custom) * 100) : amount;
+
+  const submit = async (): Promise<void> => {
+    if (busy) return;
+    if (!session) { setError('Sign in to send a tip.'); return; }
+    if (!resolvedAmount || resolvedAmount < 100) { setError('Minimum tip is $1.00'); return; }
+    if (resolvedAmount > 100_000) { setError('Maximum tip is $1,000.00'); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/videos/${encodeURIComponent(videoId)}/tip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ amount_cents: resolvedAmount, message: message || undefined }),
+      });
+      const data = await r.json() as { checkout_url?: string; error?: string };
+      if (!r.ok) throw new Error(data.error ?? 'Failed to create checkout');
+      if (data.checkout_url) window.location.href = data.checkout_url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn--ghost"
+        onClick={() => { setOpen(true); setError(null); }}
+      >
+        Tip creator
+      </button>
+
+      {open && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Send a tip"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.6)',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+        >
+          <div
+            className="card stack-sm"
+            style={{ padding: 'var(--space-5)', maxWidth: 360, width: '100%' }}
+          >
+            <h2 className="ds-h3" style={{ margin: 0 }}>Send a tip</h2>
+            <p className="ds-meta">Choose an amount to tip this creator.</p>
+
+            <div className="row" style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+              {TIP_PRESETS.map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  className={amount === preset && !custom ? 'btn btn--sm' : 'btn btn--ghost btn--sm'}
+                  onClick={() => { setAmount(preset); setCustom(''); }}
+                >
+                  ${(preset / 100).toFixed(0)}
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <label className="ds-label" htmlFor="tip-custom">Custom amount ($)</label>
+              <input
+                id="tip-custom"
+                type="number"
+                className="input"
+                min="1"
+                max="1000"
+                step="0.01"
+                placeholder="e.g. 3.00"
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                style={{ marginTop: 'var(--space-1)' }}
+              />
+            </div>
+
+            <div>
+              <label className="ds-label" htmlFor="tip-message">Message (optional)</label>
+              <input
+                id="tip-message"
+                type="text"
+                className="input"
+                maxLength={280}
+                placeholder="Say something nice…"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                style={{ marginTop: 'var(--space-1)' }}
+              />
+            </div>
+
+            {error && <p className="status-error">{error}</p>}
+
+            <div className="row" style={{ gap: 'var(--space-2)', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={busy}
+                onClick={() => { void submit(); }}
+              >
+                {busy ? 'Redirecting…' : `Send $${((resolvedAmount || 0) / 100).toFixed(2)}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 function formatHms(total: number): string {
   const t = Math.max(0, Math.floor(total));
@@ -81,6 +230,7 @@ export function Watch(): JSX.Element {
   const [subBusy, setSubBusy] = useState(false);
   const [subError, setSubError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [tipSuccess, setTipSuccess] = useState(searchParams.get('tip_success') === '1');
   // ALO-213: surface stored resume position so the viewer can override it.
   // null = nothing to resume; number = seconds we'd resume at.
   const [resumeOffer, setResumeOffer] = useState<number | null>(null);
@@ -612,6 +762,31 @@ export function Watch(): JSX.Element {
           <span className="badge">{video.channel_name ?? 'Unknown channel'}</span>
         </div>
       </div>
+      {tipSuccess && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="row"
+          style={{
+            gap: 'var(--space-2)',
+            padding: 'var(--space-2) var(--space-3)',
+            border: '1px solid color-mix(in oklch, var(--success, green), transparent 60%)',
+            borderRadius: 'var(--radius-lg)',
+            background: 'color-mix(in oklch, var(--success, green), transparent 90%)',
+            flexWrap: 'wrap',
+          }}
+        >
+          <span style={{ flex: 1 }}>Tip sent — thank you for supporting this creator!</span>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => setTipSuccess(false)}
+            aria-label="Dismiss"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       <p>{video.description}</p>
       <Suspense fallback={null}>
         <VideoTags videoId={video.id} />
@@ -651,6 +826,9 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
+        {id && channelUsername ? (
+          <TipButton videoId={id} creatorUsername={channelUsername} />
+        ) : null}
         {id ? (
           <Suspense fallback={null}>
             <ReportButton targetType="video" targetId={id} />

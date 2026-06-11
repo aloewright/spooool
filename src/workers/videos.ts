@@ -767,13 +767,22 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // Transition the 'uploading' row created at chunk 0 to 'queued' and stamp
   // the authoritative byte count. The WHERE guard mirrors transitionVideoStatus
   // so stale writes land safely.
-  await env.DB.prepare(
+  const { meta } = await env.DB.prepare(
     `UPDATE videos
      SET status = 'queued', bytes = ?, updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND status IN ('uploading', 'queued', 'failed')`,
   )
     .bind(totalBytes, uploadMeta.videoId)
     .run();
+
+  // No matching row means the video was deleted (or the session is corrupt)
+  // while the upload was in flight. Bail out before queueing encoding, fan-out,
+  // or emails so we don't spawn orphaned jobs or send misleading notifications.
+  // The multipart object is already committed above; just clear the session.
+  if (!meta || (meta.changes ?? 0) === 0) {
+    await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+    return c.json({ error: 'Upload session no longer valid.', code: 'upload_session_invalid' }, 409);
+  }
 
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
   await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {

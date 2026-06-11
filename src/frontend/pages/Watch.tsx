@@ -505,7 +505,10 @@ export function Watch(): JSX.Element {
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 2000);
     }
-  }, []);
+    void import('../lib/analytics')
+      .then(({ track }) => track('video_share', { video_id: id ?? '', platform: 'copy_link' }))
+      .catch(() => undefined);
+  }, [id]);
 
   if (error) {
     return (
@@ -684,6 +687,16 @@ export function Watch(): JSX.Element {
               href={l.href}
               target="_blank"
               rel="noopener noreferrer"
+              onClick={() => {
+                void import('../lib/analytics')
+                  .then(({ track }) =>
+                    track('video_share', {
+                      video_id: id ?? '',
+                      platform: l.label.toLowerCase(),
+                    }),
+                  )
+                  .catch(() => undefined);
+              }}
             >
               {l.label}
             </a>

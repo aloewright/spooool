@@ -23,6 +23,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { embedPageRoutes } from './embed-page';
 import {
   AUTH_WRITE_BUCKET,
   clientIp,
@@ -71,6 +72,7 @@ type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv 
   CF_STREAM_WEBHOOK_SECRET?: string;
   POLAR_WEBHOOK_SECRET?: string;
   ALLOWED_ORIGINS?: string;
+  EMAIL_UNSUBSCRIBE_SECRET?: string;
   ADMIN_EMAILS?: string;
   SENTRY_DSN?: string;
   CF_VERSION_METADATA?: { id: string; tag?: string };
@@ -282,10 +284,10 @@ app.route('/', statusRoutes);
 app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
-// /watch/:id is intercepted to inject per-video OG tags before falling
-// through to the SPA HTML (ALO-158). Mounted last so /api/* and other
-// dynamic routes always win.
+// /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
+// relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);
+app.route('/', embedPageRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };
 export { RenderContainer } from './render-container';

@@ -13,6 +13,37 @@ export interface AccountEnv extends AuthEnv {
   VIDEOS: R2Bucket;
   POLAR_CLIENT_ID?: string;
   POLAR_CLIENT_SECRET?: string;
+  EMAIL_UNSUBSCRIBE_SECRET?: string;
+}
+
+// HMAC-SHA256 over "unsub:<userId>:<pref>" — stateless, no DB column needed.
+// The secret is an optional Worker secret; if absent, unsubscribe links are
+// omitted from emails (graceful degradation).
+export async function generateUnsubToken(secret: string, userId: string, pref: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`unsub:${userId}:${pref}`));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+export async function verifyUnsubToken(secret: string, userId: string, pref: string, token: string): Promise<boolean> {
+  const expected = await generateUnsubToken(secret, userId, pref);
+  if (expected.length !== token.length) return false;
+  // Constant-time compare
+  const enc = new TextEncoder();
+  const a = enc.encode(expected);
+  const b = enc.encode(token);
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return diff === 0;
 }
 
 type SessionUser = { id: string; email: string; name: string } | null;
@@ -415,6 +446,45 @@ accountRoutes.post('/api/account/delete/cancel', async (c) => {
     .bind(Date.now(), user.id)
     .run();
   return c.json({ ok: true });
+});
+
+// One-click unsubscribe — linked from notification emails so the recipient
+// can opt out without having to log in. Uses a stateless HMAC token scoped
+// to the userId + preference type so tokens can't be used cross-account.
+accountRoutes.get('/api/account/unsubscribe', async (c) => {
+  const secret = c.env.EMAIL_UNSUBSCRIBE_SECRET;
+  if (!secret) return c.json({ error: 'Unsubscribe not configured' }, 501);
+
+  const uid = c.req.query('uid');
+  const tok = c.req.query('tok');
+  const pref = c.req.query('pref');
+
+  if (!uid || !tok || !pref || !['uploads', 'comments'].includes(pref)) {
+    return c.json({ error: 'Invalid unsubscribe link' }, 400);
+  }
+
+  const valid = await verifyUnsubToken(secret, uid, pref, tok);
+  if (!valid) return c.json({ error: 'Invalid or expired token' }, 400);
+
+  const col = pref === 'uploads' ? 'notify_email_new_upload' : 'notify_email_comments';
+  const result = await c.env.DB.prepare(
+    `UPDATE user SET ${col} = 0, updatedAt = ? WHERE id = ?`,
+  )
+    .bind(Date.now(), uid)
+    .run();
+
+  if (!result.meta.changes) return c.json({ error: 'User not found' }, 404);
+
+  const label = pref === 'uploads' ? 'new upload notifications' : 'comment notifications';
+  return c.html(
+    `<!doctype html><html lang="en"><head><meta charset="utf-8">` +
+    `<title>Unsubscribed — Spooool</title></head><body style="font-family:sans-serif;max-width:480px;margin:4rem auto;padding:0 1rem">` +
+    `<h1 style="font-size:1.5rem">You've been unsubscribed</h1>` +
+    `<p>You'll no longer receive ${label} from Spooool.</p>` +
+    `<p><a href="/settings/account">Manage all notification preferences</a></p>` +
+    `</body></html>`,
+    200,
+  );
 });
 
 export interface CascadeEnv {

@@ -20,5 +20,7 @@ CREATE TABLE IF NOT EXISTS channel_products (
 CREATE INDEX IF NOT EXISTS channel_products_user_active
   ON channel_products (user_id, active);
 
+-- Partial unique index: only ACTIVE links must be unique, so a creator can
+-- re-link a Polar product after a previous link was deactivated (active = 0).
 CREATE UNIQUE INDEX IF NOT EXISTS channel_products_polar_product
-  ON channel_products (polar_product_id);
+  ON channel_products (polar_product_id) WHERE active = 1;

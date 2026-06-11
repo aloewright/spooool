@@ -54,7 +54,10 @@ const membershipSchema = z.object({
 // ---------------------------------------------------------------------------
 
 interface PolarCheckoutBody {
-  product_price_id: string;
+  // Current Polar API takes a `products` array of product IDs (the deprecated
+  // single `product_price_id` field was removed). The first product is selected
+  // by default. https://docs.polar.sh/api-reference/checkouts/create-session
+  products: string[];
   success_url: string;
   amount?: number;
   customer_email?: string;
@@ -162,13 +165,13 @@ monetizeRoutes.post('/api/videos/:id/tip', async (c) => {
 
   // Find the creator's tip product (at most one active per creator).
   const tipProduct = await c.env.DB.prepare(
-    `SELECT id, polar_price_id
+    `SELECT id, polar_product_id
      FROM channel_products
      WHERE user_id = ? AND kind = 'tip' AND active = 1
      LIMIT 1`,
   )
     .bind(video.user_id)
-    .first<{ id: string; polar_price_id: string }>();
+    .first<{ id: string; polar_product_id: string }>();
   if (!tipProduct) {
     return c.json({ error: 'Creator has not configured tipping' }, 422);
   }
@@ -186,7 +189,7 @@ monetizeRoutes.post('/api/videos/:id/tip', async (c) => {
   if (message) metadata.message = message;
 
   const checkoutUrl = await createPolarCheckout(c.env.POLAR_ACCESS_TOKEN, {
-    product_price_id: tipProduct.polar_price_id,
+    products: [tipProduct.polar_product_id],
     success_url: successUrl,
     amount: amount_cents,
     customer_email: user?.email ?? undefined,
@@ -220,15 +223,18 @@ monetizeRoutes.post('/api/channels/:username/membership', async (c) => {
     .bind(username)
     .first<{ id: string; polar_account_status: string | null }>();
   if (!creator) return c.json({ error: 'Channel not found' }, 404);
+  if (creator.polar_account_status !== 'active') {
+    return c.json({ error: 'Creator has not enabled memberships' }, 422);
+  }
 
   // Verify the product belongs to this creator and is active.
   const product = await c.env.DB.prepare(
-    `SELECT id, polar_price_id
+    `SELECT id, polar_product_id
      FROM channel_products
      WHERE id = ? AND user_id = ? AND kind = 'membership' AND active = 1`,
   )
     .bind(product_id, creator.id)
-    .first<{ id: string; polar_price_id: string }>();
+    .first<{ id: string; polar_product_id: string }>();
   if (!product) return c.json({ error: 'Membership tier not found' }, 404);
 
   const origin = new URL(c.req.url).origin;
@@ -242,7 +248,7 @@ monetizeRoutes.post('/api/channels/:username/membership', async (c) => {
   };
 
   const checkoutUrl = await createPolarCheckout(c.env.POLAR_ACCESS_TOKEN, {
-    product_price_id: product.polar_price_id,
+    products: [product.polar_product_id],
     success_url: successUrl,
     customer_email: user?.email ?? undefined,
     metadata,

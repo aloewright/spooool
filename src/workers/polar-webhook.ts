@@ -114,8 +114,10 @@ const polarDataSchema = z
     user_id: z.string().optional(),
     // for payout events: which payout account received the funds
     account_id: z.string().optional(),
-    // metadata we attach when creating checkouts
-    metadata: z.record(z.string(), z.string()).optional(),
+    // metadata we attach when creating checkouts. Polar echoes values back with
+    // their original JSON type (strings, numbers, booleans), so the value schema
+    // must accept all three or validation 400s and Polar retries forever.
+    metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   })
   .passthrough();
 
@@ -282,11 +284,17 @@ async function processEarningsEvent(
     const status = et === 'payout.paid' ? 'paid' : 'pending';
     const paidAt = et === 'payout.paid' ? nowMs : null;
 
+    // Upsert on polar_payout_id: a payout.created lands first as 'pending', then
+    // a later payout.paid for the same payout must advance it to 'paid' (and set
+    // paid_at). INSERT OR IGNORE would drop the second event and leave it stuck.
     await db
       .prepare(
-        `INSERT OR IGNORE INTO creator_payouts
+        `INSERT INTO creator_payouts
            (id, user_id, amount_cents, currency, polar_payout_id, status, paid_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(polar_payout_id) WHERE polar_payout_id IS NOT NULL DO UPDATE SET
+           status = excluded.status,
+           paid_at = COALESCE(excluded.paid_at, paid_at)`,
       )
       .bind(
         crypto.randomUUID(),

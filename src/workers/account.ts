@@ -210,19 +210,26 @@ interface PolarPayoutAccount {
   status: 'created' | 'onboarding_started' | 'onboarding_succeeded' | 'active' | 'under_review' | 'suspended';
 }
 
-async function resolvePolarAccountStatus(accessToken: string): Promise<PolarAccountStatus> {
+async function resolvePolarAccount(
+  accessToken: string,
+): Promise<{ status: PolarAccountStatus; accountId: string | null }> {
   try {
     const res = await fetch(`${POLAR_API_BASE}/v1/accounts`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) return 'pending';
+    if (!res.ok) return { status: 'pending', accountId: null };
     const data = await res.json() as { items?: PolarPayoutAccount[] };
     const accounts = data.items ?? [];
-    if (accounts.some((a) => a.status === 'active')) return 'active';
-    if (accounts.some((a) => a.status === 'under_review')) return 'under_review';
-    return 'pending';
+    // Capture the payout account's id so the Polar payout webhook (which keys on
+    // data.account_id) can match this user — the webhook never receives our
+    // organization id. The id is the same for any lifecycle status, so prefer
+    // the first account regardless of status.
+    const accountId = accounts[0]?.id ?? null;
+    if (accounts.some((a) => a.status === 'active')) return { status: 'active', accountId };
+    if (accounts.some((a) => a.status === 'under_review')) return { status: 'under_review', accountId };
+    return { status: 'pending', accountId };
   } catch {
-    return 'pending';
+    return { status: 'pending', accountId: null };
   }
 }
 
@@ -318,15 +325,15 @@ accountRoutes.get('/api/account/polar/callback', async (c) => {
     return c.redirect('/settings?polar_error=no_organization');
   }
 
-  const accountStatus = await resolvePolarAccountStatus(accessToken);
+  const { status: accountStatus, accountId } = await resolvePolarAccount(accessToken);
 
   await c.env.DB.prepare(
-    `UPDATE user SET polar_organization_id = ?, polar_account_status = ?, updatedAt = ? WHERE id = ?`,
+    `UPDATE user SET polar_organization_id = ?, polar_account_id = ?, polar_account_status = ?, updatedAt = ? WHERE id = ?`,
   )
-    .bind(org.id, accountStatus, Date.now(), userId)
+    .bind(org.id, accountId, accountStatus, Date.now(), userId)
     .run();
 
-  console.log('[polar-partner] connected', { userId, orgId: org.id, accountStatus });
+  console.log('[polar-partner] connected', { userId, orgId: org.id, accountId, accountStatus });
 
   return c.redirect('/settings?polar_connected=1');
 });

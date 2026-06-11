@@ -14,10 +14,17 @@ describe('D1 migrations', () => {
       .filter((f: string) => f.endsWith('.sql'))
       .sort();
     expect(files.length).toBeGreaterThan(0);
-    files.forEach((f: string, i: number) => {
+    // Prefixes must be 4-digit, strictly ascending, and unique. We intentionally
+    // allow gaps so a migration number can be reserved for a sibling PR landing
+    // first (e.g. 0032_query_indexes merges to main ahead of this PR, so
+    // channel_products takes 0033) without forcing a renumber-on-rebase.
+    let prev = 0;
+    files.forEach((f: string) => {
       const prefix = f.split('_')[0];
       expect(prefix).toMatch(/^\d{4}$/);
-      expect(Number(prefix)).toBe(i + 1);
+      const n = Number(prefix);
+      expect(n).toBeGreaterThan(prev);
+      prev = n;
     });
   });
 

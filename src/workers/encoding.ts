@@ -5,6 +5,7 @@ import { getEncoderStub } from './encoder-container';
 export interface SendToStreamEnv {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CF_STREAM_API_TOKEN?: string;
+  R2_BUCKET?: string;
 }
 
 interface EncodingEnv extends SendToStreamEnv {
@@ -34,7 +35,7 @@ export async function sendToStream(env: SendToStreamEnv, r2Key: string): Promise
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        url: `r2://${r2Key}`,
+        url: `r2://${env.R2_BUCKET ?? 'spooool-videos'}/${r2Key}`,
         requireSignedURLs: false,
       }),
     },

@@ -113,7 +113,7 @@ videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async
      LEFT JOIN user u ON u.id = v.user_id
      LEFT JOIN views ON views.video_id = v.id
        AND views.viewed_at >= datetime('now', '-7 days')
-     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL
+     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.status != 'uploading'
      GROUP BY v.id
      ORDER BY recent_views DESC, v.view_count DESC, v.created_at DESC
      LIMIT ?`,
@@ -140,7 +140,7 @@ videoRoutes.get('/api/videos', edgeCache({ ttl: 30, swr: 60 }), async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT id, user_id, title, description, r2_key, stream_video_id, status, view_count, created_at, updated_at
      FROM videos
-     WHERE deleted_at IS NULL AND hidden_at IS NULL
+     WHERE deleted_at IS NULL AND hidden_at IS NULL AND status != 'uploading'
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`,
   )
@@ -667,6 +667,16 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
     const firstPart = await multipart.uploadPart(1, rawFile.stream());
 
+    // Create the DB row immediately so the client can poll status before the
+    // upload completes. bytes=0 here; updated to the real total at completion.
+    // status='uploading' keeps this row out of public video lists.
+    await env.DB.prepare(
+      `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 0, 'uploading', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+    )
+      .bind(videoId, user.id, metadataParsed.data.title, metadataParsed.data.description, r2Key)
+      .run();
+
     await env.SESSIONS.put(mpidKey, multipart.uploadId, { expirationTtl: 86400 });
     await env.SESSIONS.put(
       metaKey,
@@ -687,7 +697,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       >),
       { expirationTtl: 86400 },
     );
-    return c.json({ status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId }, 202);
+    return c.json({ status: 'chunk_received', chunkIndex, chunkCount, uploadId: resolvedUploadId, videoId }, 202);
   }
 
   const [multipartUploadId, uploadMetaJson, partsJson] = await Promise.all([
@@ -756,20 +766,25 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
   await multipart.complete(completedParts);
 
-  await env.DB.prepare(
-    `INSERT INTO videos (id, user_id, title, description, r2_key, bytes, status, view_count, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+  // Transition the 'uploading' row created at chunk 0 to 'queued' and stamp
+  // the authoritative byte count. The WHERE guard mirrors transitionVideoStatus
+  // so stale writes land safely.
+  const { meta } = await env.DB.prepare(
+    `UPDATE videos
+     SET status = 'queued', bytes = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND status IN ('uploading', 'queued', 'failed')`,
   )
-    .bind(
-      uploadMeta.videoId,
-      user.id,
-      uploadMeta.title,
-      uploadMeta.description,
-      uploadMeta.r2Key,
-      totalBytes,
-      'queued',
-    )
+    .bind(totalBytes, uploadMeta.videoId)
     .run();
+
+  // No matching row means the video was deleted (or the session is corrupt)
+  // while the upload was in flight. Bail out before queueing encoding, fan-out,
+  // or emails so we don't spawn orphaned jobs or send misleading notifications.
+  // The multipart object is already committed above; just clear the session.
+  if (!meta || (meta.changes ?? 0) === 0) {
+    await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+    return c.json({ error: 'Upload session no longer valid.', code: 'upload_session_invalid' }, 409);
+  }
 
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
   await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {

@@ -42,6 +42,16 @@ A video host that respects your time. Built **entirely on Cloudflare infrastruct
 | **D1** | Video metadata, user data, playlists | Free tier (500k reads/writes) |
 | **Durable Objects** | Session management, rate limiting, real-time features | $0.15/million ops |
 | **KV** | Cache layer, temporary uploads | Free tier (100k reads/day) |
+| **AI Gateway** | Gateway-backed comment spam classifier (`dynamic/text_gen`) | Usage-based |
+
+### Comment Spam Filtering
+
+Comment moderation runs as two sequential layers:
+
+1. **Deterministic pre-filter** (`isLikelySpam`) — synchronous, free, fast. Catches empty bodies, link floods (>3 URLs), ALL-CAPS shouting, and character floods.
+2. **AI Gateway classifier** (`scoreCommentWithAi`) — catches subtle phishing, AI-written promotional copypasta, and off-topic advertising that slip past the deterministic rules.
+
+The AI layer calls the `AI` Workers binding with `model: "dynamic/text_gen"` routed through AI Gateway for observability and cost control. If the `AI` binding is absent, it falls back to the AI Gateway HTTP endpoint using `CF_ACCOUNT_ID` and `CF_AIG_TOKEN` secrets. Both paths are gated — if neither is configured, or if the gateway returns an error, the comment is allowed through (fail-open) so infra failures never penalize users.
 
 ### Alternative: R2-Only Path (No Stream Cost)
 

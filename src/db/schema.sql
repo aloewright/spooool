@@ -212,8 +212,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_browse
   WHERE deleted_at IS NULL AND hidden_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_comments_replies
-  ON comments(parent_comment_id, created_at ASC)
-  WHERE deleted_at IS NULL;
+  ON comments(parent_comment_id, deleted_at, created_at ASC);
 
 CREATE INDEX IF NOT EXISTS idx_generated_assets_user_kind_status
   ON generated_assets(user_id, kind, status);
@@ -221,3 +220,9 @@ CREATE INDEX IF NOT EXISTS idx_generated_assets_user_kind_status
 CREATE INDEX IF NOT EXISTS idx_inbox_unseen
   ON subscription_inbox(subscriber_user_id, added_at DESC)
   WHERE seen_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_comments_top_level
+  ON comments(video_id, parent_comment_id, deleted_at, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_videos_user_feed
+  ON videos(user_id, deleted_at, hidden_at, dmca_status, created_at DESC);

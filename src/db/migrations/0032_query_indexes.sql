@@ -12,14 +12,14 @@ CREATE INDEX IF NOT EXISTS idx_videos_browse
   WHERE deleted_at IS NULL AND hidden_at IS NULL;
 
 -- idx_comments_replies — reply fetch + reply_count correlated subquery in comments.ts
---   WHERE parent_comment_id = ? AND deleted_at IS NULL ORDER BY created_at ASC
+--   WHERE parent_comment_id IN (...) AND deleted_at IS NULL ORDER BY created_at ASC
 --   WHERE parent_comment_id = c.id AND deleted_at IS NULL (correlated subquery)
 --   The existing idx_comments_parent_id covers parent_comment_id alone, forcing a
---   post-filter for deleted_at and a separate sort on created_at. The compound
---   partial index lets SQLite seek to parent + alive rows in chronological order.
+--   post-filter for deleted_at. A compound index with deleted_at as the second key
+--   gives the planner two seek constraints, so it wins over idx_comments_parent_id
+--   for IN-list fetches too (a partial index loses that contest without ANALYZE).
 CREATE INDEX IF NOT EXISTS idx_comments_replies
-  ON comments(parent_comment_id, created_at ASC)
-  WHERE deleted_at IS NULL;
+  ON comments(parent_comment_id, deleted_at, created_at ASC);
 
 -- idx_generated_assets_user_kind_status — studio asset lookup in studio.ts
 --   WHERE user_id = ? AND kind = 'image' AND status = 'ready'
@@ -37,3 +37,26 @@ CREATE INDEX IF NOT EXISTS idx_generated_assets_user_kind_status
 CREATE INDEX IF NOT EXISTS idx_inbox_unseen
   ON subscription_inbox(subscriber_user_id, added_at DESC)
   WHERE seen_at IS NULL;
+
+-- Performance indexes for frequently-filtered queries (ALO-perf-2)
+--
+-- idx_comments_top_level: covers the top-level comment listing query in comments.ts.
+--   WHERE video_id = ? AND parent_comment_id IS NULL AND deleted_at IS NULL
+--   ORDER BY created_at DESC LIMIT ? OFFSET ?
+--   The existing idx_comments_video_created is (video_id, created_at DESC) and does not
+--   include parent_comment_id, so SQLite re-filters parent_comment_id IS NULL on every
+--   row returned by that index. Adding parent_comment_id as the second column lets the
+--   planner seek directly to top-level (NULL) rows and walk created_at in order.
+CREATE INDEX IF NOT EXISTS idx_comments_top_level
+  ON comments(video_id, parent_comment_id, deleted_at, created_at DESC);
+
+-- idx_videos_user_feed: covers spoooolChannelItems in feeds.ts.
+--   WHERE user_id = ? AND deleted_at IS NULL AND hidden_at IS NULL
+--     AND dmca_status IS NULL ORDER BY created_at DESC LIMIT ?
+--   The existing idx_videos_channel_ready is (user_id, status, deleted_at, hidden_at,
+--   created_at DESC). The feed query does NOT filter on status, so after the user_id
+--   equality seek SQLite must scan rows for every status and re-filter. This index
+--   skips status entirely and lets the planner seek directly to visible rows and walk
+--   created_at without a post-sort.
+CREATE INDEX IF NOT EXISTS idx_videos_user_feed
+  ON videos(user_id, deleted_at, hidden_at, dmca_status, created_at DESC);

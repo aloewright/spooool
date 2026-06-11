@@ -1,7 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
-import { purgeEdgeCache } from './edge-cache';
 import { triggerFanOut } from './channel-do';
 import { sendNewUploadEmails } from './notification-email';
 import { waitUntilBackground } from './wait-until';
@@ -18,6 +17,7 @@ import {
   validateMagicBytes,
 } from './upload-validation';
 import { verifyTurnstile, type TurnstileEnv } from './turnstile';
+import { edgeCache, purgeEdgeCache } from './edge-cache';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
@@ -90,7 +90,7 @@ export const videoRoutes = new Hono<{
   Variables: VideoRoutesVariables;
 }>();
 
-videoRoutes.get('/api/videos/trending', async (c) => {
+videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 3600 }), async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);
@@ -128,7 +128,7 @@ videoRoutes.get('/api/videos/trending', async (c) => {
   return c.json({ limit, videos: results, cached: false });
 });
 
-videoRoutes.get('/api/videos', async (c) => {
+videoRoutes.get('/api/videos', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const parsed = listVideosQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);
@@ -823,6 +823,10 @@ videoRoutes.delete('/api/videos/:id', async (c) => {
     [`/api/videos/${id}/related`, `/api/videos/${id}/tags`, '/api/videos/trending', '/api/tags'],
     new URL(c.req.url).origin,
   );
+
+  // Purge edge-cached listing pages so the deleted video disappears promptly.
+  const origin = new URL(c.req.url).origin;
+  purgeEdgeCache(c, `${origin}/api/videos`, `${origin}/api/videos/trending`);
 
   return c.json({ success: true });
 });

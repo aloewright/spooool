@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
-import { purgeEdgeCache } from './edge-cache';
+import { edgeCache, purgeEdgeCache } from './edge-cache';
 
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_IMAGE_EXT: Record<string, string> = {
@@ -113,8 +113,14 @@ userRoutes.put('/api/users/me', async (c) => {
     .first<UserProfileRow>();
 
   if (refreshed?.username) {
-    await purgeEdgeCache([`/api/channels/${refreshed.username}`], new URL(c.req.url).origin);
+    const origin = new URL(c.req.url).origin;
+    purgeEdgeCache(
+      c,
+      `${origin}/api/channels/${refreshed.username}`,
+      `${origin}/api/channels/${refreshed.username}/videos`,
+    );
   }
+
   return c.json(refreshed);
 });
 
@@ -149,18 +155,19 @@ async function uploadProfileImage(
   url.search = '';
   const publicUrl = url.toString();
 
-  await c.env.DB.prepare(
-    `UPDATE user SET ${column} = ?, updatedAt = ? WHERE id = ?`,
+  const updated = await c.env.DB.prepare(
+    `UPDATE user SET ${column} = ?, updatedAt = ? WHERE id = ? RETURNING username`,
   )
     .bind(publicUrl, Date.now(), user.id)
-    .run();
-
-  // Purge the channel profile page — avatar/banner change is visible there.
-  const usernameRow = await c.env.DB.prepare('SELECT username FROM user WHERE id = ?')
-    .bind(user.id)
     .first<{ username: string | null }>();
-  if (usernameRow?.username) {
-    await purgeEdgeCache([`/api/channels/${usernameRow.username}`], new URL(c.req.url).origin);
+
+  if (updated?.username) {
+    const origin = new URL(c.req.url).origin;
+    purgeEdgeCache(
+      c,
+      `${origin}/api/channels/${updated.username}`,
+      `${origin}/api/channels/${updated.username}/videos`,
+    );
   }
 
   return c.json({ url: publicUrl }, 201);
@@ -198,9 +205,9 @@ async function serveProfileImage(
   });
 }
 
-userRoutes.get('/api/users/avatars/:userId/:objectName', (c) =>
+userRoutes.get('/api/users/avatars/:userId/:objectName', edgeCache({ ttl: 31536000 }), (c) =>
   serveProfileImage(c, 'avatars'),
 );
-userRoutes.get('/api/users/banners/:userId/:objectName', (c) =>
+userRoutes.get('/api/users/banners/:userId/:objectName', edgeCache({ ttl: 31536000 }), (c) =>
   serveProfileImage(c, 'banners'),
 );

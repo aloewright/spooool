@@ -23,13 +23,21 @@ export function Embed(): JSX.Element {
       setError('Missing video ID');
       return;
     }
+    let ignore = false;
     void fetch(`/api/videos/${id}`)
       .then(async (r) => {
         if (!r.ok) throw new Error('Video not found');
         return (await r.json()) as VideoResponse;
       })
-      .then(setVideo)
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Error'));
+      .then((v) => {
+        if (!ignore) setVideo(v);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setError(err instanceof Error ? err.message : 'Error');
+      });
+    return () => {
+      ignore = true;
+    };
   }, [id]);
 
   const handlePlayerReady = useCallback((p: Player): void => {

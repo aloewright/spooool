@@ -724,12 +724,18 @@ export default function App(): JSX.Element {
   const splash = useSplash();
 
   // Embed pages render as a bare player with no app shell so they can be
-  // iframed into third-party sites without nav chrome.
+  // iframed into third-party sites without nav chrome. They still go through
+  // React Router (so Embed's useParams() resolves :id) and MantineProvider,
+  // but skip the header/nav/footer shell.
   if (location.pathname.startsWith('/embed/')) {
     return (
-      <Suspense fallback={<div style={{ background: '#000', height: '100dvh' }} />}>
-        <Embed />
-      </Suspense>
+      <MantineProvider>
+        <Suspense fallback={<div style={{ background: '#000', height: '100dvh' }} />}>
+          <Routes>
+            <Route path="/embed/:id" element={<Embed />} />
+          </Routes>
+        </Suspense>
+      </MantineProvider>
     );
   }
 

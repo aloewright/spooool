@@ -20,8 +20,10 @@ embedPageRoutes.get('/embed/:id', async (c) => {
   const assetRes = await c.env.ASSETS.fetch(assetReq);
   // If the asset binding can't serve the SPA shell, fall through to a 404
   // rather than erroring — the viewer sees nothing and no exception is thrown.
+  // Wrap in a fresh Response so its headers stay mutable: the fetched response
+  // has immutable headers and the securityHeaders() middleware mutates c.res.
   if (!assetRes.ok || !assetRes.headers.get('content-type')?.includes('text/html')) {
-    return assetRes;
+    return new Response(assetRes.body, assetRes);
   }
   // Return a mutable copy so the securityHeaders() middleware can set the
   // embed-friendly headers on this response object.

@@ -14,6 +14,7 @@ import {
   gatewayChat,
   gatewayImage,
   gatewayTranscription,
+  DEFAULT_CHAT_MODEL,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_STT_MODEL,
   type AiGatewayEnv,
@@ -279,10 +280,13 @@ const metadataOutputSchema = z.object({
   chapters: z.array(z.object({
     startSeconds: z.number().nonnegative(),
     title: z.string().max(100),
-  })).max(20),
+  })).max(20).optional().default([]),
 });
 
-export type VideoMetadata = z.infer<typeof metadataOutputSchema>;
+// Use z.input (not z.infer/z.output): @tanstack/ai's chat() infers its return
+// from the schema's INPUT type, where chapters is optional (.default([]) only
+// fills it at parse time). Matching that keeps `metadata` assignable.
+export type VideoMetadata = z.input<typeof metadataOutputSchema>;
 
 const METADATA_SYSTEM_PROMPT =
   "You are a video metadata expert. Given context about a video, generate SEO-optimised metadata. " +
@@ -340,7 +344,7 @@ studioRoutes.post('/api/studio/metadata', async (c) => {
   const now = Date.now();
   const specJson = JSON.stringify({
     videoId: video.id,
-    model: '@cf/google/gemma-4-26b-a4b-it',
+    model: DEFAULT_CHAT_MODEL,
     metadata,
   });
 
@@ -353,7 +357,7 @@ studioRoutes.post('/api/studio/metadata', async (c) => {
       userId: user.id,
       op: 'metadata_gen',
       route: 'dynamic/text_gen',
-      model: '@cf/google/gemma-4-26b-a4b-it',
+      model: DEFAULT_CHAT_MODEL,
       units: METADATA_TOKENS_ESTIMATE,
       unitKind: 'tokens',
       estUsd: EST_USD_PER_METADATA,

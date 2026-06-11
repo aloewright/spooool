@@ -115,7 +115,7 @@ const polarDataSchema = z
     // for payout events: which payout account received the funds
     account_id: z.string().optional(),
     // metadata we attach when creating checkouts
-    metadata: z.record(z.string()).optional(),
+    metadata: z.record(z.string(), z.string()).optional(),
   })
   .passthrough();
 

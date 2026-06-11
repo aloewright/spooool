@@ -103,3 +103,30 @@ export async function setThumbnailFromAsset(
   await throwIfNotOk(res, route);
   return (await res.json()) as { thumbnail_url: string };
 }
+
+export interface VideoChapter {
+  startSeconds: number;
+  title: string;
+}
+
+export interface GeneratedMetadata {
+  assetId: string;
+  title: string;
+  description: string;
+  tags: string[];
+  chapters: VideoChapter[];
+}
+
+export async function generateMetadata(
+  videoId: string,
+  opts: { projectId?: string; additionalContext?: string } = {},
+): Promise<GeneratedMetadata> {
+  const route = '/api/studio/metadata';
+  const res = await timedFetch(route, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ videoId, ...opts }),
+  });
+  await throwIfNotOk(res, route);
+  return (await res.json()) as GeneratedMetadata;
+}

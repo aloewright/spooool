@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { purgeTrendingEdgeCache } from './edge-cache';
+import { bumpTrendingCacheVersion } from './trending-cache';
+import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
@@ -9,6 +12,7 @@ import { handleEncodingMessage } from './encoding';
 import { transitionVideoStatus } from './video-status';
 import { handleAiGenMessage } from './ai-video-consumer';
 import { createAuth, type AuthEnv } from '../auth';
+import { canonicalHostRedirect } from './canonical-host';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
@@ -102,6 +106,17 @@ type Variables = {
 
 const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
 
+// First thing on every request: funnel alias hosts (www, the auth custom
+// domain, etc.) to the canonical origin. OAuth state/session cookies are
+// host-scoped, so a sign-in that starts on spooool.com but whose callback
+// lands on another host loses the better-auth state cookie and fails with
+// ?error=state_mismatch. GET/HEAD only, so webhook POSTs are untouched.
+app.use('*', async (c, next) => {
+  const redirect = canonicalHostRedirect(c.req.raw);
+  if (redirect) return redirect;
+  return next();
+});
+
 app.use('*', securityHeaders());
 app.use('*', cors({ origin: (origin) => origin, credentials: true }));
 
@@ -157,6 +172,11 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   )
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
+
+  // Invalidate caches: the video is now ready with a thumbnail, so both the
+  // trending list and any cached video-metadata KV entries are stale.
+  waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  purgeTrendingEdgeCache(c);
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });
@@ -321,6 +341,20 @@ const workerHandlers = {
           // Daily 02:00 UTC heavy sweeps
           // ALO-132: hard-delete users whose 30-day grace window has elapsed.
           // The cron is configured in wrangler.toml under [triggers] crons.
+
+          // Clean up DB rows left in `uploading` state by uploads that never
+          // finished (KV session TTL is 24h, so anything older than 25h is
+          // definitively abandoned and will never transition to queued).
+          const { meta: uploadCleanupMeta } = await env.DB.prepare(
+            `DELETE FROM videos
+             WHERE status = 'uploading'
+               AND updated_at < datetime('now', '-25 hours')`,
+          ).run();
+          const abandonedUploads = (uploadCleanupMeta?.changes as number | undefined) ?? 0;
+          if (abandonedUploads > 0) {
+            console.log('[upload-cleanup]', { abandoned: abandonedUploads });
+          }
+
           const stats = await runDeletionSweep(env);
           if (stats.length > 0) {
             console.log('[deletion-sweep]', { cron: controller.cron, deleted: stats });

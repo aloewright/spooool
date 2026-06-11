@@ -1,0 +1,124 @@
+name: D1 backup · weekly
+
+# ALO-175: automated counterpart to docs/runbooks/d1-backup-restore.md.
+# Runs every Sunday at 03:00 UTC — well outside any expected deploy window.
+# Also triggerable on demand via workflow_dispatch for ad-hoc backups
+# (e.g. before a risky migration).
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Which database to back up
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+
+concurrency:
+  group: d1-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Export D1 → R2
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Pull Cloudflare credentials (CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID)
+      # from Doppler so we don't need them as raw GitHub secrets.
+      - name: Check Doppler credentials
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          if [ -z "$DOPPLER_TOKEN" ]; then
+            echo "::error ::D1 backup requires DOPPLER_TOKEN_PROD (Doppler service token scoped to spooool/production)."
+            exit 1
+          fi
+
+      - name: Hydrate Cloudflare env from Doppler
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+
+      - name: Export D1 to local SQL file
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          TS=$(date -u +%Y%m%d-%H%M%S)
+          echo "BACKUP_TS=${TS}" >> "$GITHUB_ENV"
+          npx wrangler d1 export spooool-prod \
+            --remote \
+            --output "/tmp/d1-${TS}.sql"
+          echo "BACKUP_FILE=/tmp/d1-${TS}.sql" >> "$GITHUB_ENV"
+
+      - name: Verify export is non-empty
+        run: |
+          LINES=$(wc -l < "$BACKUP_FILE")
+          echo "Export line count: ${LINES}"
+          if [ "$LINES" -lt 50 ]; then
+            echo "::error ::Backup file suspiciously small (${LINES} lines). Aborting upload."
+            exit 1
+          fi
+
+      - name: Upload to R2
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          npx wrangler r2 object put \
+            "spooool-backups/d1/spooool-prod-${BACKUP_TS}.sql" \
+            --file "$BACKUP_FILE"
+
+      - name: Verify R2 upload
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          npx wrangler r2 object head \
+            "spooool-backups/d1/spooool-prod-${BACKUP_TS}.sql"
+          echo "::notice ::Backup verified: spooool-backups/d1/spooool-prod-${BACKUP_TS}.sql"
+
+      - name: Prune old backups (keep latest 8 weekly + 4 monthly)
+        # Best-effort: list all backup objects and delete anything beyond the
+        # retention window. Failures here are non-fatal — the new backup is
+        # already written and verified.
+        continue-on-error: true
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          # List all weekly backups sorted oldest-first and delete beyond 8.
+          npx wrangler r2 object list spooool-backups \
+            --prefix "d1/spooool-prod-" \
+            --json 2>/dev/null | \
+            node -e "
+              const objects = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+              const sorted = objects
+                .filter(o => o.key.includes('spooool-prod-'))
+                .sort((a,b) => a.key.localeCompare(b.key));
+              const toDelete = sorted.slice(0, Math.max(0, sorted.length - 8));
+              toDelete.forEach(o => console.log(o.key));
+            " | while read -r KEY; do
+              echo "Pruning old backup: ${KEY}"
+              npx wrangler r2 object delete "spooool-backups/${KEY}" || true
+            done

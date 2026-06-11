@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { edgeCache } from './edge-cache';
 
 export interface ChannelEnv {
   DB: D1Database;
@@ -26,7 +27,7 @@ interface ChannelHeaderRow {
 
 export const channelRoutes = new Hono<{ Bindings: ChannelEnv }>();
 
-channelRoutes.get('/api/channels/:username', async (c) => {
+channelRoutes.get('/api/channels/:username', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const username = c.req.param('username');
   const header = await c.env.DB.prepare(
     `SELECT u.id, u.email, u.name, u.username, u.displayName, u.bio, u.avatarUrl, u.bannerUrl,
@@ -53,7 +54,7 @@ channelRoutes.get('/api/channels/:username', async (c) => {
   });
 });
 
-channelRoutes.get('/api/channels/:username/videos', async (c) => {
+channelRoutes.get('/api/channels/:username/videos', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const username = c.req.param('username');
   const parsed = pageQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {

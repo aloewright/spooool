@@ -13,6 +13,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { purgeEdgeCache } from './edge-cache';
 
 export interface TagsEnv {
   DB: D1Database;
@@ -189,6 +190,10 @@ tagRoutes.put('/api/videos/:id/tags', async (c) => {
     );
   }
   await c.env.DB.batch(stmts);
+
+  // Purge the video's tag list and the global top-tags list from the edge cache.
+  const origin = new URL(c.req.url).origin;
+  purgeEdgeCache(c, `${origin}/api/videos/${id}/tags`, `${origin}/api/tags`);
 
   return c.json({ tags });
 });

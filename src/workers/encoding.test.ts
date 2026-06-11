@@ -127,7 +127,7 @@ describe('handleEncodingMessage', () => {
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer tok');
     expect(JSON.parse(init.body as string)).toEqual({
-      url: 'r2://videos/v1.mp4',
+      url: 'r2://spooool-videos/videos/v1.mp4',
       requireSignedURLs: false,
     });
 

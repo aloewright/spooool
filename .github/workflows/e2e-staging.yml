@@ -1,0 +1,68 @@
+name: E2E · staging
+
+# ALO-173 / ALO-E7: Run Playwright E2E against the live staging deployment
+# after each successful push to main. This is the staging gate referenced in
+# playwright.config.ts — PLAYWRIGHT_BASE_URL is set to the staging worker URL
+# so the dev server is NOT started; tests hit the real deployed environment.
+#
+# The workflow also runs on workflow_dispatch so it can be triggered manually
+# before a production deploy to confirm staging is healthy.
+
+on:
+  workflow_run:
+    workflows: ['Deploy · staging']
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-staging
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Playwright (staging)
+    # Only run after a successful staging deploy (not on failure).
+    # workflow_dispatch always runs.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: staging
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          # For workflow_run events, test the exact SHA that was deployed to
+          # staging rather than whatever HEAD happens to be. Falls back to
+          # github.sha for workflow_dispatch runs (no head_sha available).
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      - name: Run E2E tests against staging
+        env:
+          # Set this GitHub secret to the deployed staging URL, e.g.
+          # https://spooool-staging.<account>.workers.dev
+          PLAYWRIGHT_BASE_URL: ${{ secrets.PLAYWRIGHT_STAGING_URL }}
+        run: npx playwright test --project=chromium
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: playwright-report/
+          retention-days: 14

@@ -1,11 +1,35 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BULK_SECRET_LIMIT,
+  chunk,
   NEVER_SYNC_TO_WORKER,
   parseArgs,
   partition,
   quoteForDotenv,
   shellQuote,
 } from './sync-doppler-secrets.mjs';
+
+describe('chunk', () => {
+  it('splits into batches no larger than the size', () => {
+    const items = Array.from({ length: 223 }, (_, i) => `K${i}`);
+    const batches = chunk(items, BULK_SECRET_LIMIT);
+    expect(batches.length).toBe(3); // 90 + 90 + 43 for 223 at limit 90
+    expect(batches.every((b) => b.length <= BULK_SECRET_LIMIT)).toBe(true);
+    expect(batches.flat()).toEqual(items); // lossless, order preserved
+  });
+
+  it('stays at or below the Cloudflare 100-per-request cap', () => {
+    expect(BULK_SECRET_LIMIT).toBeLessThanOrEqual(100);
+  });
+
+  it('returns a single batch when under the limit', () => {
+    expect(chunk(['A', 'B'], BULK_SECRET_LIMIT)).toEqual([['A', 'B']]);
+  });
+
+  it('returns no batches for an empty list', () => {
+    expect(chunk([], BULK_SECRET_LIMIT)).toEqual([]);
+  });
+});
 
 describe('parseArgs', () => {
   it('extracts the subcommand', () => {

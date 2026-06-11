@@ -60,16 +60,23 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Sync worker secrets from Doppler
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
-        run: |
-          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
-          node scripts/sync-doppler-secrets.mjs sync-worker-secrets
-
+      # Deploy BEFORE syncing secrets. The Workers Builds CI integration uploads
+      # new (undeployed) Worker *versions* on every push, so by deploy time the
+      # "latest version" usually isn't the deployed one. Cloudflare then rejects
+      # `wrangler secret bulk` with code 10215 ("the latest version isn't
+      # currently deployed"). Running `wrangler deploy` first makes latest ==
+      # deployed, after which the secret sync is allowed. Secrets already on the
+      # worker carry the previous deploy, so deploying first never runs secretless.
       - name: Deploy worker (production)
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
         run: |
           eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
           npx wrangler deploy
+
+      - name: Sync worker secrets from Doppler
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          node scripts/sync-doppler-secrets.mjs sync-worker-secrets

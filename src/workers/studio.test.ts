@@ -22,7 +22,7 @@ vi.mock('@tanstack/ai', async (orig) => {
   };
 });
 
-import { generateImage } from '@tanstack/ai';
+import { generateImage, chat } from '@tanstack/ai';
 import { studioRoutes } from './studio';
 
 // Convenience alias — vi.mocked gives us typed access to the mock
@@ -753,5 +753,113 @@ describe('POST /api/studio/captions (ALO-648)', () => {
       { startFrames: 30, endFrames: 60, text: 'world' },
     ]);
     expect(body.assetId).toMatch(/^a_/);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// Metadata tests (ALO-649)
+// ────────────────────────────────────────────────────────────
+describe('POST /api/studio/metadata (ALO-649)', () => {
+  const metadataUser = { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true };
+
+  const SAMPLE_METADATA = {
+    title: 'How to Build a Video Platform',
+    description: 'A concise guide to building a video platform on Cloudflare.',
+    tags: ['cloudflare', 'video', 'workers'],
+    chapters: [{ startSeconds: 0, title: 'Introduction' }],
+  };
+
+  const mockChat = vi.mocked(chat);
+
+  function postMetadata(
+    user: typeof metadataUser | null,
+    body: unknown,
+    dbOverrides: Record<string, unknown> = {},
+  ) {
+    const db = makeDbStub({ videoRow: { id: 'v1', user_id: 'u1', title: 'My video', description: 'Cool video' }, ...dbOverrides });
+    const videos = makeVideosStub();
+    const app = new Hono<{ Variables: { user: typeof metadataUser | null } }>();
+    app.use('*', async (c, next) => { c.set('user', user); await next(); });
+    app.route('/', studioRoutes);
+    const base = {
+      AI: { gateway: () => ({ run: async () => new Response('') }), run: async () => ({}) },
+      DB: db,
+      VIDEOS: videos,
+      RATE_LIMITER: undefined,
+    };
+    return { res: app.request('/api/studio/metadata', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }, base), db };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: chat resolves to SAMPLE_METADATA when called with outputSchema.
+    mockChat.mockResolvedValue(SAMPLE_METADATA as unknown as never);
+  });
+
+  it('returns 401 without a session', async () => {
+    const { res } = postMetadata(null, { videoId: 'v1' });
+    expect((await res).status).toBe(401);
+  });
+
+  it('returns 403 when email not verified', async () => {
+    const { res } = postMetadata({ ...metadataUser, emailVerified: false }, { videoId: 'v1' });
+    expect((await res).status).toBe(403);
+  });
+
+  it('returns 400 on invalid body (missing videoId)', async () => {
+    const { res } = postMetadata(metadataUser, {});
+    expect((await res).status).toBe(400);
+  });
+
+  it('returns 404 when video is not found', async () => {
+    const { res } = postMetadata(metadataUser, { videoId: 'missing' }, { videoRow: null });
+    expect((await res).status).toBe(404);
+  });
+
+  it('returns 403 when video belongs to another user', async () => {
+    const { res } = postMetadata(
+      { ...metadataUser, id: 'u_other' },
+      { videoId: 'v1' },
+    );
+    // The video row has user_id='u1'; the requester is 'u_other'
+    expect((await res).status).toBe(403);
+  });
+
+  it('returns 201 with structured metadata and stores generated_asset + ai_cost', async () => {
+    const { res, db } = postMetadata(metadataUser, { videoId: 'v1' });
+    const response = await res;
+    expect(response.status).toBe(201);
+
+    const body = await response.json() as { assetId: string; title: string; description: string; tags: string[]; chapters: Array<{ startSeconds: number; title: string }> };
+    expect(body.assetId).toMatch(/^a_/);
+    expect(body.title).toBe(SAMPLE_METADATA.title);
+    expect(body.description).toBe(SAMPLE_METADATA.description);
+    expect(body.tags).toEqual(SAMPLE_METADATA.tags);
+    expect(body.chapters).toEqual(SAMPLE_METADATA.chapters);
+
+    // chat must be called once with the outputSchema and the video context
+    expect(mockChat).toHaveBeenCalledOnce();
+    const [chatArg] = mockChat.mock.calls[0];
+    expect((chatArg as Record<string, unknown>).outputSchema).toBeDefined();
+    const msgs = (chatArg as { messages: Array<{ role: string; content: string }> }).messages;
+    expect(msgs.some((m) => m.content.includes('My video'))).toBe(true);
+
+    // DB.batch must be called once to write generated_assets + ai_costs
+    expect((db as { _batchCalls: unknown[][] })._batchCalls).toHaveLength(1);
+  });
+
+  it('returns 502 when chat throws', async () => {
+    mockChat.mockRejectedValueOnce(new Error('model error'));
+    const { res } = postMetadata(metadataUser, { videoId: 'v1' });
+    expect((await res).status).toBe(502);
+  });
+
+  it('returns 429 at the daily gen cap', async () => {
+    const { res } = postMetadata(metadataUser, { videoId: 'v1' }, { aiCostsCount: { n: 50 } });
+    expect((await res).status).toBe(429);
   });
 });

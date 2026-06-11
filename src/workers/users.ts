@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { edgeCache, purgeEdgeCache } from './edge-cache';
 
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_IMAGE_EXT: Record<string, string> = {
@@ -62,6 +63,8 @@ userRoutes.get('/api/users/me', async (c) => {
     .bind(user.id)
     .first<UserProfileRow>();
   if (!row) return c.json({ error: 'User not found' }, 404);
+  // Per-user data — must never be shared across users in an edge cache.
+  c.header('Cache-Control', 'private, no-store');
   return c.json(row);
 });
 
@@ -110,6 +113,16 @@ userRoutes.put('/api/users/me', async (c) => {
   )
     .bind(user.id)
     .first<UserProfileRow>();
+
+  if (refreshed?.username) {
+    const origin = new URL(c.req.url).origin;
+    purgeEdgeCache(
+      c,
+      `${origin}/api/channels/${refreshed.username}`,
+      `${origin}/api/channels/${refreshed.username}/videos`,
+    );
+  }
+
   return c.json(refreshed);
 });
 
@@ -144,11 +157,20 @@ async function uploadProfileImage(
   url.search = '';
   const publicUrl = url.toString();
 
-  await c.env.DB.prepare(
-    `UPDATE user SET ${column} = ?, updatedAt = ? WHERE id = ?`,
+  const updated = await c.env.DB.prepare(
+    `UPDATE user SET ${column} = ?, updatedAt = ? WHERE id = ? RETURNING username`,
   )
     .bind(publicUrl, Date.now(), user.id)
-    .run();
+    .first<{ username: string | null }>();
+
+  if (updated?.username) {
+    const origin = new URL(c.req.url).origin;
+    purgeEdgeCache(
+      c,
+      `${origin}/api/channels/${updated.username}`,
+      `${origin}/api/channels/${updated.username}/videos`,
+    );
+  }
 
   return c.json({ url: publicUrl }, 201);
 }
@@ -185,9 +207,15 @@ async function serveProfileImage(
   });
 }
 
-userRoutes.get('/api/users/avatars/:userId/:objectName', (c) =>
+// Avatar and banner images are served from R2 using UUID-based object names
+// (content-addressed). They are immutable once uploaded — no invalidation path
+// is needed. The Cache API stores them at the edge so repeated requests skip
+// the Worker and R2 round-trip entirely.
+const immutableImageCache = edgeCache({ ttl: 31536000, immutable: true });
+
+userRoutes.get('/api/users/avatars/:userId/:objectName', immutableImageCache, (c) =>
   serveProfileImage(c, 'avatars'),
 );
-userRoutes.get('/api/users/banners/:userId/:objectName', (c) =>
+userRoutes.get('/api/users/banners/:userId/:objectName', immutableImageCache, (c) =>
   serveProfileImage(c, 'banners'),
 );

@@ -34,26 +34,29 @@ export const subscriptionRoutes = new Hono<{
 
 subscriptionRoutes.get('/api/channels/:username/subscription', async (c) => {
   const username = c.req.param('username');
-  const channel = await findChannelByUsername(c.env.DB, username);
-  if (!channel) return c.json({ error: 'Channel not found' }, 404);
-
-  const countRow = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS c FROM subscriptions WHERE channel_user_id = ?',
-  )
-    .bind(channel.id)
-    .first<{ c: number }>();
-
   const user = c.get('user');
-  let subscribed = false;
-  if (user) {
-    const row = await c.env.DB.prepare(
-      'SELECT 1 FROM subscriptions WHERE subscriber_user_id = ? AND channel_user_id = ?',
-    )
-      .bind(user.id, channel.id)
-      .first();
-    subscribed = row !== null;
-  }
-  return c.json({ subscribed, subscriberCount: Number(countRow?.c ?? 0) });
+
+  // Single JOIN collapses 2-3 sequential round-trips into one:
+  //   1. username → channel id  2. subscriber count  3. is-subscribed check
+  // NULL subscriber_user_id (unauthenticated) never matches any row, so
+  // is_subscribed safely returns 0 without branching.
+  const row = await c.env.DB.prepare(
+    `SELECT u.id AS channel_id,
+            COUNT(s.id) AS subscriber_count,
+            COALESCE(MAX(CASE WHEN s.subscriber_user_id = ? THEN 1 ELSE 0 END), 0) AS is_subscribed
+     FROM user u
+     LEFT JOIN subscriptions s ON s.channel_user_id = u.id
+     WHERE u.username = ?
+     GROUP BY u.id`,
+  )
+    .bind(user?.id ?? null, username)
+    .first<{ channel_id: string; subscriber_count: number; is_subscribed: number }>();
+
+  if (!row) return c.json({ error: 'Channel not found' }, 404);
+  return c.json({
+    subscribed: row.is_subscribed !== 0,
+    subscriberCount: Number(row.subscriber_count ?? 0),
+  });
 });
 
 subscriptionRoutes.post('/api/channels/:username/subscribe', async (c) => {

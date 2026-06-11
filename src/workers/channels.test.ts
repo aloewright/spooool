@@ -61,13 +61,23 @@ function fakeDB(spec: FakeDBSpec): D1Database {
         return null;
       },
       all: async () => {
+        // Owner lookup (batch statement 1): the simple form starts with SELECT id FROM user.
+        // Distinguish it from the videos query that embeds the same lookup as a subquery.
+        if (/^SELECT\s+id\s+FROM\s+user\s+WHERE/i.test(sql.trim())) {
+          const username = bound[0] as string;
+          const owner = spec.ownerByUsername?.[username];
+          return { results: (owner ? [owner] : []) as never[] };
+        }
         return { results: (spec.videos ?? []) as never[] };
       },
       run: async () => ({ success: true }),
     };
     return stmt;
   };
-  return { prepare } as unknown as D1Database;
+  // batch() sends both statements in one D1 round-trip; simulate by calling
+  // all() on each statement and returning the result array.
+  const batch = async (stmts: FakeStmt[]) => Promise.all(stmts.map((s) => s.all()));
+  return { prepare, batch } as unknown as D1Database;
 }
 
 function buildApp(db: D1Database) {

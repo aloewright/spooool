@@ -8,6 +8,6 @@ cd "$(dirname "$0")/.."
 docker run --rm \
   -v "$(pwd):/app" \
   -w /app \
-  node:20-bookworm-slim \
+  node:24-bookworm-slim \
   sh -c 'rm -rf node_modules && npm ci && npm install --package-lock-only'
 echo "package-lock.json regenerated on Linux. Run: npm ci"

@@ -69,14 +69,10 @@ jobs:
           fi
           npm run build
 
-      # Sync any non-VITE / non-CF secrets from Doppler into the worker's
-      # secret store. Idempotent: re-running with the same values is a no-op.
-      - name: Sync worker secrets from Doppler
-        if: steps.creds.outputs.configured == 'true'
-        env:
-          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
-        run: node scripts/sync-doppler-secrets.mjs sync-worker-secrets --env=staging
-
+      # Deploy BEFORE syncing secrets — the Workers Builds integration uploads
+      # undeployed Worker versions, so `wrangler secret bulk` is rejected with
+      # code 10215 ("latest version isn't deployed") until a deploy makes
+      # latest == deployed. See deploy-prod.yml for the full rationale.
       - name: Deploy worker (staging)
         if: steps.creds.outputs.configured == 'true'
         env:
@@ -84,3 +80,13 @@ jobs:
         run: |
           eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
           npx wrangler deploy --env staging
+
+      # Sync any non-VITE / non-CF secrets from Doppler into the worker's
+      # secret store. Idempotent: re-running with the same values is a no-op.
+      - name: Sync worker secrets from Doppler
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_STAGING }}
+        run: |
+          eval "$(node scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          node scripts/sync-doppler-secrets.mjs sync-worker-secrets --env=staging

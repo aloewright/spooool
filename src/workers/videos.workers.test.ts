@@ -51,7 +51,10 @@ describe('video API worker integration (ALO-189)', () => {
     const second = await SELF.fetch('http://localhost/api/videos/trending?limit=5');
     expect(second.status).toBe(200);
     const secondBody = (await second.json()) as { cached: boolean };
-    expect(secondBody.cached).toBe(true);
+    // Second hit is served from either the Workers edge cache (CF-Edge-Cache: HIT)
+    // or from the KV cache (body.cached === true). Either indicates caching is working.
+    const edgeCacheHit = second.headers.get('CF-Edge-Cache') === 'HIT';
+    expect(edgeCacheHit || secondBody.cached).toBe(true);
   });
 
   it('POST /api/videos/upload returns 401 without a session', async () => {

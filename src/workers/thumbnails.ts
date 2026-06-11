@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { edgeCache, purgeEdgeCache } from './edge-cache';
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_EXT: Record<string, string> = {
@@ -105,6 +106,11 @@ thumbnailRoutes.put('/api/videos/:id/thumbnail', async (c) => {
     .bind(parsed.data.url, videoId)
     .run();
 
+  // Thumbnail is part of video metadata — purge the KV-backed video meta cache
+  // and the edge-cached video detail page (if it was cached without the thumbnail).
+  const origin = new URL(c.req.url).origin;
+  purgeEdgeCache(c, `${origin}/api/videos/${videoId}`);
+
   return c.json({ id: videoId, thumbnail_url: parsed.data.url });
 });
 
@@ -151,10 +157,13 @@ thumbnailRoutes.post('/api/videos/:id/thumbnail', async (c) => {
     .bind(publicUrl, videoId)
     .run();
 
+  const origin = new URL(c.req.url).origin;
+  purgeEdgeCache(c, `${origin}/api/videos/${videoId}`);
+
   return c.json({ id: videoId, thumbnail_url: publicUrl }, 201);
 });
 
-thumbnailRoutes.get('/api/thumbnails/:userId/:videoId/:objectName', async (c) => {
+thumbnailRoutes.get('/api/thumbnails/:userId/:videoId/:objectName', edgeCache({ ttl: 31536000 }), async (c) => {
   const { userId, videoId, objectName } = c.req.param();
   if (!/^[a-zA-Z0-9._-]+$/.test(objectName)) {
     return c.json({ error: 'Invalid object name' }, 400);

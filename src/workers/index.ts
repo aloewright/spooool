@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { purgeTrendingEdgeCache } from './edge-cache';
+import { bumpTrendingCacheVersion } from './trending-cache';
+import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
@@ -9,6 +12,7 @@ import { handleEncodingMessage } from './encoding';
 import { transitionVideoStatus } from './video-status';
 import { handleAiGenMessage } from './ai-video-consumer';
 import { createAuth, type AuthEnv } from '../auth';
+import { canonicalHostRedirect } from './canonical-host';
 import { channelRoutes } from './channels';
 import { commentRoutes } from './comments';
 import { csrfProtection, parseAllowedOrigins } from './csrf';
@@ -102,6 +106,17 @@ type Variables = {
 
 const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
 
+// First thing on every request: funnel alias hosts (www, the auth custom
+// domain, etc.) to the canonical origin. OAuth state/session cookies are
+// host-scoped, so a sign-in that starts on spooool.com but whose callback
+// lands on another host loses the better-auth state cookie and fails with
+// ?error=state_mismatch. GET/HEAD only, so webhook POSTs are untouched.
+app.use('*', async (c, next) => {
+  const redirect = canonicalHostRedirect(c.req.raw);
+  if (redirect) return redirect;
+  return next();
+});
+
 app.use('*', securityHeaders());
 app.use('*', cors({ origin: (origin) => origin, credentials: true }));
 
@@ -157,6 +172,11 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   )
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
+
+  // Invalidate caches: the video is now ready with a thumbnail, so both the
+  // trending list and any cached video-metadata KV entries are stale.
+  waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  purgeTrendingEdgeCache(c);
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });

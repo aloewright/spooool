@@ -99,6 +99,13 @@ export function createAuth(env: AuthEnv) {
       accountLinking: {
         enabled: true,
         trustedProviders: ['google', 'github'],
+        // better-auth defaults requireLocalEmailVerified to true, which blocks
+        // linking a social sign-in into a pre-existing email/password account
+        // whose email was never verified — surfacing as ?error=account_not_linked
+        // (link-account.mjs: `requireLocalEmailVerified && !user.emailVerified`).
+        // Google/GitHub verify the email on their side, so we let the trusted
+        // provider's verification stand in for local verification and auto-link.
+        requireLocalEmailVerified: false,
       },
     },
     // Canonical origin first. The alias hosts (www, the auth custom domain)

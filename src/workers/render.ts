@@ -12,6 +12,9 @@ import { z } from 'zod';
 
 export interface RenderEnv {
   DB: D1Database;
+  // Optional so existing narrower RenderEnv usages still type-check. In
+  // production the full EnvBindings always includes CACHE.
+  CACHE?: KVNamespace;
   RENDER_CONTAINER: DurableObjectNamespace;
   RENDER_CALLBACK_SECRET: string;
   VIDEO_ENCODING: Queue<{ videoId: string; r2Key: string }>;
@@ -137,10 +140,24 @@ function requireCallbackSecret(c: { req: { header: (name: string) => string | un
   return null;
 }
 
+// 1-second KV cache TTL for render job polling. Clients poll every ~2s;
+// a 1-second buffer absorbs most D1 round-trips without meaningful stale delay.
+const RENDER_JOB_POLL_CACHE_TTL = 1;
+
 renderRoutes.get('/api/render/jobs/:id', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const id = c.req.param('id');
+
+  // Short-circuit D1 on every poll tick. Key scoped to user so a user can't
+  // read another user's cached status; user.id already comes from the verified
+  // session so it's safe to trust here.
+  const kvKey = `rjob:${user.id}:${id}`;
+  if (c.env.CACHE) {
+    const cached = await c.env.CACHE.get(kvKey, 'json') as Record<string, unknown> | null;
+    if (cached) return c.json(cached);
+  }
+
   const row = await c.env.DB.prepare(
     `SELECT id, status, progress, output_r2_key, video_id, error_message FROM render_jobs WHERE id = ? AND user_id = ?`,
   ).bind(id, user.id).first<{
@@ -152,14 +169,23 @@ renderRoutes.get('/api/render/jobs/:id', async (c) => {
     error_message: string | null;
   }>();
   if (!row) return c.json({ error: 'Not found' }, 404);
-  return c.json({
+
+  const payload = {
     id: row.id,
     status: row.status,
     progress: row.progress,
     outputKey: row.output_r2_key,
     videoId: row.video_id,
     error: row.error_message,
-  });
+  };
+
+  // Cache all states: completed/failed are permanent so caching them briefly
+  // is harmless, and the client stops polling once it sees a terminal state.
+  if (c.env.CACHE) {
+    await c.env.CACHE.put(kvKey, JSON.stringify(payload), { expirationTtl: RENDER_JOB_POLL_CACHE_TTL });
+  }
+
+  return c.json(payload);
 });
 
 renderRoutes.post('/api/render/jobs/:id/complete', async (c) => {

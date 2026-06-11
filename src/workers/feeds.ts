@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { waitUntilBackground } from './wait-until';
 import {
   assembleFeed,
   parseSqliteTimestamp,
@@ -342,9 +343,12 @@ feedRoutes.get('/api/feeds/:id/items', async (c) => {
   const assembled = assembleFeed(sourceResults, parsed.data.cursor ?? null, parsed.data.limit);
 
   // Touch last_viewed_at so the cron warmer keeps this feed's caches fresh.
-  await c.env.DB.prepare(`UPDATE feeds SET last_viewed_at = ? WHERE id = ?`)
+  // Fire-and-forget: the response doesn't depend on this write, and a missed
+  // update at worst delays cache warming by one 5-minute cron cycle.
+  waitUntilBackground(c, c.env.DB.prepare(`UPDATE feeds SET last_viewed_at = ? WHERE id = ?`)
     .bind(Date.now(), feed.id)
-    .run();
+    .run()
+    .catch((err) => console.warn('[feeds] last_viewed_at update failed', { feedId: feed.id, error: String(err) })));
 
   // Enrich the source summary with labels for the manage panel.
   const labelById = new Map(rows.map((r) => [r.id, r.label]));

@@ -198,12 +198,6 @@ videoRoutes.get('/api/videos/:id', async (c) => {
 
   let viewCount = Number(video.view_count ?? 0);
   if (fresh) {
-    await c.env.DB.prepare('UPDATE videos SET view_count = view_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
-      .bind(id)
-      .run();
-    await c.env.DB.prepare('INSERT INTO views (video_id, user_id, viewed_at) VALUES (?, ?, CURRENT_TIMESTAMP)')
-      .bind(id, user?.id ?? null)
-      .run();
     viewCount += 1;
 
     c.env.ANALYTICS?.writeDataPoint({
@@ -211,6 +205,14 @@ videoRoutes.get('/api/videos/:id', async (c) => {
       blobs: ['view', user?.id ?? '', sid],
       doubles: [1],
     });
+
+    // Both writes happen after the response is already built from the
+    // incremented local counter. Issue them in parallel and defer to
+    // background — they don't affect what we return.
+    waitUntilBackground(c, Promise.all([
+      c.env.DB.prepare('UPDATE videos SET view_count = view_count + 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').bind(id).run(),
+      c.env.DB.prepare('INSERT INTO views (video_id, user_id, viewed_at) VALUES (?, ?, CURRENT_TIMESTAMP)').bind(id, user?.id ?? null).run(),
+    ]).catch((err) => console.warn('[views] write failed', { videoId: id, error: String(err) })));
   }
 
   if (setCookie) c.header('Set-Cookie', setCookie, { append: true });
@@ -630,21 +632,24 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       )
       .run();
 
+    // Enqueue encoding synchronously — the consumer reads the video row
+    // immediately after receiving the message, so DB + queue must be ordered.
+    // Fan-out, emails, and cache invalidation are fire-and-forget: they don't
+    // affect the 201 response and can run in the background.
     await env.VIDEO_ENCODING.send({ videoId, r2Key });
-    await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
-      videoId,
-      channelUserId: user.id,
-    });
-    waitUntilBackground(c, sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
-      videoId,
-      channelUserId: user.id,
-      channelName: user.name,
-      videoTitle: metadataParsed.data.title,
-      origin: new URL(c.req.url).origin,
-    }).catch((err) => {
-      console.warn('new-upload email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
-    }));
-    await bumpTrendingCacheVersion(env.CACHE);
+    waitUntilBackground(c, Promise.all([
+      triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, { videoId, channelUserId: user.id }),
+      bumpTrendingCacheVersion(env.CACHE),
+      sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
+        videoId,
+        channelUserId: user.id,
+        channelName: user.name,
+        videoTitle: metadataParsed.data.title,
+        origin: new URL(c.req.url).origin,
+      }).catch((err) => {
+        console.warn('new-upload email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
+      }),
+    ]));
 
     return c.json({ id: videoId, status: 'queued' }, 201);
   }
@@ -769,23 +774,27 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     )
     .run();
 
+  // Enqueue encoding synchronously — the consumer reads the video row
+  // immediately after receiving the message, so DB + queue must be ordered.
+  // Fan-out, emails, cache invalidation, and KV session cleanup are
+  // fire-and-forget: parallel in the background so they don't add latency.
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
-  await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
-    videoId: uploadMeta.videoId,
-    channelUserId: user.id,
-  });
-  waitUntilBackground(c, sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
-    videoId: uploadMeta.videoId,
-    channelUserId: user.id,
-    channelName: user.name,
-    videoTitle: uploadMeta.title,
-    origin: new URL(c.req.url).origin,
-  }).catch((err) => {
-    console.warn('new-upload email failed', { videoId: uploadMeta.videoId, error: err instanceof Error ? err.message : String(err) });
-  }));
-  await bumpTrendingCacheVersion(env.CACHE);
-
-  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+  waitUntilBackground(c, Promise.all([
+    triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, { videoId: uploadMeta.videoId, channelUserId: user.id }),
+    bumpTrendingCacheVersion(env.CACHE),
+    sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
+      videoId: uploadMeta.videoId,
+      channelUserId: user.id,
+      channelName: user.name,
+      videoTitle: uploadMeta.title,
+      origin: new URL(c.req.url).origin,
+    }).catch((err) => {
+      console.warn('new-upload email failed', { videoId: uploadMeta.videoId, error: err instanceof Error ? err.message : String(err) });
+    }),
+    env.SESSIONS.delete(mpidKey),
+    env.SESSIONS.delete(metaKey),
+    env.SESSIONS.delete(partsKey),
+  ]));
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });

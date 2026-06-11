@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { videoMetaCacheKey } from './video-meta-cache';
 
 interface AnalyticsEngineDataset {
   writeDataPoint(point: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
@@ -91,10 +92,19 @@ analyticsRoutes.post('/api/videos/:id/heartbeat', async (c) => {
   const { delta, position } = parsed.data;
   if (delta === 0) return c.json({ ok: true });
 
-  const exists = await c.env.DB.prepare('SELECT 1 FROM videos WHERE id = ? AND deleted_at IS NULL')
-    .bind(id)
-    .first();
-  if (!exists) return c.json({ error: 'Video not found' }, 404);
+  // Heartbeats fire every ~10s during playback. Checking D1 on each one is
+  // wasteful — ready videos are already in the KV meta cache from their initial
+  // GET. A cache hit means the video is in 'ready' state and publicly viewable,
+  // which is exactly the condition a playing viewer satisfies. Only fall back
+  // to D1 on a cold miss (first heartbeat before the GET populates KV, or after
+  // the 60s TTL lapses mid-session).
+  const kvHit = await c.env.CACHE.get(videoMetaCacheKey(id));
+  if (!kvHit) {
+    const exists = await c.env.DB.prepare('SELECT 1 FROM videos WHERE id = ? AND deleted_at IS NULL')
+      .bind(id)
+      .first();
+    if (!exists) return c.json({ error: 'Video not found' }, 404);
+  }
 
   const user = c.get('user');
   const sid = readSessionCookie(c.req.header('cookie') ?? null) ?? '';

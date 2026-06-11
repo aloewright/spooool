@@ -112,7 +112,7 @@ videoRoutes.get('/api/videos/trending', async (c) => {
      LEFT JOIN user u ON u.id = v.user_id
      LEFT JOIN views ON views.video_id = v.id
        AND views.viewed_at >= datetime('now', '-7 days')
-     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL
+     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.status = 'ready'
      GROUP BY v.id
      ORDER BY recent_views DESC, v.view_count DESC, v.created_at DESC
      LIMIT ?`,
@@ -139,7 +139,7 @@ videoRoutes.get('/api/videos', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT id, user_id, title, description, r2_key, stream_video_id, status, view_count, created_at, updated_at
      FROM videos
-     WHERE deleted_at IS NULL AND hidden_at IS NULL
+     WHERE deleted_at IS NULL AND hidden_at IS NULL AND status = 'ready'
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`,
   )

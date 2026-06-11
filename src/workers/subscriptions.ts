@@ -36,23 +36,20 @@ subscriptionRoutes.get('/api/channels/:username/subscription', async (c) => {
   const channel = await findChannelByUsername(c.env.DB, username);
   if (!channel) return c.json({ error: 'Channel not found' }, 404);
 
-  const countRow = await c.env.DB.prepare(
-    'SELECT COUNT(*) AS c FROM subscriptions WHERE channel_user_id = ?',
-  )
-    .bind(channel.id)
-    .first<{ c: number }>();
-
   const user = c.get('user');
-  let subscribed = false;
-  if (user) {
-    const row = await c.env.DB.prepare(
-      'SELECT 1 FROM subscriptions WHERE subscriber_user_id = ? AND channel_user_id = ?',
-    )
-      .bind(user.id, channel.id)
-      .first();
-    subscribed = row !== null;
-  }
-  return c.json({ subscribed, subscriberCount: Number(countRow?.c ?? 0) });
+  const [countRow, subscriptionRow] = await Promise.all([
+    c.env.DB.prepare('SELECT COUNT(*) AS c FROM subscriptions WHERE channel_user_id = ?')
+      .bind(channel.id)
+      .first<{ c: number }>(),
+    user
+      ? c.env.DB.prepare(
+          'SELECT 1 FROM subscriptions WHERE subscriber_user_id = ? AND channel_user_id = ?',
+        )
+          .bind(user.id, channel.id)
+          .first()
+      : Promise.resolve(null),
+  ]);
+  return c.json({ subscribed: subscriptionRow !== null, subscriberCount: Number(countRow?.c ?? 0) });
 });
 
 subscriptionRoutes.post('/api/channels/:username/subscribe', async (c) => {

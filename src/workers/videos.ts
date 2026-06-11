@@ -17,7 +17,7 @@ import {
   validateMagicBytes,
 } from './upload-validation';
 import { verifyTurnstile, type TurnstileEnv } from './turnstile';
-import { edgeCache, purgeEdgeCache } from './edge-cache';
+import { edgeCache, purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
@@ -90,7 +90,7 @@ export const videoRoutes = new Hono<{
   Variables: VideoRoutesVariables;
 }>();
 
-videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 3600 }), async (c) => {
+videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);
@@ -128,7 +128,7 @@ videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 3600 }), asyn
   return c.json({ limit, videos: results, cached: false });
 });
 
-videoRoutes.get('/api/videos', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
+videoRoutes.get('/api/videos', edgeCache({ ttl: 30, swr: 60 }), async (c) => {
   const parsed = listVideosQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json({ error: 'Invalid query parameters', details: parsed.error.flatten() }, 400);
@@ -150,7 +150,7 @@ videoRoutes.get('/api/videos', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   return c.json({ page, limit, videos: results });
 });
 
-videoRoutes.get('/api/videos/:id', async (c) => {
+videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) => {
   const id = c.req.param('id');
 
   const cacheKey = videoMetaCacheKey(id);
@@ -646,7 +646,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       console.warn('new-upload email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
     }));
     await bumpTrendingCacheVersion(env.CACHE);
-    await purgeEdgeCache(['/api/videos/trending', '/api/tags'], new URL(c.req.url).origin);
+    purgeTrendingEdgeCache(c);
 
     return c.json({ id: videoId, status: 'queued' }, 201);
   }
@@ -786,7 +786,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     console.warn('new-upload email failed', { videoId: uploadMeta.videoId, error: err instanceof Error ? err.message : String(err) });
   }));
   await bumpTrendingCacheVersion(env.CACHE);
-  await purgeEdgeCache(['/api/videos/trending', '/api/tags'], new URL(c.req.url).origin);
+  purgeTrendingEdgeCache(c);
 
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
@@ -819,14 +819,16 @@ videoRoutes.delete('/api/videos/:id', async (c) => {
   await c.env.VIDEOS.delete(video.r2_key);
   await c.env.CACHE.delete(videoMetaCacheKey(id));
   await bumpTrendingCacheVersion(c.env.CACHE);
-  await purgeEdgeCache(
-    [`/api/videos/${id}/related`, `/api/videos/${id}/tags`, '/api/videos/trending', '/api/tags'],
-    new URL(c.req.url).origin,
-  );
 
-  // Purge edge-cached listing pages so the deleted video disappears promptly.
+  // Purge the video metadata entry and trending list from the edge cache so
+  // the deletion is reflected immediately rather than waiting for TTL expiry.
   const origin = new URL(c.req.url).origin;
-  purgeEdgeCache(c, `${origin}/api/videos`, `${origin}/api/videos/trending`);
+  purgeEdgeCache(
+    c,
+    `${origin}/api/videos/${id}`,
+    `${origin}/api/videos/trending`,
+    `${origin}/api/videos/trending?limit=12`,
+  );
 
   return c.json({ success: true });
 });

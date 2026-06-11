@@ -63,6 +63,8 @@ userRoutes.get('/api/users/me', async (c) => {
     .bind(user.id)
     .first<UserProfileRow>();
   if (!row) return c.json({ error: 'User not found' }, 404);
+  // Per-user data — must never be shared across users in an edge cache.
+  c.header('Cache-Control', 'private, no-store');
   return c.json(row);
 });
 
@@ -205,9 +207,15 @@ async function serveProfileImage(
   });
 }
 
-userRoutes.get('/api/users/avatars/:userId/:objectName', edgeCache({ ttl: 31536000 }), (c) =>
+// Avatar and banner images are served from R2 using UUID-based object names
+// (content-addressed). They are immutable once uploaded — no invalidation path
+// is needed. The Cache API stores them at the edge so repeated requests skip
+// the Worker and R2 round-trip entirely.
+const immutableImageCache = edgeCache({ ttl: 31536000, immutable: true });
+
+userRoutes.get('/api/users/avatars/:userId/:objectName', immutableImageCache, (c) =>
   serveProfileImage(c, 'avatars'),
 );
-userRoutes.get('/api/users/banners/:userId/:objectName', edgeCache({ ttl: 31536000 }), (c) =>
+userRoutes.get('/api/users/banners/:userId/:objectName', immutableImageCache, (c) =>
   serveProfileImage(c, 'banners'),
 );

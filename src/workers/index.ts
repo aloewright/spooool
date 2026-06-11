@@ -1,5 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { edgeCacheMiddleware, purgeTrendingEdgeCache } from './edge-cache';
+import { bumpTrendingCacheVersion } from './trending-cache';
+import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
@@ -104,6 +107,7 @@ const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
 
 app.use('*', securityHeaders());
 app.use('*', cors({ origin: (origin) => origin, credentials: true }));
+app.use('*', edgeCacheMiddleware());
 
 app.use('/api/*', async (c, next) => {
   const allowedOrigins = parseAllowedOrigins(c.env.ALLOWED_ORIGINS);
@@ -157,6 +161,17 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   )
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
+
+  // Invalidate caches: the video is now ready with a thumbnail, so both the
+  // trending list and any cached video-metadata KV entries are stale.
+  const origin = new URL(c.req.url).origin;
+  waitUntilBackground(
+    c,
+    Promise.all([
+      bumpTrendingCacheVersion(c.env.CACHE),
+      purgeTrendingEdgeCache(origin),
+    ]),
+  );
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });

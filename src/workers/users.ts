@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
+import { purgeEdgeCachePath } from './edge-cache';
+import { waitUntilBackground } from './wait-until';
 
 const ALLOWED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const ALLOWED_IMAGE_EXT: Record<string, string> = {
@@ -110,6 +112,15 @@ userRoutes.put('/api/users/me', async (c) => {
   )
     .bind(user.id)
     .first<UserProfileRow>();
+
+  if (refreshed?.username) {
+    const origin = new URL(c.req.url).origin;
+    waitUntilBackground(
+      c,
+      purgeEdgeCachePath(origin, `/api/channels/${refreshed.username}`),
+    );
+  }
+
   return c.json(refreshed);
 });
 
@@ -149,6 +160,18 @@ async function uploadProfileImage(
   )
     .bind(publicUrl, Date.now(), user.id)
     .run();
+
+  // Purge the channel profile page — avatar/banner change is visible there.
+  const usernameRow = await c.env.DB.prepare('SELECT username FROM user WHERE id = ?')
+    .bind(user.id)
+    .first<{ username: string | null }>();
+  if (usernameRow?.username) {
+    const origin = new URL(c.req.url).origin;
+    waitUntilBackground(
+      c,
+      purgeEdgeCachePath(origin, `/api/channels/${usernameRow.username}`),
+    );
+  }
 
   return c.json({ url: publicUrl }, 201);
 }

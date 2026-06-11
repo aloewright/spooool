@@ -2,6 +2,7 @@ import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
+import { purgeTrendingEdgeCache } from './edge-cache';
 import { sendNewUploadEmails } from './notification-email';
 import { waitUntilBackground } from './wait-until';
 import {
@@ -816,6 +817,7 @@ videoRoutes.delete('/api/videos/:id', async (c) => {
   await c.env.VIDEOS.delete(video.r2_key);
   await c.env.CACHE.delete(videoMetaCacheKey(id));
   await bumpTrendingCacheVersion(c.env.CACHE);
+  waitUntilBackground(c, purgeTrendingEdgeCache(new URL(c.req.url).origin));
 
   return c.json({ success: true });
 });

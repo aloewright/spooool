@@ -1,0 +1,62 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1777312449608,
+      "tag": "0000_crazy_argent",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1777572072220,
+      "tag": "0001_chubby_smasher",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778461788756,
+      "tag": "0002_true_prima",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1747008000000,
+      "tag": "0003_scenes_bme",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1781117496604,
+      "tag": "0004_supreme_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1781136731033,
+      "tag": "0005_sharp_karnak",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1781137786943,
+      "tag": "0006_heavy_blur",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1781203145405,
+      "tag": "0007_silky_annihilus",
+      "breakpoints": true
+    }
+  ]
+}

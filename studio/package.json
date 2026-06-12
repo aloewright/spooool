@@ -1,0 +1,29 @@
+{
+  "name": "bookgenerators",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "deploy": "bash scripts/deploy.sh",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run && pnpm -r --if-present test",
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.59.1",
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.8"
+  },
+  "pnpm": {
+    "overrides": {
+      "@esbuild-kit/core-utils>esbuild": "^0.25.0",
+      "mermaid>uuid": "^14.0.0"
+    }
+  },
+  "packageManager": "pnpm@9.15.0"
+}

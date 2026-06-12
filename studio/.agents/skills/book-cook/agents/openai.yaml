@@ -1,0 +1,6 @@
+interface:
+  display_name: "Book Cook"
+  short_description: "Repo-specific patterns and workflows for book-cook"
+  default_prompt: "Use the book-cook repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types/2023-07-01"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@client/*": ["./client/*"]
+    }
+  },
+  "include": [
+    "src/**/*",
+    "client/**/*",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "worker-configuration.d.ts"
+  ]
+}

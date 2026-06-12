@@ -1,0 +1,116 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bookgenerators-web",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-25",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/agents/*", "/studio", "/studio/*", "/words", "/words/*"]
+  },
+
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "upload_source_maps": true,
+  "triggers": { "crons": ["0 4 * * 1"] },
+
+  "routes": [
+    { "pattern": "book-cook.com", "custom_domain": true },
+    { "pattern": "www.book-cook.com", "custom_domain": true },
+    // The studio also serves on the spooool hub under the /studio base path;
+    // the worker strips the prefix before routing (src/index.ts).
+    { "pattern": "spooool.com/studio*", "zone_name": "spooool.com" },
+    // Legacy base path: /words* requests get 301-redirected to /studio*
+    // (src/index.ts).
+    { "pattern": "spooool.com/words*", "zone_name": "spooool.com" }
+  ],
+
+  "vars": {
+    "ENV": "dev",
+    "DEFAULT_MODEL": "@cf/zai-org/glm-4.7-flash",
+    "RESEARCH_MODEL": "anthropic/claude-opus-4-7",
+    "IMAGE_MODEL": "openai/gpt-image-2",
+    "AI_GATEWAY_ID": "x",
+    "R2_BUCKET": "bookgenerators",
+    "POSTPILOT_BASE_URL": "https://postpilot.cc",
+    "BETTER_AUTH_URL": "https://book-cook.com",
+    "GOOGLE_CLIENT_ID": "887895427361-3joav8mmi30g9ebeek6qtnbf69j5cl64.apps.googleusercontent.com"
+  },
+
+  // Secrets (provision via scripts/bootstrap.sh):
+  //   BETTER_AUTH_SECRET
+  //   AI_GATEWAY_BASE_URL
+  //   AI_GATEWAY_TOKEN
+  //   S3_ACCESS_KEY_ID
+  //   S3_SECRET_ACCESS_KEY
+  //   S3_ENDPOINT
+  //   RENDER_WORKER_INTERNAL_TOKEN
+  //   KEYRING_MASTER_KEY
+  //   GOOGLE_CLIENT_SECRET
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bookgenerators",
+      "database_id": "12308aa2-4101-4c20-8cce-fd0fd7a85a48",
+      "migrations_dir": "drizzle"
+    },
+    // spooool.com's own Better Auth database, read by the /studio mount to
+    // accept spooool sessions (src/spooool-session.ts). Read-only by intent.
+    {
+      "binding": "SPOOOOL_DB",
+      "database_name": "spooool-prod",
+      "database_id": "bbdd0163-a3d8-4bc7-805a-c23d2b08d4d7"
+    }
+  ],
+  "kv_namespaces": [{ "binding": "KV", "id": "550e0e2af0c9454c8e256d94fcac4d47" }],
+  "r2_buckets": [{ "binding": "R2", "bucket_name": "bookgenerators" }],
+  "ai": { "binding": "AI" },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "ALOYSIUS", "class_name": "BookProjectAgent" },
+      { "name": "RENDER_WORKER", "class_name": "RenderWorkerContainer" }
+    ]
+  },
+
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["BookProjectAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["RenderWorkerContainer"] }
+  ],
+
+  "workflows": [
+    {
+      "name": "book-export-workflow",
+      "binding": "BOOK_EXPORT_WORKFLOW",
+      "class_name": "BookExportWorkflow"
+    },
+    {
+      "name": "audiobook-mastering-workflow",
+      "binding": "AUDIOBOOK_MASTERING_WORKFLOW",
+      "class_name": "AudiobookMasteringWorkflow"
+    },
+    {
+      "name": "gtm-brief-workflow",
+      "binding": "GTM_BRIEF_WORKFLOW",
+      "class_name": "GtmBriefWorkflow"
+    }
+  ],
+
+  "containers": [
+    {
+      "name": "render-worker",
+      "class_name": "RenderWorkerContainer",
+      "image": "../../services/render-worker/Dockerfile",
+      "image_build_context": "../../services/render-worker",
+      "instance_type": "basic",
+      "max_instances": 4
+    }
+  ],
+
+  "dev": {
+    "enable_containers": false
+  }
+}

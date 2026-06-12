@@ -49,7 +49,6 @@ const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.P
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
 const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
-const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -243,9 +242,11 @@ function HeaderNav(): JSX.Element {
       <Link to="/discover">
         <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
-      <Link to="/studio">
+      {/* Studio is the content hub served by the `editor` worker via the
+          spooool.com/studio* zone route — full page load, not client routing. */}
+      <a href="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
-      </Link>
+      </a>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
 
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -704,7 +705,19 @@ function useSplash(): { show: boolean; dismiss: () => void } {
   return { show, dismiss };
 }
 
-export default function App(): JSX.Element {
+export default // The content hub (books/blogs/scripts + AI studio, ALO spec
+// docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
+// at spooool.com/studio via a zone route; a full page load hands the URL to
+// it. The legacy AI Studio component remains for its panels to be absorbed
+// into the hub.
+function StudioHubRedirect() {
+  useEffect(() => {
+    window.location.replace('/studio');
+  }, []);
+  return null;
+}
+
+function App(): JSX.Element {
   const location = useLocation();
   const splash = useSplash();
 
@@ -763,14 +776,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route
-            path="/studio"
-            element={
-              <RequireAuth>
-                <Studio />
-              </RequireAuth>
-            }
-          />
+          <Route path="/studio" element={<StudioHubRedirect />} />
           <Route
             path="/profile"
             element={

@@ -280,27 +280,6 @@ code, kbd, pre, samp {
   font-size: 30px;
 }
 
-/* The run of o's bobs continuously — present from first paint, no entrance.
-   Amplitude is em-based so it tracks the wordmark font size. */
-.ds-wordmark__o {
-  display: inline-block;
-  animation: ds-wordmark-bob 1.257s linear infinite;
-}
-
-@keyframes ds-wordmark-bob {
-  0%   { transform: translateY(0); }
-  25%  { transform: translateY(0.12em); }
-  50%  { transform: translateY(0); }
-  75%  { transform: translateY(-0.12em); }
-  100% { transform: translateY(0); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ds-wordmark__o {
-    animation: none;
-  }
-}
-
 
 /* ── Layout ────────────────────────────────────────────────── */
 .app-shell {
@@ -318,7 +297,7 @@ code, kbd, pre, samp {
   justify-content: space-between;
   height: 56px;
   padding: 0 var(--space-6);
-  background: var(--sidebar);
+  background: var(--background);
   border-bottom: 1px solid color-mix(in oklch, var(--border), transparent 50%);
 }
 

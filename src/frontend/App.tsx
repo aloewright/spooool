@@ -140,32 +140,14 @@ function SpoolWave({
 }
 
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
-  // Each "o" in the run bobs on a staggered sine-like loop. Delays match the
-  // Remotion source (i*4 frames @ 30fps ≈ 0.133s per letter index); the o's
-  // sit at indices 2–5.
-  const oDelays = ['-0.267s', '-0.400s', '-0.533s', '-0.667s'];
-  let oIndex = 0;
+  // Plain text title set in Nunito (via .ds-wordmark) — no per-letter motion.
   return (
     <Link
       to="/"
       aria-label="spooool"
       className={size === 'sm' ? 'ds-wordmark ds-wordmark--sm' : 'ds-wordmark'}
-      style={{ display: 'inline-flex', alignItems: 'baseline', gap: 0 }}
     >
-      {'spooool'.split('').map((char, i) => {
-        const isO = char === 'o';
-        const delay = isO ? oDelays[oIndex++] : undefined;
-        return (
-          <span
-            key={i}
-            aria-hidden="true"
-            className={isO ? 'ds-wordmark__o' : undefined}
-            style={isO ? { animationDelay: delay } : undefined}
-          >
-            {char}
-          </span>
-        );
-      })}
+      spooool
     </Link>
   );
 }

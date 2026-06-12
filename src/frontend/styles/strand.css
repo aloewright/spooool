@@ -267,13 +267,20 @@ code, kbd, pre, samp {
 .ds-wordmark {
   font-family: 'Nunito', var(--font-display);
   font-style: normal;
-  font-weight: 800;
+  /* Half the previous extra-bold stroke (was 800). */
+  font-weight: 400;
   font-size: 52px;
   line-height: 1;
   letter-spacing: -0.04em;
   color: var(--foreground);
-  text-shadow: 0 0 0.18em rgba(255, 255, 255, 0.6);
+  /* Glow only on hover. */
+  text-shadow: none;
+  transition: text-shadow 0.2s ease;
   position: relative;
+}
+
+.ds-wordmark:hover {
+  text-shadow: 0 0 0.18em rgba(255, 255, 255, 0.6);
 }
 
 .ds-wordmark--sm {

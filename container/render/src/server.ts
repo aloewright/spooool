@@ -10,8 +10,10 @@
 // being hammered. Since the worker dispatches one instance per user (render)
 // or pool slot (encode), this bounds concurrent work per instance.
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
-import { RenderQueue } from './queue';
+import { RenderQueue } from './queue.js';
 
 export interface ServerDeps {
   renderJob: (job: {
@@ -152,76 +154,200 @@ export function createServer(deps: ServerDeps) {
 }
 
 // --- Production entrypoint (runs when `node dist/server.js` starts) ---
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const { bundle } = await import('@remotion/bundler');
-  const { renderMedia, selectComposition } = await import('@remotion/renderer');
-  const { S3Client, GetObjectCommand, PutObjectCommand } = await import('@aws-sdk/client-s3');
-  const fs = await import('node:fs/promises');
-  const path = await import('node:path');
+//
+// Strategy: keep this top-level minimal — only @hono/node-server and a stub
+// Hono server with /health, /render, /diagnostic. The heavy dependencies
+// (@remotion/*, @aws-sdk/*) are deferred to first use inside the /render
+// handler. That way the container always boots, and any startup-time error
+// from those modules surfaces as a /fail callback to the worker (visible in
+// `wrangler tail`) instead of an opaque "container failed to start".
+
+async function bootstrap(): Promise<void> {
+  console.log('[render-container] booting…');
+  // @hono/node-server is deferred so the module stays import-safe (and so a
+  // missing native dep surfaces at boot, not import). Hono itself is already
+  // imported at the top of the file — reuse it rather than re-importing and
+  // shadowing the top-level binding.
   const { serve } = await import('@hono/node-server');
 
-  const s3 = new S3Client({
-    region: 'auto',
-    endpoint: process.env.R2_S3_ENDPOINT!,
-    credentials: {
-      accessKeyId: process.env.R2_ACCESS_KEY_ID!,
-      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-    },
-  });
-  const bucket = process.env.R2_BUCKET ?? 'spooool-videos';
-  const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
-  const callbackSecret = process.env.RENDER_CALLBACK_SECRET!;
-  const remotionEntry = process.env.REMOTION_ENTRY ?? path.resolve('./remotion/index.ts');
-  const tmpDir = process.env.TMP_DIR ?? '/tmp';
-  const publicDir = path.resolve('./remotion/public');
-
-  const downloadTake = async (key: string, dest: string) => {
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-    if (!out.Body) throw new Error(`take ${key} not found in R2`);
-    const buf = Buffer.from(await out.Body.transformToByteArray());
-    await fs.writeFile(dest, buf);
-  };
-
-  const { renderJob } = await import('./render.js');
-  const { encodeToHls } = await import('./encode.js');
-
-  const app = createServer({
-    renderJob: (input) => renderJob(input, {
-      renderer: {
-        bundle,
-        selectComposition: (a) => selectComposition(a as never) as never,
-        renderMedia: (a) => renderMedia(a as never) as never,
-      },
-      downloadTake,
-      tmpDir,
-      publicDir,
-      remotionEntry,
-    }),
-    uploadToR2: async (jobId, localPath) => {
-      const key = `recorder/renders/${jobId}.mp4`;
-      const body = await fs.readFile(localPath);
-      await s3.send(new PutObjectCommand({
-        Bucket: bucket,
-        Key: key,
-        Body: body,
-        ContentType: 'video/mp4',
-      }));
-      return key;
-    },
-    encodeToHls: (opts) => encodeToHls({ ...opts, s3, bucket }),
-    callbackToWorker: async (callbackPath, body) => {
-      const res = await fetch(`${workerBase}${callbackPath}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`worker callback ${callbackPath} -> ${res.status}`);
-    },
-    queueMax: 3,
-  });
-
   const port = Number(process.env.PORT ?? 8080);
+  const app = new Hono();
+
+  app.get('/health', (c) => c.json({ ok: true }));
+
+  app.get('/diagnostic', (c) =>
+    c.json({
+      cwd: process.cwd(),
+      argv: process.argv,
+      env_present: {
+        R2_S3_ENDPOINT: Boolean(process.env.R2_S3_ENDPOINT),
+        R2_ACCESS_KEY_ID: Boolean(process.env.R2_ACCESS_KEY_ID),
+        R2_SECRET_ACCESS_KEY: Boolean(process.env.R2_SECRET_ACCESS_KEY),
+        RENDER_CALLBACK_SECRET: Boolean(process.env.RENDER_CALLBACK_SECRET),
+        WORKER_BASE_URL: Boolean(process.env.WORKER_BASE_URL),
+      },
+    }),
+  );
+
+  let heavyServer: ReturnType<typeof createServer> | null = null;
+  let heavyServerError: string | null = null;
+  let initPromise: Promise<void> | null = null;
+
+  async function ensureHeavyServer(): Promise<{ ok: true; app: ReturnType<typeof createServer> } | { ok: false; error: string }> {
+    if (heavyServer) return { ok: true, app: heavyServer };
+    if (heavyServerError) return { ok: false, error: heavyServerError };
+    if (!initPromise) {
+      initPromise = (async () => {
+        const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
+        const callbackSecret = process.env.RENDER_CALLBACK_SECRET ?? '';
+        const callbackToWorker = async (callbackPath: string, body: unknown): Promise<void> => {
+          const res = await fetch(`${workerBase}${callbackPath}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
+            body: JSON.stringify(body),
+          });
+          if (!res.ok) throw new Error(`worker callback ${callbackPath} -> ${res.status}`);
+        };
+
+        try {
+          console.log('[render-container] loading heavy deps…');
+          const { bundle } = await import('@remotion/bundler');
+          const { renderMedia, selectComposition } = await import('@remotion/renderer');
+          const { S3Client, GetObjectCommand, PutObjectCommand } = await import('@aws-sdk/client-s3');
+          const fs = await import('node:fs/promises');
+          const path = await import('node:path');
+          const { renderJob } = await import('./render.js');
+          const { encodeToHls } = await import('./encode.js');
+          console.log('[render-container] heavy deps loaded');
+
+          const s3 = new S3Client({
+            region: 'auto',
+            endpoint: process.env.R2_S3_ENDPOINT!,
+            credentials: {
+              accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+            },
+          });
+          const bucket = process.env.R2_BUCKET ?? 'spooool-videos';
+          const remotionEntry = process.env.REMOTION_ENTRY ?? path.resolve('./remotion/index.ts');
+          const tmpDir = process.env.TMP_DIR ?? '/tmp';
+          const publicDir = path.resolve('./remotion/public');
+
+          const downloadTake = async (key: string, dest: string): Promise<void> => {
+            await fs.mkdir(path.dirname(dest), { recursive: true });
+            const out = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+            if (!out.Body) throw new Error(`take ${key} not found in R2`);
+            const buf = Buffer.from(await out.Body.transformToByteArray());
+            await fs.writeFile(dest, buf);
+          };
+
+          heavyServer = createServer({
+            renderJob: (input) =>
+              renderJob(input, {
+                renderer: {
+                  bundle,
+                  selectComposition: (a) => selectComposition(a as never) as never,
+                  renderMedia: (a) => renderMedia(a as never) as never,
+                },
+                downloadTake,
+                tmpDir,
+                publicDir,
+                remotionEntry,
+              }),
+            uploadToR2: async (jobId, localPath) => {
+              const key = `recorder/renders/${jobId}.mp4`;
+              const body = await fs.readFile(localPath);
+              await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: 'video/mp4' }));
+              return key;
+            },
+            encodeToHls: (opts) => encodeToHls({ ...opts, s3, bucket }),
+            callbackToWorker,
+            queueMax: 3,
+          });
+          console.log('[render-container] heavy server ready');
+        } catch (err) {
+          const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
+          heavyServerError = msg;
+          console.error('[render-container] heavy init FAILED:', msg);
+        }
+      })();
+    }
+    await initPromise;
+    if (heavyServer) return { ok: true, app: heavyServer };
+    return { ok: false, error: heavyServerError ?? 'unknown init failure' };
+  }
+
+  app.post('/render', async (c) => {
+    // Buffer the body so we can both inspect it (for the failure callback
+    // path) and forward an intact stream to the inner heavy server.
+    const rawBody = await c.req.text();
+    let parsedJobId: string | undefined;
+    try {
+      parsedJobId = (JSON.parse(rawBody) as { jobId?: string }).jobId;
+    } catch { /* malformed JSON — leave parsedJobId undefined */ }
+
+    const init = await ensureHeavyServer();
+    if (!init.ok) {
+      if (parsedJobId) {
+        const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
+        const callbackSecret = process.env.RENDER_CALLBACK_SECRET ?? '';
+        void fetch(`${workerBase}/api/render/jobs/${parsedJobId}/fail`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
+          body: JSON.stringify({ error: `Container init failed: ${init.error.slice(0, 800)}` }),
+        }).catch(() => {});
+      }
+      return c.json({ error: 'container init failed', detail: init.error.slice(0, 800) }, 503);
+    }
+    // Reconstruct the inner Request with the body buffered above. The
+    // original c.req.raw has been consumed by the .text() read.
+    //
+    // Strip framing headers from the original request: content-length,
+    // content-encoding, and transfer-encoding all describe the *original*
+    // wire framing. The body we forward is the already-decoded string from
+    // c.req.text(), so the old framing no longer applies — leaving these
+    // headers in place causes length mismatches, double-decoding, or a
+    // hung/truncated read on the inner server. Let the Request constructor
+    // recompute content-length from the new body.
+    const innerHeaders = new Headers(c.req.raw.headers);
+    innerHeaders.delete('content-length');
+    innerHeaders.delete('content-encoding');
+    innerHeaders.delete('transfer-encoding');
+    const innerReq = new Request(c.req.raw.url, {
+      method: 'POST',
+      headers: innerHeaders,
+      body: rawBody,
+    });
+    return init.app.fetch(innerReq);
+  });
+
   serve({ fetch: app.fetch, port });
   console.log(`[render-container] listening on :${port}`);
+}
+
+// Only run bootstrap when this file is the process entrypoint (i.e.
+// `node dist/server.js`), never when it is merely imported — e.g. by
+// server.test.ts importing `createServer`. Importing must NOT start a real
+// @hono/node-server listener on port 8080 (open handles / EADDRINUSE in CI).
+//
+// The naive `import.meta.url === \`file://${process.argv[1]}\`` guard can
+// false-negative when the entrypoint is a symlink or a differently-resolved
+// path, so resolve both sides through fs.realpathSync before comparing.
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    const thisPath = fileURLToPath(import.meta.url);
+    return realpathSync(thisPath) === realpathSync(entry);
+  } catch {
+    // Fall back to the URL comparison if realpath resolution fails.
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (isMainModule()) {
+  void bootstrap().catch((err) => {
+    console.error('[render-container] bootstrap FAILED:', err);
+    process.exit(1);
+  });
 }

@@ -17,8 +17,6 @@
   "triggers": { "crons": ["0 4 * * 1"] },
 
   "routes": [
-    { "pattern": "book-cook.com", "custom_domain": true },
-    { "pattern": "www.book-cook.com", "custom_domain": true },
     // The studio also serves on the spooool hub under the /studio base path;
     // the worker strips the prefix before routing (src/index.ts).
     { "pattern": "spooool.com/studio*", "zone_name": "spooool.com" },

@@ -407,3 +407,19 @@ studioRoutes.post('/api/videos/:id/thumbnail/from-asset', async (c) => {
 
   return c.json({ id: videoId, thumbnail_url: thumbnailUrl });
 });
+
+studioRoutes.get('/api/studio/projects', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const rows = await c.env.DB.prepare(
+    `SELECT ep.id, ep.title, ep.updated_at, ep.status, v.thumbnail_url
+     FROM edit_projects ep
+     LEFT JOIN videos v ON v.id = ep.source_video_id AND v.deleted_at IS NULL
+     WHERE ep.user_id = ?
+     ORDER BY ep.updated_at DESC
+     LIMIT 10`,
+  ).bind(user.id).all<{ id: string; title: string | null; updated_at: number; status: string; thumbnail_url: string | null }>();
+
+  return c.json({ projects: rows.results });
+});

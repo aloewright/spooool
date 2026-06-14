@@ -4,7 +4,7 @@ import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } 
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
-import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
+import { ClapperIcon, ReelIcon, ScriptIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
 import './styles/strand.css';
 
@@ -62,6 +62,7 @@ const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
+const Words = lazy(() => import('./pages/Words').then((m) => ({ default: m.Words })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -392,15 +393,36 @@ function AppHeader(): JSX.Element {
   );
 }
 
-const SUGGESTIONS: {
+type SuggestionItem = {
   title: string;
   helper: string;
-  to: string;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
-}[] = [
-  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
-  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
-  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
+  ariaLabel: string;
+} & ({ to: string; external?: false } | { href: string; external: true });
+
+const SUGGESTIONS: SuggestionItem[] = [
+  {
+    title: 'Pre-Production',
+    helper: 'Script, caption, and copy tools for your next project.',
+    to: '/words',
+    Icon: ScriptIcon,
+    ariaLabel: 'Go to Words — Pre-Production tools',
+  },
+  {
+    title: 'Production',
+    helper: 'AI Studio: generate animations, thumbnails, and more.',
+    to: '/studio',
+    Icon: ClapperIcon,
+    ariaLabel: 'Go to AI Studio — Production tools',
+  },
+  {
+    title: 'Post-Production',
+    helper: 'Edit, colour-grade, and publish your finished footage.',
+    href: 'https://reel-ez.com/',
+    external: true,
+    Icon: ReelIcon,
+    ariaLabel: 'Open Reel EZ — Post-Production tools (opens in new tab)',
+  },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
@@ -605,41 +627,61 @@ function Home(): JSX.Element {
       >
         <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>Start here</h2>
         <div className="suggestion-grid">
-          {SUGGESTIONS.map((item, i) => (
-            <Link
-              key={item.title}
-              to={item.to}
-              className="suggestion-card suggestion-card--glow"
-              // Hover-only border-trace; per-card duration so consecutive
-              // hovers feel slightly different.
-              style={
-                {
-                  '--trace-duration': ['1.6s', '2s', '1.8s'][i],
-                } as React.CSSProperties
-              }
-            >
-              <span className="suggestion-card__border" aria-hidden="true">
-                <span className="suggestion-card__shine" />
-              </span>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 44,
-                  height: 44,
-                  borderRadius: 10,
-                  marginBottom: 'var(--space-2)',
-                }}
+          {SUGGESTIONS.map((item, i) => {
+            const cardStyle = {
+              '--trace-duration': ['1.6s', '2s', '1.8s'][i],
+            } as React.CSSProperties;
+            const cardContent = (
+              <>
+                <span className="suggestion-card__border" aria-hidden="true">
+                  <span className="suggestion-card__shine" />
+                </span>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 44,
+                    height: 44,
+                    borderRadius: 10,
+                    marginBottom: 'var(--space-2)',
+                  }}
+                >
+                  <item.Icon />
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
+                <div className="ds-meta" style={{ marginTop: 4 }}>
+                  {item.helper}
+                </div>
+              </>
+            );
+            if (item.external) {
+              return (
+                <a
+                  key={item.title}
+                  href={item.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="suggestion-card suggestion-card--glow"
+                  aria-label={item.ariaLabel}
+                  style={cardStyle}
+                >
+                  {cardContent}
+                </a>
+              );
+            }
+            return (
+              <Link
+                key={item.title}
+                to={item.to}
+                className="suggestion-card suggestion-card--glow"
+                aria-label={item.ariaLabel}
+                style={cardStyle}
               >
-                <item.Icon />
-              </div>
-              <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
-              <div className="ds-meta" style={{ marginTop: 4 }}>
-                {item.helper}
-              </div>
-            </Link>
-          ))}
+                {cardContent}
+              </Link>
+            );
+          })}
         </div>
       </section>
     </main>
@@ -861,6 +903,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route path="/words" element={<Words />} />
           <Route path="/status" element={<Status />} />
           <Route
             path="/admin/status"

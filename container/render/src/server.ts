@@ -10,6 +10,8 @@
 // being hammered. Since the worker dispatches one instance per user (render)
 // or pool slot (encode), this bounds concurrent work per instance.
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Hono } from 'hono';
 import { RenderQueue } from './queue.js';
 
@@ -162,8 +164,11 @@ export function createServer(deps: ServerDeps) {
 
 async function bootstrap(): Promise<void> {
   console.log('[render-container] booting…');
+  // @hono/node-server is deferred so the module stays import-safe (and so a
+  // missing native dep surfaces at boot, not import). Hono itself is already
+  // imported at the top of the file — reuse it rather than re-importing and
+  // shadowing the top-level binding.
   const { serve } = await import('@hono/node-server');
-  const { Hono } = await import('hono');
 
   const port = Number(process.env.PORT ?? 8080);
   const app = new Hono();
@@ -296,9 +301,21 @@ async function bootstrap(): Promise<void> {
     }
     // Reconstruct the inner Request with the body buffered above. The
     // original c.req.raw has been consumed by the .text() read.
+    //
+    // Strip framing headers from the original request: content-length,
+    // content-encoding, and transfer-encoding all describe the *original*
+    // wire framing. The body we forward is the already-decoded string from
+    // c.req.text(), so the old framing no longer applies — leaving these
+    // headers in place causes length mismatches, double-decoding, or a
+    // hung/truncated read on the inner server. Let the Request constructor
+    // recompute content-length from the new body.
+    const innerHeaders = new Headers(c.req.raw.headers);
+    innerHeaders.delete('content-length');
+    innerHeaders.delete('content-encoding');
+    innerHeaders.delete('transfer-encoding');
     const innerReq = new Request(c.req.raw.url, {
       method: 'POST',
-      headers: c.req.raw.headers,
+      headers: innerHeaders,
       body: rawBody,
     });
     return init.app.fetch(innerReq);
@@ -308,10 +325,29 @@ async function bootstrap(): Promise<void> {
   console.log(`[render-container] listening on :${port}`);
 }
 
-// Always run bootstrap when this file is executed directly. Avoid the
-// `import.meta.url === \`file://${process.argv[1]}\`` guard because it can
-// false-negative on symlinked or resolved CMD paths.
-void bootstrap().catch((err) => {
-  console.error('[render-container] bootstrap FAILED:', err);
-  process.exit(1);
-});
+// Only run bootstrap when this file is the process entrypoint (i.e.
+// `node dist/server.js`), never when it is merely imported — e.g. by
+// server.test.ts importing `createServer`. Importing must NOT start a real
+// @hono/node-server listener on port 8080 (open handles / EADDRINUSE in CI).
+//
+// The naive `import.meta.url === \`file://${process.argv[1]}\`` guard can
+// false-negative when the entrypoint is a symlink or a differently-resolved
+// path, so resolve both sides through fs.realpathSync before comparing.
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    const thisPath = fileURLToPath(import.meta.url);
+    return realpathSync(thisPath) === realpathSync(entry);
+  } catch {
+    // Fall back to the URL comparison if realpath resolution fails.
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+if (isMainModule()) {
+  void bootstrap().catch((err) => {
+    console.error('[render-container] bootstrap FAILED:', err);
+    process.exit(1);
+  });
+}

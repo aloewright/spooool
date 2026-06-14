@@ -105,6 +105,10 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   } | null>(null);
   const [redraftInstructions, setRedraftInstructions] = useState<Record<string, string>>({});
   const pendingSave = useRef<number | undefined>(undefined);
+  // Tracks the in-flight autosave so a newer save can abort an older one
+  // before it lands — without this an earlier (slow) request could resolve
+  // last and clobber the editor's latest content on the server.
+  const inFlightSave = useRef<AbortController | null>(null);
   const editorRoot = useRef<HTMLDivElement | null>(null);
   const editor = useCreateBlockNote({
     initialContent: initialContent(chapter),
@@ -112,14 +116,23 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      // Supersede any save still in flight so out-of-order responses can't
+      // overwrite newer content.
+      inFlightSave.current?.abort();
+      const controller = new AbortController();
+      inFlightSave.current = controller;
       const draftJson = editor.document;
       const draftMd = await editor.blocksToMarkdownLossy(editor.document);
       const words = wordCount(draftMd);
-      await api.updateChapter(chapter.id, {
-        draft_json: draftJson,
-        draft_md: draftMd,
-        status: words > 0 ? "drafting" : "pending",
-      });
+      await api.updateChapter(
+        chapter.id,
+        {
+          draft_json: draftJson,
+          draft_md: draftMd,
+          status: words > 0 ? "drafting" : "pending",
+        },
+        { signal: controller.signal },
+      );
       return words;
     },
     onMutate: () => setSaveState("saving"),
@@ -128,7 +141,12 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
       setSaveState("saved");
       await queryClient.invalidateQueries({ queryKey: queryKeys.chapter(chapter.id) });
     },
-    onError: () => setSaveState("error"),
+    onError: (error) => {
+      // A save we deliberately aborted (superseded by a newer one) isn't a
+      // real failure — don't flip the UI to "error" for it.
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setSaveState("error");
+    },
   });
 
   const draftMutation = useMutation({
@@ -184,6 +202,9 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   useEffect(() => {
     return () => {
       if (pendingSave.current) window.clearTimeout(pendingSave.current);
+      // Cancel any save still in flight so it can't resolve and set state on
+      // an unmounted component.
+      inFlightSave.current?.abort();
     };
   }, []);
 

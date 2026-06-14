@@ -30,18 +30,3 @@ export function BookFlowPreview() {
     </div>
   );
 }
-
-function BookFlowStatic() {
-  return (
-    <div className="p-4">
-      <div className="text-xs font-semibold uppercase text-muted-foreground">Book flow</div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {STEPS.map((step) => (
-          <span key={step} className="rounded-full border bg-background px-3 py-1 text-sm">
-            {step}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}

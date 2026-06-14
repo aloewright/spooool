@@ -1,9 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText, LayoutTemplate, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { type Section, api, queryKeys } from "../../lib/api";
-
-type SaveState = "idle" | "saving" | "saved" | "error";
+import { type SaveState, useAutosave } from "../../lib/use-autosave";
 
 export function SceneCard({
   section,
@@ -12,45 +11,15 @@ export function SceneCard({
   section: Section;
   chapterId: string;
 }) {
-  const [body, setBody] = useState(section.draft_md);
-  const [saveState, setSaveState] = useState<SaveState>("idle");
-  const [pendingDraft, setPendingDraft] = useState(false);
-  const timerRef = useRef<number | undefined>(undefined);
-  const lastSaved = useRef(section.draft_md);
-
-  useEffect(() => {
-    if (body !== lastSaved.current) return;
-    if (section.draft_md === lastSaved.current) return;
-    setBody(section.draft_md);
-    lastSaved.current = section.draft_md;
-    setSaveState("idle");
-  }, [section.draft_md, body]);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    [],
+  // useAutosave owns the debounce, adopts new server values when there are no
+  // local edits, aborts superseded requests, and ignores out-of-order
+  // responses — so a slow earlier save can't overwrite newer scene text
+  // (autosave race fix). It also cleans up the timer + in-flight request on
+  // unmount.
+  const [body, setBody, saveState] = useAutosave(section.draft_md, (next, signal) =>
+    api.updateSection(chapterId, section.id, { draft_md: next }, { signal }),
   );
-
-  function handleChange(next: string) {
-    setBody(next);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (next === lastSaved.current) {
-      setSaveState("idle");
-      return;
-    }
-    setSaveState("saving");
-    timerRef.current = window.setTimeout(async () => {
-      try {
-        await api.updateSection(chapterId, section.id, { draft_md: next });
-        lastSaved.current = next;
-        setSaveState("saved");
-      } catch {
-        setSaveState("error");
-      }
-    }, 800);
-  }
+  const [pendingDraft, setPendingDraft] = useState(false);
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl bg-white/70 p-4 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
@@ -78,7 +47,7 @@ export function SceneCard({
         <textarea
           aria-label={`Scene ${section.ordinal} body`}
           className="w-full resize-none bg-transparent font-serif text-[15px] text-neutral-800 leading-relaxed outline-none placeholder:text-neutral-400 dark:text-neutral-200"
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={(e) => setBody(e.target.value)}
           placeholder="Write your scene here…"
           rows={Math.max(4, (body.split("\n").length || 1) + 1)}
           value={body}

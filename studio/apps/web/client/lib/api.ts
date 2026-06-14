@@ -726,10 +726,12 @@ export const api = {
       draft_md?: string;
       status?: Chapter["status"];
     },
+    options?: { signal?: AbortSignal },
   ) =>
     fetchJson<{ ok: true }>(`/api/v1/chapters/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
+      signal: options?.signal,
     }),
   updateProject: (id: string, input: { voice_id?: string | null }) =>
     fetchJson<{ ok: true }>(`/api/v1/projects/${id}`, {

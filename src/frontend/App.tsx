@@ -705,11 +705,13 @@ function useSplash(): { show: boolean; dismiss: () => void } {
   return { show, dismiss };
 }
 
-export default // The content hub (books/blogs/scripts + AI studio, ALO spec
+// The content hub (books/blogs/scripts + AI studio, ALO spec
 // docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
 // at spooool.com/studio via a zone route; a full page load hands the URL to
 // it. The legacy AI Studio component remains for its panels to be absorbed
-// into the hub.
+// into the hub. This component backs the in-shell `/studio` route as a
+// belt-and-suspenders client redirect for the rare case the SPA serves
+// `/studio` before the zone route intercepts it.
 function StudioHubRedirect() {
   useEffect(() => {
     window.location.replace('/studio');
@@ -717,7 +719,11 @@ function StudioHubRedirect() {
   return null;
 }
 
-function App(): JSX.Element {
+// `App` is the default export mounted by main.tsx — the full spooool shell
+// (header, routed pages, footer). The /studio handoff lives on its own route
+// (StudioHubRedirect) and via the HeaderNav <a href="/studio"> hard link, so
+// the rest of the app keeps client-side routing.
+export default function App(): JSX.Element {
   const location = useLocation();
   const splash = useSplash();
 

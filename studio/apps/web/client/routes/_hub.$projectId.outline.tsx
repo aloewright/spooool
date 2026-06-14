@@ -8,6 +8,7 @@ import { SideDrawer } from "../components/studio/SideDrawer";
 import { TopLeftPill } from "../components/studio/TopLeftPill";
 import { type Chapter, type Project, type Section, api, queryKeys } from "../lib/api";
 import { useDrawerLayout } from "../lib/drawer-layout";
+import { useAutosave } from "../lib/use-autosave";
 
 type OutlineSearch = { logline?: string };
 
@@ -302,19 +303,12 @@ function SceneSummaryCard({
   onDrop: (e: React.DragEvent) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [summary, setSummary] = useState(section.prompt);
-  const timerRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    if (!editing) setSummary(section.prompt);
-  }, [section.prompt, editing]);
-
-  function scheduleSave(next: string) {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      api.updateSection(chapterId, section.id, { prompt: next });
-    }, 800);
-  }
+  // useAutosave handles the debounce, aborts superseded requests, and ignores
+  // out-of-order responses — replacing the hand-rolled timer that could let an
+  // older save overwrite newer content (ALO autosave race fix).
+  const [summary, setSummary] = useAutosave(section.prompt, (next, signal) =>
+    api.updateSection(chapterId, section.id, { prompt: next }, { signal }),
+  );
 
   return (
     <div
@@ -343,10 +337,7 @@ function SceneSummaryCard({
           id={`scene-summary-${section.id}`}
           name={`scene-summary-${section.id}`}
           onBlur={() => setEditing(false)}
-          onChange={(e) => {
-            setSummary(e.target.value);
-            scheduleSave(e.target.value);
-          }}
+          onChange={(e) => setSummary(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && setEditing(false)}
           placeholder="Scene summary…"
           ref={(el) => el?.focus()}
@@ -374,44 +365,13 @@ function SceneSummaryCard({
 
 function ChapterHeading({ chapter, projectId }: { chapter: Chapter; projectId: string }) {
   const queryClient = useQueryClient();
-  const [title, setTitle] = useState(chapter.title);
-  const [saving, setSaving] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  const lastSaved = useRef(chapter.title);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(() => {
-    if (title === lastSaved.current && chapter.title !== lastSaved.current) {
-      lastSaved.current = chapter.title;
-      setTitle(chapter.title);
-    }
-  }, [chapter.title, title]);
-
-  useEffect(
-    () => () => {
-      if (timer.current) window.clearTimeout(timer.current);
-    },
-    [],
-  );
-
-  function handleChange(next: string) {
-    setTitle(next);
-    if (timer.current) window.clearTimeout(timer.current);
-    if (next.trim() === lastSaved.current) {
-      setSaving("idle");
-      return;
-    }
-    setSaving("saving");
-    timer.current = window.setTimeout(async () => {
-      try {
-        await api.updateChapter(chapter.id, { title: next.trim() });
-        lastSaved.current = next.trim();
-        setSaving("saved");
-        queryClient.invalidateQueries({ queryKey: queryKeys.projectOutline(projectId) });
-      } catch {
-        setSaving("error");
-      }
-    }, 800);
-  }
+  // useAutosave debounces, aborts superseded requests, and ignores out-of-order
+  // responses so a slow earlier save can't clobber a newer title (autosave
+  // race fix). It also tears down the timer + in-flight request on unmount.
+  const [title, setTitle, saving] = useAutosave(chapter.title, async (next, signal) => {
+    await api.updateChapter(chapter.id, { title: next.trim() }, { signal });
+    queryClient.invalidateQueries({ queryKey: queryKeys.projectOutline(projectId) });
+  });
 
   return (
     <div className="px-1">
@@ -432,7 +392,7 @@ function ChapterHeading({ chapter, projectId }: { chapter: Chapter; projectId: s
           className="min-w-0 flex-1 bg-transparent font-serif text-2xl tracking-tight outline-none placeholder:text-neutral-400 focus:-mx-1 focus:rounded focus:bg-black/5 focus:px-1 dark:focus:bg-white/5"
           id={`chapter-${chapter.ordinal}-title`}
           name={`chapter-${chapter.ordinal}-title`}
-          onChange={(e) => handleChange(e.target.value)}
+          onChange={(e) => setTitle(e.target.value)}
           placeholder="Untitled chapter"
           value={title}
         />

@@ -1,0 +1,170 @@
+@import url("https://fonts.googleapis.com/css2?family=Aleo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800;900&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./styles/themes/index.css";
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  html {
+    overflow: hidden;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    letter-spacing: var(--tracking-normal);
+    margin: 0;
+    overflow: hidden;
+  }
+
+  .bn-container {
+    --bn-colors-editor-text: var(--card-foreground);
+    --bn-colors-editor-background: var(--card);
+    --bn-colors-menu-text: var(--popover-foreground);
+    --bn-colors-menu-background: var(--popover);
+    --bn-colors-tooltip-text: var(--popover-foreground);
+    --bn-colors-tooltip-background: var(--popover);
+    --bn-colors-hovered-text: var(--accent-foreground);
+    --bn-colors-hovered-background: var(--accent);
+    --bn-colors-selected-text: var(--primary-foreground);
+    --bn-colors-selected-background: var(--primary);
+    --bn-colors-disabled-text: var(--muted-foreground);
+    --bn-colors-disabled-background: var(--muted);
+    --bn-colors-shadow: var(--border);
+    --bn-colors-border: var(--border);
+    --bn-colors-side-menu: var(--muted-foreground);
+    color: var(--card-foreground);
+    background: var(--card);
+  }
+
+  .bn-container .bn-editor,
+  .bn-container .bn-default-styles {
+    color: var(--card-foreground);
+    background: var(--card);
+  }
+
+  .bn-container .bn-block-content,
+  .bn-container [contenteditable="true"] {
+    color: var(--card-foreground);
+  }
+
+  .bn-container .mantine-Menu-dropdown,
+  .bn-container .mantine-Popover-dropdown,
+  .bn-container .mantine-Tooltip-tooltip {
+    color: var(--popover-foreground);
+    background: var(--popover);
+    border-color: var(--border);
+  }
+}
+
+/* Blog surfaces read friendlier in Nunito: within .blog-surface the serif
+   used by headings and titles is remapped to the sans stack (Nunito), with a
+   little extra weight so large headings keep their presence. Book pages keep
+   the Aleo serif. */
+.blog-surface {
+  --font-serif: var(--font-sans);
+}
+.blog-surface .font-serif {
+  font-weight: 600;
+}
+
+/* Script surfaces lean into the screenplay/Courier identity: within
+   .script-surface the serif used by headings and titles is remapped to the
+   mono stack, at normal weight as a typewriter would have it. */
+.script-surface {
+  --font-serif: var(--font-mono);
+}
+
+.prose.chat-markdown {
+  --tw-prose-body: var(--card-foreground);
+  --tw-prose-headings: var(--card-foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--card-foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--card-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--card-foreground);
+  --tw-prose-pre-code: var(--card-foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  color: var(--card-foreground);
+}
+
+.prose.chat-markdown :where(p, li, h1, h2, h3, h4, h5, h6, strong, em, blockquote) {
+  color: var(--card-foreground);
+}
+
+.prose.chat-markdown :where(a) {
+  color: var(--primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}

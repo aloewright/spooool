@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Book Cook</title>
+    <script>
+      // Base detection: the same build serves at "/" on book-cook.com and at
+      // "/studio" via spooool.com/studio. Must run before the module script so
+      // runtime asset URLs (vite.config.ts renderBuiltUrl) resolve correctly.
+      (function () {
+        var p = location.pathname;
+        globalThis.__appBase = p === "/studio" || p.indexOf("/studio/") === 0 ? "/studio/" : "/";
+      })();
+    </script>
+    <script>
+      // No-flash theme: must run before first paint.
+      (function () {
+        try {
+          var pref = localStorage.getItem("book-cook-theme");
+          if (pref !== "light" && pref !== "dark" && pref !== "system") pref = "system";
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var mode = pref === "dark" || (pref === "system" && prefersDark) ? "dark" : "light";
+          var color =
+            localStorage.getItem("book-cook-color-theme") ||
+            (globalThis.__appBase === "/studio/" ? "spooool" : "book-cook");
+          var root = document.documentElement;
+          root.dataset.theme = color + "-" + mode;
+          if (mode === "dark") root.classList.add("dark");
+          root.style.colorScheme = mode;
+        } catch (_) {}
+      })();
+    </script>
+    <style>
+      html { background: #ffffff; }
+      html.dark { background: #0a0a0a; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/client/main.tsx"></script>
+  </body>
+</html>

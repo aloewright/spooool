@@ -1,0 +1,57 @@
+name: Studio · CI
+
+on:
+  pull_request:
+    paths:
+      - "studio/**"
+      - ".github/workflows/studio-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "studio/**"
+      - ".github/workflows/studio-ci.yml"
+
+concurrency:
+  group: studio-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Typecheck, build, tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: studio
+    steps:
+      - name: Check out
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+
+      # studio/ is a pnpm workspace (pinned via packageManager) — independent
+      # of the repo root's npm setup.
+      - name: Enable pnpm via corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate worker types
+        run: pnpm --filter web cf-typegen
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build
+        run: pnpm --filter web build
+
+      - name: Unit tests
+        run: npx vitest run
+
+      - name: Integration tests (workers pool)
+        working-directory: studio/apps/web
+        run: npx vitest run

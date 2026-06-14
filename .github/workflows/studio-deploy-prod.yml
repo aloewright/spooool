@@ -1,0 +1,75 @@
+name: Studio · Deploy production
+
+# Deploys the `editor` worker (the content hub at spooool.com/studio, also
+# serving book-cook.com during deprecation) from studio/. Mirrors
+# deploy-prod.yml: manual dispatch, Doppler-sourced Cloudflare credentials.
+# Existing worker secrets (BETTER_AUTH_SECRET, GOOGLE_CLIENT_SECRET, …) carry
+# across deploys; this workflow does not manage them.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref (commit SHA, tag, or branch) to deploy
+        required: true
+        default: main
+
+concurrency:
+  group: studio-deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Wrangler deploy (editor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+    steps:
+      - name: Check out
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+
+      - name: Enable pnpm via corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        working-directory: studio
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate worker types
+        working-directory: studio
+        run: pnpm --filter web cf-typegen
+
+      - name: Verify quality gates
+        working-directory: studio
+        run: |
+          pnpm typecheck
+          npx vitest run
+
+      - name: Build
+        working-directory: studio
+        run: pnpm --filter web build
+
+      - name: Check Doppler credentials
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          if [ -z "$DOPPLER_TOKEN" ]; then
+            echo "::error ::Studio deploy requires DOPPLER_TOKEN_PROD (Doppler service token scoped to spooool/production)."
+            exit 1
+          fi
+
+      - name: Deploy worker (editor)
+        working-directory: studio/apps/web
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN_PROD }}
+        run: |
+          eval "$(node ../../../scripts/sync-doppler-secrets.mjs print-cloudflare-env)"
+          npx wrangler deploy --name editor

@@ -46,7 +46,22 @@ interface CloudflareAiGateway {
 
 interface AiBinding {
   gateway(gatewayId: string): CloudflareAiGateway;
-  run(model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string; skipCache?: boolean } }): Promise<unknown>;
+  run(model: string, input: Record<string, unknown>, opts?: { gateway?: { id: string; skipCache?: boolean; cacheTtl?: number; metadata?: Record<string, string> } }): Promise<unknown>;
+}
+
+/**
+ * Optional cf-aig cache controls threaded into gateway calls (ALO-651).
+ * When provided, these appear in the AI Gateway dashboard and let you filter
+ * by operation and user without changing observability routing.
+ *   op     — operation label ('chat', 'tts', 'image', 'transcription', 'summarize')
+ *   userId — caller's user id for per-user cost attribution
+ *   skipCache / cacheTtl — cache controls (default: gateway's own defaults)
+ */
+export interface GatewayMeta {
+  op?: string;
+  userId?: string;
+  skipCache?: boolean;
+  cacheTtl?: number;
 }
 
 export interface AiGatewayEnv {
@@ -136,7 +151,19 @@ function buildMessages(
  * `Uint8Array`, `ArrayBuffer`, or `Response` — all three are narrowed to bytes
  * and base64-encoded into the `TTSResult.audio` field.
  */
-function runGatewayTts(env: AiGatewayEnv, model: string): TTSAdapter {
+function buildGatewayOpts(meta?: GatewayMeta) {
+  const gw: { id: string; skipCache?: boolean; cacheTtl?: number; metadata?: Record<string, string> } = { id: GATEWAY_ID };
+  if (meta?.skipCache !== undefined) gw.skipCache = meta.skipCache;
+  if (meta?.cacheTtl !== undefined) gw.cacheTtl = meta.cacheTtl;
+  if (meta?.op !== undefined || meta?.userId !== undefined) {
+    gw.metadata = {};
+    if (meta.op) gw.metadata['op'] = meta.op;
+    if (meta.userId) gw.metadata['userId'] = meta.userId;
+  }
+  return { gateway: gw };
+}
+
+function runGatewayTts(env: AiGatewayEnv, model: string, meta?: GatewayMeta): TTSAdapter {
   return {
     kind: 'tts',
     name: 'run-gateway-tts',
@@ -146,7 +173,7 @@ function runGatewayTts(env: AiGatewayEnv, model: string): TTSAdapter {
       const raw = await env.AI.run(
         model,
         { text: options.text, speaker: options.voice, encoding: 'mp3' },
-        { gateway: { id: GATEWAY_ID } },
+        buildGatewayOpts(meta),
       );
       let bytes: Uint8Array;
       if (raw instanceof Response) {
@@ -199,7 +226,7 @@ function narrowChatText(raw: unknown): string {
   return body.response ?? body.choices?.[0]?.message?.content ?? '';
 }
 
-function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, Record<string, never>, [], never> {
+function runGatewayChat(env: AiGatewayEnv, model: string, meta?: GatewayMeta): TextAdapter<string, Record<string, never>, [], never> {
   return {
     kind: 'text',
     name: 'run-gateway-chat',
@@ -214,7 +241,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
         raw = await env.AI.run(
           model,
           { messages: buildMessages(options.systemPrompts, options.messages) },
-          { gateway: { id: GATEWAY_ID } },
+          buildGatewayOpts(meta),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -237,7 +264,7 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
       const raw = await env.AI.run(
         model,
         { messages: buildMessages(options.chatOptions.systemPrompts, options.chatOptions.messages) },
-        { gateway: { id: GATEWAY_ID } },
+        buildGatewayOpts(meta),
       );
       const rawText = narrowChatText(raw);
       let data: unknown = rawText;
@@ -258,9 +285,13 @@ function runGatewayChat(env: AiGatewayEnv, model: string): TextAdapter<string, R
  *     directly (the proven path, byte-for-byte parity with create-tools.ts).
  *   - 'gateway-binding': adapter built against `env.AI.gateway(GATEWAY_ID)` (opt-in once verified).
  * Either way the call is gateway-routed — bare `env.AI` (plain binding) is never used.
+ *
+ * Pass `meta` to thread cf-aig observability labels into run-gateway calls (ALO-651);
+ * they appear in the AI Gateway dashboard and enable per-op / per-user filtering.
+ * In gateway-binding mode `meta` is silently ignored (the binding manages its own opts).
  */
-export function gatewayChat(env: AiGatewayEnv, model: string = DEFAULT_CHAT_MODEL) {
-  if (resolveMode(env) === 'run-gateway') return runGatewayChat(env, model);
+export function gatewayChat(env: AiGatewayEnv, model: string = DEFAULT_CHAT_MODEL, meta?: GatewayMeta) {
+  if (resolveMode(env) === 'run-gateway') return runGatewayChat(env, model, meta);
   return createWorkersAiChat(model, { binding: gatewayBinding(env) });
 }
 
@@ -268,8 +299,8 @@ export function gatewayImage(env: AiGatewayEnv, model: string = DEFAULT_IMAGE_MO
   return createWorkersAiImage(model, { binding: gatewayBinding(env) });
 }
 
-export function gatewayTts(env: AiGatewayEnv, model: string = DEFAULT_TTS_MODEL) {
-  if (resolveMode(env) === 'run-gateway') return runGatewayTts(env, model);
+export function gatewayTts(env: AiGatewayEnv, model: string = DEFAULT_TTS_MODEL, meta?: GatewayMeta) {
+  if (resolveMode(env) === 'run-gateway') return runGatewayTts(env, model, meta);
   return createWorkersAiTts(model, { binding: gatewayBinding(env) });
 }
 

@@ -18,7 +18,7 @@ function messageText(m: UIMessage): string {
 
 export function AIStudio(): JSX.Element {
   const connection = useMemo(() => studioChatConnection(), []);
-  const { messages, sendMessage, isLoading, error } = useChat({ connection });
+  const { messages, sendMessage, isLoading, error } = useChat({ connection, devtools: { name: 'AI Studio Chat' } });
 
   const [input, setInput] = useState('');
   const logRef = useRef<HTMLDivElement>(null);

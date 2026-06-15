@@ -277,7 +277,7 @@ export async function synthesizeTts(args: {
   let result: { audio: string };
   try {
     result = await generateSpeech({
-      adapter: gatewayTts(args.env as unknown as AiGatewayEnv),
+      adapter: gatewayTts(args.env as unknown as AiGatewayEnv, undefined, { op: 'tts' }),
       text: args.script,
       voice: auraSpeaker(args.voice.profile),
       format: 'mp3',

@@ -1,6 +1,6 @@
 import { FormEvent, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useSession } from '../lib/auth-client';
+import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
@@ -46,30 +46,6 @@ export function classifyUploadError(message: string): string {
   return 'unknown';
 }
 
-async function resendVerification(email: string): Promise<{ ok: boolean; error: string | null }> {
-  // ALO-128: ask better-auth to re-issue the verification email. better-auth
-  // requires the email in the body and cross-checks it against the session.
-  let res: Response;
-  try {
-    res = await fetch('/api/auth/send-verification-email', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-  } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : 'Network error' };
-  }
-  if (res.ok) return { ok: true, error: null };
-  let message = `Request failed (${res.status})`;
-  try {
-    const body = (await res.json()) as { message?: string; error?: string } | null;
-    message = body?.message ?? body?.error ?? message;
-  } catch {
-    // body wasn't JSON
-  }
-  return { ok: false, error: message };
-}
 
 export function Upload(): JSX.Element {
   const { data: session } = useSession();
@@ -166,7 +142,7 @@ export function Upload(): JSX.Element {
                   setResendStatus('No email on session.');
                   return;
                 }
-                void resendVerification(email).then((r) =>
+                void resendVerificationEmail(email).then((r) =>
                   setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed'),
                 );
               }}

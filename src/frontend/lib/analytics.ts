@@ -33,8 +33,23 @@ export function readAnalyticsConfig(): AnalyticsConfig {
   };
 }
 
+function hasAnalyticsConsent(): boolean {
+  try {
+    const v = window.localStorage.getItem('cookie-consent:v1');
+    if (v === 'accepted') return true;
+    // Declined or missing: don't start PostHog. The cookie banner calls
+    // initAnalytics() directly when the user clicks Accept.
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
   if (started || !config.enabled || !config.apiKey) return;
+  // Gate on explicit consent. On first visit there is no stored choice yet;
+  // the CookieBanner component calls initAnalytics() again on Accept.
+  if (!hasAnalyticsConsent()) return;
   posthog.init(config.apiKey, {
     api_host: config.host,
     // Capture the standard set automatically; we layer custom events on top

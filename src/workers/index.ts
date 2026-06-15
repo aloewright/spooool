@@ -48,6 +48,7 @@ import { createRoutes, runAbandonedSessionsSweep, type CreateEnv } from './creat
 import { studioRoutes, type StudioEnv } from './studio';
 import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
+import { waitlistRoutes, type WaitlistEnv } from './waitlist';
 import { discoverRoutes } from './discover';
 import { runEmailDigestSweep } from './notification-email';
 import { warmFeedCaches } from './feed-warm';
@@ -67,7 +68,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & TurnstileEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
@@ -286,6 +287,7 @@ app.route('/', statusRoutes);
 app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
+app.route('/', waitlistRoutes);
 // /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
 // relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);

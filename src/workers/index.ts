@@ -49,7 +49,7 @@ import { studioRoutes, type StudioEnv } from './studio';
 import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { discoverRoutes } from './discover';
-import { runEmailDigestSweep } from './notification-email';
+import { runEmailDigestSweep, sendNewUploadEmails } from './notification-email';
 import { warmFeedCaches } from './feed-warm';
 import type { AiGatewayMode } from './ai-gateway';
 import type { TurnstileEnv } from './turnstile';
@@ -180,6 +180,27 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   // trending list and any cached video-metadata KV entries are stale.
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
   purgeTrendingEdgeCache(c);
+
+  // Notify subscribers by email now that the video is actually watchable.
+  waitUntilBackground(c, (async () => {
+    try {
+      const video = await c.env.DB.prepare(
+        `SELECT v.id, v.user_id, v.title, u.name AS channel_name
+         FROM videos v LEFT JOIN user u ON u.id = v.user_id
+         WHERE v.id = ?`,
+      ).bind(videoId).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
+      if (!video) return;
+      await sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
+        videoId: video.id,
+        channelUserId: video.user_id,
+        channelName: video.channel_name ?? '',
+        videoTitle: video.title,
+        origin: new URL(c.req.url).origin,
+      });
+    } catch (err) {
+      console.warn('[encode] new-upload email failed', { videoId, err: err instanceof Error ? err.message : String(err) });
+    }
+  })());
 
   console.log('[encode] complete', { videoId, masterKey: body.masterKey, thumbnailKey: body.thumbnailKey });
   return c.json({ ok: true });

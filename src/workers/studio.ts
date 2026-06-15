@@ -91,7 +91,7 @@ studioRoutes.post('/api/studio/chat', async (c) => {
   // CloudflareAiGateway.run returns Promise<Response> — a tsc-only divergence
   // bridged at runtime by the real Ai binding. Same pattern as create-tools.ts.
   const stream = chat({
-    adapter: gatewayChat(c.env as unknown as AiGatewayEnv),
+    adapter: gatewayChat(c.env as unknown as AiGatewayEnv, undefined, { op: 'chat', userId: user.id }),
     systemPrompts: [STUDIO_SYSTEM_PROMPT],
     messages: parsed.data.messages,
   });
@@ -331,7 +331,7 @@ studioRoutes.post('/api/studio/metadata', async (c) => {
   let metadata: VideoMetadata;
   try {
     metadata = await chat({
-      adapter: gatewayChat(c.env as unknown as AiGatewayEnv),
+      adapter: gatewayChat(c.env as unknown as AiGatewayEnv, undefined, { op: 'metadata', userId: user.id }),
       systemPrompts: [METADATA_SYSTEM_PROMPT],
       messages: [{ role: 'user', content: contextText }],
       outputSchema: metadataOutputSchema,

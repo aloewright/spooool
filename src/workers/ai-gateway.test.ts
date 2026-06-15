@@ -245,6 +245,64 @@ describe('ai-gateway run-gateway mode', () => {
   });
 });
 
+describe('ai-gateway: GatewayMeta threading (ALO-651)', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('gatewayChat threads op + userId into gateway opts when meta is provided', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue({ response: 'ok' });
+
+    for await (const _ of gatewayChat(env, undefined, { op: 'chat', userId: 'u42' }).chatStream({
+      model: DEFAULT_CHAT_MODEL,
+      messages: [{ role: 'user', content: 'hi' }],
+    } as any)) { /* drain */ }
+
+    const [, , opts] = env.AI.run.mock.calls[0];
+    expect(opts.gateway.metadata).toEqual({ op: 'chat', userId: 'u42' });
+    expect(opts.gateway.id).toBe(GATEWAY_ID);
+  });
+
+  it('gatewayChat omits metadata key entirely when no meta provided (backward compat)', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue({ response: 'ok' });
+
+    for await (const _ of gatewayChat(env).chatStream({
+      model: DEFAULT_CHAT_MODEL,
+      messages: [{ role: 'user', content: 'hi' }],
+    } as any)) { /* drain */ }
+
+    const [, , opts] = env.AI.run.mock.calls[0];
+    expect(opts.gateway.metadata).toBeUndefined();
+    expect(opts.gateway.id).toBe(GATEWAY_ID);
+  });
+
+  it('gatewayTts threads op into gateway opts', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue(new Uint8Array([1, 2, 3]));
+
+    await gatewayTts(env, undefined, { op: 'tts' }).generateSpeech({
+      model: DEFAULT_TTS_MODEL, text: 'hello',
+    } as any);
+
+    const [, , opts] = env.AI.run.mock.calls[0];
+    expect(opts.gateway.metadata).toEqual({ op: 'tts' });
+  });
+
+  it('gatewayChat.structuredOutput threads meta gateway opts', async () => {
+    const env = makeEnv({ AI_GATEWAY_MODE: 'run-gateway' });
+    env.AI.run.mockResolvedValue({ response: '{}' });
+
+    await gatewayChat(env, undefined, { op: 'metadata', userId: 'u7', skipCache: true }).structuredOutput({
+      chatOptions: { model: DEFAULT_CHAT_MODEL, messages: [] },
+      outputSchema: {},
+    } as any);
+
+    const [, , opts] = env.AI.run.mock.calls[0];
+    expect(opts.gateway.metadata).toEqual({ op: 'metadata', userId: 'u7' });
+    expect(opts.gateway.skipCache).toBe(true);
+  });
+});
+
 describe('ai-gateway: every activity is gateway-routed', () => {
   beforeEach(() => vi.clearAllMocks());
 

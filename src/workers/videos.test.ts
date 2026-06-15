@@ -581,6 +581,52 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     expect(insert!.bound[2]).toBe('my video');
   });
 
+  it('retrying the final chunk after KV cleanup returns 201 via done sentinel', async () => {
+    const { env, kv } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    // chunk 0
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '2');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    expect(res0.status).toBe(202);
+    const { videoId, uploadId } = (await res0.json()) as { videoId: string; uploadId: string };
+
+    // chunk 1 (final) — completes successfully
+    const fd1 = new FormData();
+    fd1.set('title', 'vid');
+    fd1.set('description', '');
+    fd1.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1.set('chunkIndex', '1');
+    fd1.set('chunkCount', '2');
+    fd1.set('uploadId', uploadId);
+    const res1 = await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
+    expect(res1.status).toBe(201);
+
+    // Done sentinel must be present after successful completion.
+    const doneKey = `upload-done:${USER_ID}:${uploadId}`;
+    expect(kv[doneKey]).toBeDefined();
+
+    // Simulate: client never received the 201 (dropped connection) and retries.
+    // Session keys are gone but the done sentinel remains in KV.
+    const fd1Retry = new FormData();
+    fd1Retry.set('title', 'vid');
+    fd1Retry.set('description', '');
+    fd1Retry.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1Retry.set('chunkIndex', '1');
+    fd1Retry.set('chunkCount', '2');
+    fd1Retry.set('uploadId', uploadId);
+    const res1Retry = await fetcher('/api/videos/upload', { method: 'POST', body: fd1Retry });
+    expect(res1Retry.status).toBe(201);
+    const bodyRetry = (await res1Retry.json()) as { id: string; status: string };
+    expect(bodyRetry.id).toBe(videoId);
+    expect(bodyRetry.status).toBe('queued');
+  });
+
   it('final chunk transitions existing row to queued, returns same videoId', async () => {
     const { env, dbInserts, dbUpdates, queueSends } = multiChunkEnv();
     const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });

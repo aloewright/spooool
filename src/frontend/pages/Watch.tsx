@@ -286,6 +286,21 @@ export function Watch(): JSX.Element {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
 
+  // Poll for status updates while the video is being processed. Stops
+  // automatically once the video reaches a terminal state (ready or failed).
+  useEffect(() => {
+    if (!id || !video) return;
+    const { status } = video;
+    if (!status || status === 'ready' || status === 'failed') return;
+    const timer = window.setInterval(() => {
+      void fetch(`/api/videos/${id}`)
+        .then(async (r) => r.ok ? (await r.json() as VideoResponse) : null)
+        .then((data) => { if (data) setVideo(data); })
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [id, video?.status]);
+
   // ALO-145: record this watch in the signed-in user's history. Fire-and-forget;
   // failures are silent so a hiccup against /api/users/me/history can't disrupt
   // playback. Anonymous users are skipped — there's no row to UPSERT for them.

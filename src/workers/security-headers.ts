@@ -2,7 +2,8 @@ import type { MiddlewareHandler } from 'hono';
 
 const CSP_DIRECTIVES: Record<string, string[]> = {
   'default-src': ["'self'"],
-  'script-src': ["'self'"],
+  // challenges.cloudflare.com: Turnstile CAPTCHA script loader.
+  'script-src': ["'self'", 'https://challenges.cloudflare.com'],
   'style-src': ["'self'", "'unsafe-inline'"],
   'img-src': ["'self'", 'data:', 'blob:', 'https:'],
   'font-src': ["'self'", 'data:'],
@@ -10,6 +11,12 @@ const CSP_DIRECTIVES: Record<string, string[]> = {
     "'self'",
     'https://videodelivery.net',
     'https://*.cloudflarestream.com',
+    // Turnstile token validation.
+    'https://challenges.cloudflare.com',
+    // PostHog analytics (VITE_POSTHOG_HOST default; self-hosted installs add their own host).
+    'https://us.i.posthog.com',
+    // Sentry browser error reporting.
+    'https://*.ingest.sentry.io',
   ],
   'media-src': [
     "'self'",
@@ -17,7 +24,8 @@ const CSP_DIRECTIVES: Record<string, string[]> = {
     'https://videodelivery.net',
     'https://*.cloudflarestream.com',
   ],
-  'frame-src': ['https://www.youtube-nocookie.com'],
+  // challenges.cloudflare.com: Turnstile renders inside a sandboxed iframe.
+  'frame-src': ['https://www.youtube-nocookie.com', 'https://challenges.cloudflare.com'],
   'object-src': ["'none'"],
   'frame-ancestors': ["'none'"],
   'base-uri': ["'self'"],

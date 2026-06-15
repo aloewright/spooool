@@ -707,6 +707,20 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   ]);
 
   if (!multipartUploadId || !uploadMetaJson) {
+    // The final chunk may have completed and cleaned up KV before the 201
+    // response reached the client (dropped on a flaky connection). If the
+    // client retries with the same uploadId, recover via the done sentinel.
+    if (uploadId) {
+      const doneRaw = await env.SESSIONS.get(`upload-done:${user.id}:${uploadId}`);
+      if (doneRaw) {
+        try {
+          const done = JSON.parse(doneRaw) as { videoId?: string };
+          if (done.videoId) {
+            return c.json({ id: done.videoId, status: 'queued' }, 201);
+          }
+        } catch { /* malformed sentinel — fall through to 400 */ }
+      }
+    }
     return c.json({ error: 'Missing upload session. Start with chunkIndex=0.' }, 400);
   }
 
@@ -804,6 +818,15 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   purgeTrendingEdgeCache(c);
 
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
+
+  // Write a short-lived sentinel so a retry of the final chunk (e.g. when
+  // the 201 response was dropped in transit) gets the same 201 rather than
+  // a 400 "Missing upload session". 300 s is well within any retry window.
+  await env.SESSIONS.put(
+    `upload-done:${user.id}:${resolvedUploadId}`,
+    JSON.stringify({ videoId: uploadMeta.videoId }),
+    { expirationTtl: 300 },
+  );
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });

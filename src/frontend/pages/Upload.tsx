@@ -250,8 +250,8 @@ export function Upload(): JSX.Element {
       {error ? <p className="status-error">{error}</p> : null}
       {uploadedVideoId ? (
         <p className="status-ok">
-          Upload complete.{' '}
-          <Link to={`/watch/${uploadedVideoId}`}>Watch your video</Link>
+          Upload complete — encoding in progress.{' '}
+          <Link to={`/watch/${uploadedVideoId}`}>Track encoding progress</Link>
         </p>
       ) : null}
     </main>

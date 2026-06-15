@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   __resetForTests,
@@ -20,9 +21,14 @@ vi.mock('posthog-js', () => {
 
 import posthog from 'posthog-js';
 
+function acceptAnalyticsConsent(): void {
+  window.localStorage.setItem('cookie-consent:v1', 'accepted');
+}
+
 afterEach(() => {
   __resetForTests();
   vi.clearAllMocks();
+  window.localStorage.clear();
 });
 
 describe('readAnalyticsConfig', () => {
@@ -49,7 +55,17 @@ describe('initAnalytics', () => {
     expect(posthog.init).not.toHaveBeenCalled();
   });
 
+  it('is a no-op without cookie consent', () => {
+    initAnalytics({
+      apiKey: 'phc_test',
+      host: 'https://us.i.posthog.com',
+      enabled: true,
+    });
+    expect(posthog.init).not.toHaveBeenCalled();
+  });
+
   it('initialises posthog when enabled with a key', () => {
+    acceptAnalyticsConsent();
     initAnalytics({
       apiKey: 'phc_test',
       host: 'https://us.i.posthog.com',
@@ -63,6 +79,7 @@ describe('initAnalytics', () => {
   });
 
   it('is idempotent — second call does not re-init', () => {
+    acceptAnalyticsConsent();
     const cfg = { apiKey: 'phc_test', host: 'https://x', enabled: true };
     initAnalytics(cfg);
     initAnalytics(cfg);
@@ -81,6 +98,7 @@ describe('track / identify / reset', () => {
   });
 
   it('proxies through to posthog after init', () => {
+    acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     track('signup', { source: 'invite' });
     identify('user-1', { plan: 'free' });

@@ -1,6 +1,6 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { signOut, useSession } from '../lib/auth-client';
+import { resendVerificationEmail, signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
 
 interface AccountInfo {
@@ -91,6 +91,7 @@ export function AccountSettings(): JSX.Element {
   const [emailDraft, setEmailDraft] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailInfo, setEmailInfo] = useState<string | null>(null);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
 
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -416,6 +417,30 @@ export function AccountSettings(): JSX.Element {
             Save email
           </button>
         </form>
+        {session.user.emailVerified === false ? (
+          <div className="stack-xs">
+            <p className="ds-meta status-error">
+              Email not verified. Check your inbox for a verification link.
+            </p>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setResendStatus(null);
+                void resendVerificationEmail(session.user.email).then((r) =>
+                  setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed'),
+                );
+              }}
+            >
+              Resend verification email
+            </button>
+            {resendStatus ? <p className="ds-meta">{resendStatus}</p> : null}
+          </div>
+        ) : (
+          <p className="ds-meta" style={{ color: 'var(--color-success, green)' }}>
+            Email verified
+          </p>
+        )}
       </section>
 
       <section className="stack-sm" aria-label="Password">

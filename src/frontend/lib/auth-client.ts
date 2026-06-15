@@ -34,6 +34,10 @@ export async function resetPassword(args: {
   return postAuth('/api/auth/reset-password', body, captchaToken);
 }
 
+export async function resendVerificationEmail(email: string): Promise<AuthResponse> {
+  return postAuth('/api/auth/send-verification-email', { email });
+}
+
 async function postAuth(path: string, body: unknown, captchaToken?: string | null): Promise<AuthResponse> {
   let res: Response;
   try {

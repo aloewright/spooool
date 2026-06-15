@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
+import { CookieBanner } from './components/CookieBanner';
 import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
@@ -61,6 +62,7 @@ const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds
 const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
+const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -530,19 +532,91 @@ function Home(): JSX.Element {
 
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
-      <section
-        className="stack-sm"
-        style={{
-          alignItems: 'center',
-          textAlign: 'center',
-          paddingTop: 'var(--space-8)',
-          paddingBottom: 'var(--space-4)',
-        }}
-      >
-        <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
-          A video host that respects your time. Upload, stream, share — no friction.
-        </p>
-      </section>
+      {!session?.user ? (
+        <section
+          className="stack"
+          style={{
+            alignItems: 'center',
+            textAlign: 'center',
+            paddingTop: 'var(--space-10)',
+            paddingBottom: 'var(--space-6)',
+          }}
+        >
+          <h1
+            style={{
+              fontSize: 'clamp(var(--text-3xl), 5vw, var(--text-5xl))',
+              fontWeight: 800,
+              lineHeight: 1.15,
+              letterSpacing: '-0.02em',
+              margin: 0,
+              maxWidth: 600,
+            }}
+          >
+            Your video.
+            <br />
+            Your audience.
+            <br />
+            No nonsense.
+          </h1>
+          <p className="ds-lede" style={{ maxWidth: 520, margin: '0 auto' }}>
+            Creator-first video hosting — adaptive streaming, channel pages, memberships, and
+            tipping. No ads. No algorithm fighting you.
+          </p>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link to="/signup" className="btn">Sign up free</Link>
+            <Link to="/pricing" className="btn btn--secondary">See pricing</Link>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              gap: 'var(--space-4)',
+              marginTop: 'var(--space-4)',
+              width: '100%',
+              textAlign: 'left',
+            }}
+          >
+            {[
+              {
+                emoji: '🎬',
+                title: 'Upload & stream',
+                body: 'Adaptive bitrate HLS playback, anywhere. 5 GiB free.',
+              },
+              {
+                emoji: '📡',
+                title: 'Build your audience',
+                body: 'Subscriptions, comments, tags, search, and watch history.',
+              },
+              {
+                emoji: '💸',
+                title: 'Earn from your work',
+                body: 'Tips and recurring memberships on the Creator plan.',
+              },
+            ].map(({ emoji, title, body }) => (
+              <article key={title} className="card stack-sm">
+                <span style={{ fontSize: 'var(--text-2xl)' }}>{emoji}</span>
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 'var(--text-base)' }}>{title}</h3>
+                <p className="ds-meta" style={{ margin: 0 }}>{body}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section
+          className="stack-sm"
+          style={{
+            alignItems: 'center',
+            textAlign: 'center',
+            paddingTop: 'var(--space-6)',
+            paddingBottom: 'var(--space-2)',
+          }}
+        >
+          <p className="ds-lede" style={{ maxWidth: 480, margin: '0 auto' }}>
+            A video host that respects your time. Upload, stream, share — no friction.
+          </p>
+        </section>
+      )}
 
       {session?.user && history !== null && history.length > 0 ? (
         <section className="stack-sm" aria-label="Continue watching">
@@ -882,10 +956,12 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
+          <Route path="/waitlist" element={<Waitlist />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
       <SiteFooter />
+      <CookieBanner />
     </div>
     </MantineProvider>
   );

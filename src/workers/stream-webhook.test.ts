@@ -69,6 +69,11 @@ function makeFakeDB(seed: FakeRow[] = []): {
           }
           return { meta: { changes } };
         },
+        // email notification path: SELECT by stream_video_id — return null so the
+        // background send is a no-op in tests (no email bindings available).
+        async first() {
+          return null;
+        },
       };
       return stmt;
     },

@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { Context, MiddlewareHandler } from 'hono';
 import { buildThumbnailCandidates } from './thumbnails';
 import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
+import { sendNewUploadEmails, type NotificationDbEnv } from './notification-email';
+import { waitUntilBackground } from './wait-until';
 
 export const STREAM_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 
@@ -112,8 +114,7 @@ export async function verifyWebhookSignature(
   return { ok: true };
 }
 
-export interface StreamWebhookEnv {
-  DB: D1Database;
+export interface StreamWebhookEnv extends NotificationDbEnv {
   CF_STREAM_WEBHOOK_SECRET?: string;
 }
 
@@ -188,5 +189,29 @@ export const handleStreamWebhook =
     if (changes === 0) {
       return c.json({ ok: true, matched: 0, status }, 202);
     }
+
+    // Notify subscribers by email once the video is actually watchable.
+    if (status === 'ready') {
+      waitUntilBackground(c, (async () => {
+        try {
+          const video = await c.env.DB.prepare(
+            `SELECT v.id, v.user_id, v.title, u.name AS channel_name
+             FROM videos v LEFT JOIN user u ON u.id = v.user_id
+             WHERE v.stream_video_id = ?`,
+          ).bind(payload.uid).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
+          if (!video) return;
+          await sendNewUploadEmails(c.env, {
+            videoId: video.id,
+            channelUserId: video.user_id,
+            channelName: video.channel_name ?? '',
+            videoTitle: video.title,
+            origin: 'https://spooool.com',
+          });
+        } catch (err) {
+          console.warn('[stream-webhook] new-upload email failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });
+        }
+      })());
+    }
+
     return c.json({ ok: true, matched: changes, status });
   };

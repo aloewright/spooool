@@ -2,8 +2,6 @@ import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
-import { sendNewUploadEmails } from './notification-email';
-import { waitUntilBackground } from './wait-until';
 import {
   UPLOAD_INIT_BUCKET,
   rateLimit,
@@ -636,15 +634,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       videoId,
       channelUserId: user.id,
     });
-    waitUntilBackground(c, sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
-      videoId,
-      channelUserId: user.id,
-      channelName: user.name,
-      videoTitle: metadataParsed.data.title,
-      origin: new URL(c.req.url).origin,
-    }).catch((err) => {
-      console.warn('new-upload email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
-    }));
     await bumpTrendingCacheVersion(env.CACHE);
     purgeTrendingEdgeCache(c);
 
@@ -791,15 +780,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     videoId: uploadMeta.videoId,
     channelUserId: user.id,
   });
-  waitUntilBackground(c, sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
-    videoId: uploadMeta.videoId,
-    channelUserId: user.id,
-    channelName: user.name,
-    videoTitle: uploadMeta.title,
-    origin: new URL(c.req.url).origin,
-  }).catch((err) => {
-    console.warn('new-upload email failed', { videoId: uploadMeta.videoId, error: err instanceof Error ? err.message : String(err) });
-  }));
   await bumpTrendingCacheVersion(env.CACHE);
   purgeTrendingEdgeCache(c);
 

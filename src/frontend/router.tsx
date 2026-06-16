@@ -102,9 +102,8 @@ const ComposeScript = lazy(() =>
 // Project workspace shell (sub-project #4, PR-3). The $projectId layout +
 // read-only canvas + outline builder, all children of the /studio layout so
 // they inherit StudioLayout's QueryClient + studio-scoped Tailwind CSS behind
-// RequireAuth. Lazy so they land in the /studio async chunk. The book/voice/
-// marketplace panels (and the chapter editor) are PR-4 — links to them 404
-// gracefully until registered. See src/frontend/content-hub/routes/.
+// RequireAuth. Lazy so they land in the /studio async chunk. See
+// src/frontend/content-hub/routes/.
 const ProjectShell = lazy(() =>
   import('./content-hub/routes/ProjectShell').then((m) => ({ default: m.ProjectShell })),
 );
@@ -113,6 +112,23 @@ const ProjectCanvas = lazy(() =>
 );
 const ProjectOutline = lazy(() =>
   import('./content-hub/routes/ProjectOutline').then((m) => ({ default: m.ProjectOutline })),
+);
+// Project panels (sub-project #4, PR-4): book / voice / marketplace, all
+// children of the $projectId layout so they inherit StudioLayout's QueryClient +
+// studio-scoped Tailwind CSS behind RequireAuth. Lazy so they land in the
+// /studio async chunk. Their export / generate ACTIONS depend on the deferred
+// workflow bindings; the panels surface the backend's "unavailable" error
+// inline. See src/frontend/content-hub/routes/.
+const ProjectBook = lazy(() =>
+  import('./content-hub/routes/ProjectBook').then((m) => ({ default: m.ProjectBook })),
+);
+const ProjectVoice = lazy(() =>
+  import('./content-hub/routes/ProjectVoice').then((m) => ({ default: m.ProjectVoice })),
+);
+const ProjectMarketplace = lazy(() =>
+  import('./content-hub/routes/ProjectMarketplace').then((m) => ({
+    default: m.ProjectMarketplace,
+  })),
 );
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
@@ -385,10 +401,37 @@ const projectOutlineRoute = createRoute({
   validateSearch: passthroughSearch,
   component: () => <ProjectOutline />,
 });
+// Project panels (sub-project #4, PR-4): /studio/$projectId/{book,voice,
+// marketplace}, children of the $projectId layout so they inherit
+// StudioLayout's QueryClient + studio CSS and the RequireAuth gate. The
+// SideDrawer already links here (it 404'd until now). `validateSearch:
+// passthroughSearch` lets the marketplace ?tab= param survive the round trip
+// (the panel reads it via useSearch).
+const projectBookRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/book',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectBook />,
+});
+const projectVoiceRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/voice',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectVoice />,
+});
+const projectMarketplaceRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/marketplace',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectMarketplace />,
+});
 const projectShellRouteTree = projectShellRoute.addChildren([
   projectIndexRoute,
   projectCanvasRoute,
   projectOutlineRoute,
+  projectBookRoute,
+  projectVoiceRoute,
+  projectMarketplaceRoute,
 ]);
 const studioRouteTree = studioRoute.addChildren([
   studioIndexRoute,

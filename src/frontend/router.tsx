@@ -99,6 +99,21 @@ const ComposeBlog = lazy(() =>
 const ComposeScript = lazy(() =>
   import('./content-hub/routes/ComposeScript').then((m) => ({ default: m.ComposeScript })),
 );
+// Project workspace shell (sub-project #4, PR-3). The $projectId layout +
+// read-only canvas + outline builder, all children of the /studio layout so
+// they inherit StudioLayout's QueryClient + studio-scoped Tailwind CSS behind
+// RequireAuth. Lazy so they land in the /studio async chunk. The book/voice/
+// marketplace panels (and the chapter editor) are PR-4 — links to them 404
+// gracefully until registered. See src/frontend/content-hub/routes/.
+const ProjectShell = lazy(() =>
+  import('./content-hub/routes/ProjectShell').then((m) => ({ default: m.ProjectShell })),
+);
+const ProjectCanvas = lazy(() =>
+  import('./content-hub/routes/ProjectCanvas').then((m) => ({ default: m.ProjectCanvas })),
+);
+const ProjectOutline = lazy(() =>
+  import('./content-hub/routes/ProjectOutline').then((m) => ({ default: m.ProjectOutline })),
+);
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
 // 3b: intentionally NOT switched to beforeLoad to minimize behavior change).
@@ -330,11 +345,57 @@ const composeScriptRoute = createRoute({
   validateSearch: passthroughSearch,
   component: () => <ComposeScript />,
 });
+// Project workspace (sub-project #4, PR-3). `/studio/$projectId` is a nested
+// LAYOUT route (ProjectShell = <Outlet/>) under the /studio layout, so the
+// canvas/outline screens inherit StudioLayout's QueryClient + studio CSS and the
+// RequireAuth gate the parent already applies. The post-create redirect from the
+// compose wizards (→ /studio/$id) now resolves: the index child below redirects
+// the bare `/studio/$projectId` to `/studio/$projectId/canvas`, mirroring the
+// studio source's beforeLoad redirect. `validateSearch: passthroughSearch` lets
+// the `?logline=` param survive (the canvas/outline read it via useSearch).
+const projectShellRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/$projectId',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectShell />,
+});
+const projectIndexRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/',
+  component: function ProjectIndexRedirect(): JSX.Element {
+    // Bare /studio/$projectId → /studio/$projectId/canvas (replicates the
+    // studio source's beforeLoad redirect). Carry the projectId param + any
+    // search (e.g. ?logline=) through so the canvas can show the logline.
+    const { projectId } = projectShellRoute.useParams();
+    const search = projectShellRoute.useSearch();
+    return (
+      <Navigate to="/studio/$projectId/canvas" params={{ projectId }} search={search} replace />
+    );
+  },
+});
+const projectCanvasRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/canvas',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectCanvas />,
+});
+const projectOutlineRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/outline',
+  validateSearch: passthroughSearch,
+  component: () => <ProjectOutline />,
+});
+const projectShellRouteTree = projectShellRoute.addChildren([
+  projectIndexRoute,
+  projectCanvasRoute,
+  projectOutlineRoute,
+]);
 const studioRouteTree = studioRoute.addChildren([
   studioIndexRoute,
   composeRoute,
   composeBlogRoute,
   composeScriptRoute,
+  projectShellRouteTree,
 ]);
 // Legacy base path: /words* → /studio (matches the old zone-route 301).
 const wordsRoute = createRoute({

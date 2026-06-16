@@ -35,9 +35,9 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.41",
     "@better-auth/core": "^1.6.9",
-    "@blocknote/core": "^0.39.2",
-    "@blocknote/mantine": "^0.39.2",
-    "@blocknote/react": "^0.39.2",
+    "@blocknote/core": "^0.51.4",
+    "@blocknote/mantine": "^0.51.4",
+    "@blocknote/react": "^0.51.4",
     "@chenglou/pretext": "^0.0.6",
     "@cloudflare/ai-utils": "^1.0.1",
     "@cloudflare/containers": "^0.3.5",

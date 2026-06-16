@@ -98,6 +98,48 @@
 }
 
 /*
+ * Dark-mode token override for the studio scope.
+ *
+ * spooool drives its theme by toggling a `.dark` class on <html> (see
+ * App.tsx ThemeToggle). The `.studio-scope` block above pins the shadcn
+ * tokens to their LIGHT values unconditionally, so without this block the
+ * studio stayed light even when spooool was dark: every studio heading /
+ * paragraph renders near-black on a dark background and is invisible. That's
+ * because strand.css (spooool's global, UNLAYERED stylesheet) sets
+ * `h1..h6 { color: var(--foreground) }` and `p { color: var(--foreground) }`
+ * directly on elements — and being unlayered, those rules beat the studio's
+ * LAYERED Tailwind `text-*` utilities. So the only reliable lever is the
+ * `--foreground` token itself. Mirroring strand.css's own `.dark` palette here
+ * (so the studio matches spooool's dark look exactly) flips every token-based
+ * surface (bg-background/text-foreground, the DynamicIslandTOC, cards) AND the
+ * leaked strand element colors to their dark values in one place.
+ *
+ * `.dark .studio-scope` (specificity 0,2,0) wins over `.studio-scope` (0,1,0)
+ * when <html> carries `.dark`. fonts / radius are unchanged (theme-agnostic).
+ */
+.dark .studio-scope {
+  --background: oklch(0.195 0 0);
+  --foreground: oklch(0.94 0 0);
+  --card: oklch(0.225 0 0);
+  --card-foreground: oklch(0.94 0 0);
+  --popover: oklch(0.225 0 0);
+  --popover-foreground: oklch(0.94 0 0);
+  --primary: oklch(0.94 0 0);
+  --primary-foreground: oklch(0.195 0 0);
+  --secondary: oklch(0.26 0 0);
+  --secondary-foreground: oklch(0.75 0 0);
+  --muted: oklch(0.165 0 0);
+  --muted-foreground: oklch(0.6 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.94 0 0);
+  --destructive: oklch(0.7 0.15 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.27 0 0);
+  --input: oklch(0.27 0 0);
+  --ring: oklch(0.45 0 0);
+}
+
+/*
  * BlockNote editor containment (sub-project #4, PR-6).
  *
  * The blog-post / script-scene editors import `@blocknote/mantine/style.css`, a

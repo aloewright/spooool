@@ -1,6 +1,11 @@
 name = "spooool"
 main = "src/workers/index.ts"
-compatibility_date = "2024-03-29"
+# Bumped 2024-03-29 → 2024-09-23: the merged studio hub pulls in a dependency
+# that uses Node's global `Buffer` under `nodejs_compat`, which Workers only
+# exposes as a global from compatibility_date 2024-09-23+. On the old date every
+# hub /api/v1/* route 500'd with "Buffer is not defined" (studio showed no
+# books/blogs/scripts and creation failed). See the studio single-worker merge.
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 

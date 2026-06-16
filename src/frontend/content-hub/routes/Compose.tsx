@@ -19,6 +19,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DynamicIslandTOC } from '../components/dynamic-toc';
 import { ChoiceCard, Step, ToggleChip } from '../components/wizard';
 import { api } from '../lib/api';
+import { scrollToStep } from '../lib/scroll-to-step';
 
 type StepKey = 'title' | 'genre' | 'type' | 'logline' | 'audience' | 'voice' | 'review';
 
@@ -126,14 +127,7 @@ export function Compose() {
     const next = STEPS[nextIdx];
     window.history.pushState(null, '', `#step-${next.id}`);
     const el = document.getElementById(`step-${next.id}`);
-    if (el && containerRef.current) {
-      const top =
-        el.getBoundingClientRect().top -
-        containerRef.current.getBoundingClientRect().top +
-        containerRef.current.scrollTop -
-        40;
-      containerRef.current.scrollTo({ top, behavior: 'smooth' });
-    }
+    if (el && containerRef.current) scrollToStep(containerRef.current, el);
   };
 
   const canSubmit = title.trim().length > 0 && composed.length > 8;

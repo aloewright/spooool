@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useRef, type JSX } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import {
   createRootRoute,
   createRoute,
@@ -224,14 +224,38 @@ function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
 // what the useSearchParams compat shim relies on.
 const passthroughSearch = (s: Record<string, unknown>): Record<string, unknown> => s;
 
+// spooool owns the theme: ThemeToggle (App.tsx) toggles a `.dark` class on
+// <html> + writes localStorage('theme'). Mantine, however, tracks its OWN color
+// scheme via `data-mantine-color-scheme` and was never told about the toggle, so
+// every Mantine component (and the @blocknote/mantine editors) stayed light even
+// in dark mode. This hook observes the `.dark` class so the root MantineProvider
+// can `forceColorScheme` to match — making Mantine follow spooool's theme.
+function useHtmlColorScheme(): 'light' | 'dark' {
+  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+      ? 'dark'
+      : 'light',
+  );
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setScheme(root.classList.contains('dark') ? 'dark' : 'light');
+    sync(); // catch the class ThemeToggle's mount effect adds after first paint
+    const obs = new MutationObserver(sync);
+    obs.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => obs.disconnect();
+  }, []);
+  return scheme;
+}
+
 // ── Root: provides MantineProvider for the whole tree, renders the matched
 // route via <Outlet/>. Embed sits directly under root (bare, no shell); all
 // other routes sit under the `shellRoute` pathless layout which adds the
 // header/footer/splash chrome.
 const rootRoute = createRootRoute({
   component: function RootComponent(): JSX.Element {
+    const colorScheme = useHtmlColorScheme();
     return (
-      <MantineProvider>
+      <MantineProvider forceColorScheme={colorScheme}>
         <Outlet />
       </MantineProvider>
     );

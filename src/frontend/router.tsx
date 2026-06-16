@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, type JSX } from 'react';
+import { lazy, Suspense, useMemo, useRef, type JSX } from 'react';
 import {
   createRootRoute,
   createRoute,
@@ -10,10 +10,14 @@ import {
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
 import { useSession } from './lib/auth-client';
-// App.tsx holds the eager shell (header/footer/splash/Home + StudioHub) and is
-// always in the initial chunk, so Home is imported statically here — lazy()ing
-// it from the same module would be a no-op split (rolldown warns).
-import { AppHeader, Home, RouteFallback, SiteFooter, SplashGate, StudioHub } from './App';
+// App.tsx holds the eager shell (header/footer/splash/Home) and is always in
+// the initial chunk, so Home is imported statically here — lazy()ing it from
+// the same module would be a no-op split (rolldown warns). StudioHub (the
+// legacy /studio handoff → in-app AI Studio) is intentionally NOT imported
+// anymore: /studio now mounts the ported content hub (see studioRoute below).
+// The component still lives in App.tsx so nothing breaks if it's referenced
+// elsewhere.
+import { AppHeader, Home, RouteFallback, SiteFooter, SplashGate } from './App';
 import { CookieBanner } from './components/CookieBanner';
 import './styles/strand.css';
 
@@ -57,7 +61,9 @@ const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.P
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
 const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
-const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
+// (Removed the dead `Studio` lazy import — it was unused even before /studio
+// was repointed to the content hub. pages/Studio is still reachable via the
+// legacy StudioHub in App.tsx, which imports it independently.)
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -71,6 +77,16 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+// Content hub (ported studio UI). Both the /studio layout (QueryClient +
+// studio-scoped Tailwind CSS) and the hub-home index are lazy so they land in
+// the /studio async chunk and never inflate the eager bundle. See
+// src/frontend/content-hub/.
+const StudioLayout = lazy(() =>
+  import('./content-hub/StudioLayout').then((m) => ({ default: m.StudioLayout })),
+);
+const ContentHubHome = lazy(() =>
+  import('./content-hub/ContentHubHome').then((m) => ({ default: m.ContentHubHome })),
+);
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
 // 3b: intentionally NOT switched to beforeLoad to minimize behavior change).
@@ -81,15 +97,23 @@ function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
   const { data: session, isPending } = useSession();
   const location = useLocation();
 
+  // Capture the intended destination ONCE, at mount. Without this, the
+  // <Navigate> below recomputes when `location` flips to /login during the
+  // redirect itself, rewriting ?from to /login — which then bounces the user
+  // back to /login after they sign in (blank page / loop). Never carry an auth
+  // page as `from` (belt-and-suspenders against the same loop).
+  const intended = useRef(location.pathname).current;
+  const from = /^\/(login|signup)/.test(intended) ? '/' : intended;
+
   // TanStack's <Navigate> re-fires whenever its props object identity changes
   // (it compares previousProps !== props in a layout effect). A component that
   // also subscribes to router/session state re-renders, producing a fresh JSX
   // element (new props object) each time → infinite navigate loop. Memoize the
-  // whole <Navigate> element so it fires once (matching react-router's
-  // mount-only redirect).
+  // whole <Navigate> element (on the now-stable `from`) so it fires once,
+  // matching react-router's mount-only redirect.
   const loginRedirect = useMemo(
-    () => <Navigate to="/login" search={{ from: location.pathname }} replace />,
-    [location.pathname],
+    () => <Navigate to="/login" search={{ from }} replace />,
+    [from],
   );
 
   if (isPending) {
@@ -246,12 +270,29 @@ const createRouteRoute = createRoute({
     </RequireAuth>
   ),
 });
+// /studio is now the ported content hub (sub-project #4 PR-1), not the
+// one-shot StudioHub handoff. The route is a LAYOUT: it mounts the QueryClient
+// + studio-scoped Tailwind CSS (StudioLayout) behind the existing RequireAuth
+// gate (redirect to /login when signed out), and renders child screens via
+// <Outlet/>. The hub-home is the index child. Later PRs add the project/blog/
+// script detail children under this same layout. The legacy in-app AI Studio
+// (StudioHub → pages/Studio) stays in the tree but is no longer routed here.
 const studioRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: '/studio',
   validateSearch: passthroughSearch,
-  component: () => <StudioHub />,
+  component: () => (
+    <RequireAuth>
+      <StudioLayout />
+    </RequireAuth>
+  ),
 });
+const studioIndexRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/',
+  component: () => <ContentHubHome />,
+});
+const studioRouteTree = studioRoute.addChildren([studioIndexRoute]);
 // Legacy base path: /words* → /studio (matches the old zone-route 301).
 const wordsRoute = createRoute({
   getParentRoute: () => shellRoute,
@@ -435,7 +476,7 @@ const shellRouteTree = shellRoute.addChildren([
   uploadRoute,
   recordRoute,
   createRouteRoute,
-  studioRoute,
+  studioRouteTree,
   wordsRoute,
   wordsSplatRoute,
   profileRoute,

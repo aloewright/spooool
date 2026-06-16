@@ -1,0 +1,98 @@
+/*
+ * Studio / content-hub scoped Tailwind v4 entry.
+ *
+ * CRITICAL: this file deliberately does NOT do `@import "tailwindcss";`.
+ * That shorthand pulls in Tailwind's Preflight — a GLOBAL element reset
+ * (margin/padding/border/box-sizing on *, button/list/heading resets, etc.)
+ * that would wipe out spooool's hand-written design system (strand.css).
+ *
+ * Instead we import ONLY the theme + utilities layers (no `preflight.css`),
+ * exactly as documented under Tailwind v4 "Disabling Preflight". The result:
+ * `bg-white/80`, `grid`, `font-serif`, `dark:*`, etc. all work, but no global
+ * base reset is emitted, so non-/studio pages render identically to before.
+ *
+ * This stylesheet is imported ONLY from the /studio layout component
+ * (router.tsx → StudioLayout), so Vite code-splits it into the /studio async
+ * chunk and it never loads on the home/watch/etc. routes.
+ */
+
+/* Layer order must be declared so utilities win over theme. `base` is named
+   here for ordering only — we never populate it with Preflight. */
+@layer theme, base, components, utilities;
+
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* Typography plugin — the hub home does not use `prose`, but blog/script
+   editors in later PRs do, and it ships in this same code-split chunk. */
+@plugin "@tailwindcss/typography";
+
+/* tweakcn-style dark variant: `dark:*` utilities activate under a `.dark`
+   ancestor. The studio scope is light by default; a later PR can toggle
+   `.dark` on the scope wrapper without touching spooool's global theme. */
+@custom-variant dark (&:is(.dark *));
+
+/* Map the shadcn/tweakcn design tokens onto Tailwind's theme so token
+   utilities (bg-card, text-foreground, border-border, font-serif, the radius
+   scale, shadows) resolve. Ported from studio/apps/web/client/index.css. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/*
+ * Token defaults for the studio scope. The studio app drives these via a
+ * runtime theme picker (lib/theme.ts + the 47 tweakcn theme files); the hub
+ * scaffold ships only the shadcn baseline so colors/fonts have sane values.
+ * Scoped to `.studio-scope` (the layout wrapper) so these vars never leak onto
+ * spooool's global `:root` / strand.css tokens.
+ */
+.studio-scope {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.625rem;
+  --font-sans: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  --font-serif: 'Aleo', ui-serif, Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}

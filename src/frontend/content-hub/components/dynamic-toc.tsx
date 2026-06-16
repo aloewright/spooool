@@ -103,7 +103,17 @@ export function DynamicIslandTOC({ children, selector = '[data-toc]', scrollCont
 
   useEffect(() => {
     const target: HTMLElement | Window = scrollContainer ?? window;
-    const handleScroll = () => {
+    // Coalesce scroll handling to at most once per animation frame. The previous
+    // version ran on EVERY scroll event, each time doing a getBoundingClientRect
+    // per heading (forced reflow) plus two setState calls (framer-motion
+    // re-render). During a programmatic or momentum scroll — which fires events
+    // faster than the browser paints — that synchronous reflow+render cost
+    // compounded and hung the renderer for tens of seconds (the compose wizard
+    // "freeze after Enter"). rAF caps the work at once per frame so it can never
+    // outpace painting.
+    let rafId = 0;
+    const compute = () => {
+      rafId = 0;
       let currentActiveId: string | null = null;
       for (const h of headings) {
         const top = h.element.getBoundingClientRect().top;
@@ -121,9 +131,15 @@ export function DynamicIslandTOC({ children, selector = '[data-toc]', scrollCont
       const total = scrollHeight - clientHeight;
       setProgress(total > 0 ? Math.min(100, Math.max(0, (scrollTop / total) * 100)) : 0);
     };
+    const handleScroll = () => {
+      if (!rafId) rafId = requestAnimationFrame(compute);
+    };
     target.addEventListener('scroll', handleScroll, { passive: true } as AddEventListenerOptions);
-    handleScroll();
-    return () => target.removeEventListener('scroll', handleScroll);
+    compute();
+    return () => {
+      target.removeEventListener('scroll', handleScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, [headings, scrollContainer]);
 
   const activeHeading = headings.find((h) => h.id === activeId);

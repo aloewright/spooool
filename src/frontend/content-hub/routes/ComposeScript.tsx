@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DynamicIslandTOC } from '../components/dynamic-toc';
 import { Step, ToggleChip } from '../components/wizard';
 import { api } from '../lib/api';
+import { scrollToStep } from '../lib/scroll-to-step';
 import { SCRIPT_FORMATS, getScriptFormat } from '../shared/script-formats';
 import type { ScriptFormatId } from '../shared/script-formats';
 
@@ -79,14 +80,7 @@ export function ComposeScript() {
     const next = STEPS[nextIdx];
     window.history.pushState(null, '', `#step-${next.id}`);
     const el = document.getElementById(`step-${next.id}`);
-    if (el && containerRef.current) {
-      const top =
-        el.getBoundingClientRect().top -
-        containerRef.current.getBoundingClientRect().top +
-        containerRef.current.scrollTop -
-        40;
-      containerRef.current.scrollTo({ top, behavior: 'smooth' });
-    }
+    if (el && containerRef.current) scrollToStep(containerRef.current, el);
   };
 
   const canSubmit = title.trim().length > 0 && !!format && composed.length >= 8;

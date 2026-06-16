@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type JSX } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '@tanstack/react-router';
 import { useSession } from '../lib/auth-client';
 import { ReportButton } from './ReportButton';
 
@@ -57,7 +57,7 @@ function AuthorLine({
   return (
     <div className="ds-meta">
       {authorUsername ? (
-        <Link to={`/channel/${authorUsername}`} style={{ fontWeight: 600 }}>
+        <Link to="/channel/$username" params={{ username: authorUsername }} style={{ fontWeight: 600 }}>
           @{authorUsername}
         </Link>
       ) : (

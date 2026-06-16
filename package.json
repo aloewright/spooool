@@ -79,13 +79,13 @@
     "posthog-js": "^1.372.8",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^6.30.4",
     "remotion": "4.0.467",
     "tailwind-merge": "^1.14.0",
     "web-vitals": "^5.2.0",
     "whatwg-mimetype": "file:whatwg-mimetype-3.0.0.tgz",
     "ws": "^8.21.0",
-    "zod": "^4.3.6"
+    "zod": "^4.3.6",
+    "@tanstack/react-router": "^1.95.0"
   },
   "optionalDependencies": {
     "@rolldown/binding-linux-x64-gnu": "file:rolldown-binding-linux-x64-gnu-1.0.0-rc.17.tgz"

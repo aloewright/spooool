@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter } from 'react-router-dom';
-import App from './App';
+import { RealAppAt } from './test-utils/router';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -52,11 +51,7 @@ async function mountAt(route: string): Promise<void> {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   await act(async () => {
-    root!.render(
-      <MemoryRouter initialEntries={[route]}>
-        <App />
-      </MemoryRouter>,
-    );
+    root!.render(<RealAppAt route={route} />);
   });
   const yieldMacrotask = () => new Promise<void>((r) => setTimeout(r, 0));
   for (let i = 0; i < 50; i++) {

@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter } from 'react-router-dom';
-import App from './App';
+import { RealAppAt } from './test-utils/router';
 
 // React requires this flag to suppress the "not configured to support act(...)"
 // warning and to actually flush effects/lazy resolutions inside act().
@@ -54,11 +53,7 @@ async function mountAt(route: string): Promise<void> {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   await act(async () => {
-    root!.render(
-      <MemoryRouter initialEntries={[route]}>
-        <App />
-      </MemoryRouter>,
-    );
+    root!.render(<RealAppAt route={route} />);
   });
   // Suspense fallback → lazy chunk → component render takes multiple
   // turns of the event loop (dynamic import is a macrotask, then React

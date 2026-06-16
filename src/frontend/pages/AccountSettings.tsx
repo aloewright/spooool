@@ -1,5 +1,6 @@
 import { useEffect, useState, FormEvent, type JSX } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from '@tanstack/react-router';
+import { useSearchParams } from '../lib/use-search-params';
 import { resendVerificationEmail, signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';
 
@@ -876,7 +877,7 @@ export function AccountSettings(): JSX.Element {
                 className="btn btn--secondary btn--sm"
                 disabled={busy}
                 onClick={() =>
-                  void requestDelete().then(() => signOut().then(() => navigate('/', { replace: true })))
+                  void requestDelete().then(() => signOut().then(() => navigate({ to: '/', replace: true })))
                 }
               >
                 Confirm — schedule deletion

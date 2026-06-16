@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type JSX } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from '@tanstack/react-router';
 import { useSession } from '../lib/auth-client';
 import { VideoPlaceholderIcon } from '../components/Icons';
 import { formatCount } from '../lib/format';
@@ -39,7 +39,7 @@ interface ChannelVideo {
 const PAGE_SIZE = 24;
 
 export function Channel(): JSX.Element {
-  const { username } = useParams<{ username: string }>();
+  const { username } = useParams({ strict: false });
   const { data: session } = useSession();
   const [header, setHeader] = useState<ChannelHeader | null>(null);
   const [videos, setVideos] = useState<ChannelVideo[]>([]);
@@ -365,7 +365,7 @@ export function Channel(): JSX.Element {
             }}
           >
             {videos.map((video) => (
-              <Link key={video.id} to={`/watch/${video.id}`} className="suggestion-card">
+              <Link key={video.id} to="/watch/$id" params={{ id: video.id }} className="suggestion-card">
                 {video.thumbnail_url ? (
                   <img
                     src={video.thumbnail_url}

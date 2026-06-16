@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState, type JSX } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '@tanstack/react-router';
 import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
 import { TurnstileWidget } from '../components/TurnstileWidget';
@@ -227,7 +227,7 @@ export function Upload(): JSX.Element {
       {uploadedVideoId ? (
         <p className="status-ok">
           Upload complete — encoding in progress.{' '}
-          <Link to={`/watch/${uploadedVideoId}`}>Track encoding progress</Link>
+          <Link to="/watch/$id" params={{ id: uploadedVideoId }}>Track encoding progress</Link>
         </p>
       ) : null}
     </main>

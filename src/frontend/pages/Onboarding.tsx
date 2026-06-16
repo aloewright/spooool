@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from '@tanstack/react-router';
 import { useSession } from '../lib/auth-client';
 import {
   getSafeStorage,
@@ -117,7 +117,7 @@ export function Onboarding(): JSX.Element {
     // Always tag the completion event with the step we were on so funnel
     // analytics can tell "finished via Continue" from "bailed via Maybe later".
     track('onboarding_completed', { exited_from: stepIndexRef.current });
-    navigate('/', { replace: true });
+    void navigate({ to: '/', replace: true });
   }, [navigate, session?.user]);
 
   const advance = useCallback((): void => {
@@ -178,6 +178,12 @@ export function Onboarding(): JSX.Element {
 
   const progress = useMemo(() => `${stepIndex + 1} of ${STEPS.length}`, [stepIndex]);
 
+  // Memoized so the <Navigate> props identity stays stable across the
+  // re-renders useSession triggers — TanStack's <Navigate> re-fires whenever
+  // its props object changes, which would loop. See RequireAuth in router.tsx.
+  const loginRedirect = useMemo(() => <Navigate to="/login" replace />, []);
+  const homeRedirect = useMemo(() => <Navigate to="/" replace />, []);
+
   if (isPending) {
     return (
       <main className="app-main app-main--narrow stack">
@@ -187,7 +193,7 @@ export function Onboarding(): JSX.Element {
   }
 
   if (!session?.user) {
-    return <Navigate to="/login" replace />;
+    return loginRedirect;
   }
 
   // Already done — drop the user back to home instead of letting them
@@ -195,7 +201,7 @@ export function Onboarding(): JSX.Element {
   // `alreadyCompleted` falls back to `false` when localStorage is
   // unavailable, so a disabled-storage Chrome config still runs the flow.
   if (alreadyCompleted) {
-    return <Navigate to="/" replace />;
+    return homeRedirect;
   }
 
   return (

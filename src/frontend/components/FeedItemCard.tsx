@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link } from '@tanstack/react-router';
 import type { FeedItem } from '../lib/feeds-client';
 import { InlineVideoPlayer } from './InlineVideoPlayer';
 

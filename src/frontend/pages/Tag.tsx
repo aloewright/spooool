@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from '@tanstack/react-router';
 import { VideoPlaceholderIcon } from '../components/Icons';
 
 interface TagVideo {
@@ -19,7 +19,7 @@ interface TagResponse {
 }
 
 export function Tag(): JSX.Element {
-  const { slug = '' } = useParams<{ slug: string }>();
+  const { slug = '' } = useParams({ strict: false });
   const [data, setData] = useState<TagResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -85,7 +85,7 @@ export function Tag(): JSX.Element {
         >
           {data.videos.map((v) => (
             <li key={v.id}>
-              <Link to={`/watch/${v.id}`} className="suggestion-card">
+              <Link to="/watch/$id" params={{ id: v.id }} className="suggestion-card">
                 {v.thumbnail_url ? (
                   <img
                     src={v.thumbnail_url}
@@ -107,7 +107,7 @@ export function Tag(): JSX.Element {
                 <div className="ds-meta" style={{ marginTop: 4 }}>
                   {v.channel_username ? (
                     <>
-                      <Link to={`/channel/${v.channel_username}`}>
+                      <Link to="/channel/$username" params={{ username: v.channel_username }}>
                         {v.channel_name ?? v.channel_username}
                       </Link>{' '}
                       ·{' '}

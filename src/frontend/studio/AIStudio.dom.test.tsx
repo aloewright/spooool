@@ -2,19 +2,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from '../test-utils/router';
 import { StudioRoot } from './index';
 
 import type { JSX } from "react";
 
+// TanStack RouterProvider commits its first matched route on a transition, so
+// mount inside an async act() with the flag set (was synchronous under
+// the old MemoryRouter).
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 
-function mount(element: JSX.Element): void {
+async function mount(element: JSX.Element): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
-  act(() => {
+  await act(async () => {
     root!.render(element);
   });
 }
@@ -84,8 +89,8 @@ afterEach(() => {
 });
 
 describe('AIStudio', () => {
-  it('renders empty state hint before any messages', () => {
-    mount(
+  it('renders empty state hint before any messages', async () => {
+    await mount(
       <MemoryRouter>
         <StudioRoot />
       </MemoryRouter>,
@@ -100,7 +105,7 @@ describe('AIStudio', () => {
 
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(sseResponse(REPLY));
 
-    mount(
+    await mount(
       <MemoryRouter>
         <StudioRoot />
       </MemoryRouter>,

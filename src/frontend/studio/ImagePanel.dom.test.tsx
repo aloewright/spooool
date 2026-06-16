@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from '../test-utils/router';
 import { ImagePanel } from './ImagePanel';
 import { ApiError } from '../create/lib/create-client';
 
@@ -18,14 +18,19 @@ import { postImage, setThumbnailFromAsset } from './lib/studio-client';
 
 import type { JSX } from "react";
 
+// TanStack RouterProvider commits its first matched route on a transition, so
+// mount inside an async act() with the flag set (was synchronous under
+// the old MemoryRouter).
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 
-function mount(element: JSX.Element): void {
+async function mount(element: JSX.Element): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
-  act(() => {
+  await act(async () => {
     root!.render(element);
   });
 }
@@ -72,8 +77,8 @@ const SAMPLE_IMAGE = {
 };
 
 describe('ImagePanel', () => {
-  it('submit button is disabled when prompt is empty', () => {
-    mount(
+  it('submit button is disabled when prompt is empty', async () => {
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,
@@ -85,7 +90,7 @@ describe('ImagePanel', () => {
   });
 
   it('submit button becomes enabled after typing a prompt', async () => {
-    mount(
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,
@@ -106,7 +111,7 @@ describe('ImagePanel', () => {
   it('submits calls postImage with the trimmed prompt and renders the preview img', async () => {
     (postImage as ReturnType<typeof vi.fn>).mockResolvedValue(SAMPLE_IMAGE);
 
-    mount(
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,
@@ -140,7 +145,7 @@ describe('ImagePanel', () => {
       thumbnail_url: 'https://example.com/thumb.jpg',
     });
 
-    mount(
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,
@@ -175,7 +180,7 @@ describe('ImagePanel', () => {
       new ApiError(429, '/api/studio/image', null, 'Too many'),
     );
 
-    mount(
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,
@@ -198,7 +203,7 @@ describe('ImagePanel', () => {
       new ApiError(413, '/api/studio/image', null, 'Payload Too Large'),
     );
 
-    mount(
+    await mount(
       <MemoryRouter>
         <ImagePanel videoId="v1" />
       </MemoryRouter>,

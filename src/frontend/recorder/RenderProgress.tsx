@@ -17,7 +17,7 @@ export function RenderProgress({ jobId }: { jobId: string }): JSX.Element {
         setPollError(null);
         if (next.status === 'completed' && next.videoId) {
           // The recorder is a standalone app; navigate via window.location
-          // rather than react-router-dom (which is not mounted here).
+          // rather than the SPA router (which is not mounted here).
           window.location.href = `/watch/${next.videoId}`;
           return;
         }

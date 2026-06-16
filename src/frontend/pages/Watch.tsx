@@ -8,7 +8,8 @@ import {
   useState,
   type JSX,
 } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { useSearchParams } from '../lib/use-search-params';
 import { useSession } from '../lib/auth-client';
 // ALO-283: keep Comments (459 LoC) + ReportButton + VideoTags out of the
 // initial Watch chunk. They render below the player (and Comments is below
@@ -220,7 +221,7 @@ type UpNextVideo = {
 };
 
 export function Watch(): JSX.Element {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ strict: false });
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { data: session } = useSession();
@@ -600,7 +601,7 @@ export function Watch(): JSX.Element {
       if (!autoAdvanceRef.current) return;
       const next = upNextRef.current[0];
       if (!next) return;
-      navigate(`/watch/${next.id}`);
+      void navigate({ to: '/watch/$id', params: { id: next.id } });
     };
     player.on('ended', onEnded);
     return () => {
@@ -942,7 +943,8 @@ export function Watch(): JSX.Element {
             {upNext.map((v) => (
               <li key={v.id}>
                 <Link
-                  to={`/watch/${v.id}`}
+                  to="/watch/$id"
+                  params={{ id: v.id }}
                   className="row"
                   style={{
                     gap: 'var(--space-2)',

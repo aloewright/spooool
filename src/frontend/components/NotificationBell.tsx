@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from '@tanstack/react-router';
 import { Bell } from 'lucide-react';
 
 export function NotificationBell(): JSX.Element {

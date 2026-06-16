@@ -18,7 +18,10 @@ export function Login(): JSX.Element {
   // RequireAuth (and Signup/Login cross-links) carry it as a `?from=` search
   // param instead of react-router's `state.from`.
   const [params] = useSearchParams();
-  const next = params.get('from') ?? '/';
+  const fromParam = params.get('from') ?? '/';
+  // Never bounce back to an auth page (a stale ?from=/login would loop here
+  // once authed). Defensive — RequireAuth already avoids emitting it.
+  const next = /^\/(login|signup)/.test(fromParam) ? '/' : fromParam;
 
   // Memoized so the <Navigate> props identity is stable across the re-renders
   // useSession/useSearchParams trigger — otherwise TanStack's <Navigate> keeps

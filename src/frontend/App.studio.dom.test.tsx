@@ -6,28 +6,53 @@ import { RealAppAt } from './test-utils/router';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-// Regression for the "/studio breaks the site" infinite-redirect loop.
+// /studio behavior (sub-project #4, PR-1).
 //
-// /studio is handed off to the `editor` content-hub worker via the
-// spooool.com/studio* zone route (spec: docs/superpowers/specs/studio-content-hub.md).
-// When that zone route is NOT intercepting (local dev, or before the worker is
-// deployed) the spooool SPA serves /studio itself. The old StudioHub redirect
-// unconditionally re-issued window.location.replace('/studio'), which re-served
-// the SPA and looped forever. StudioHub now hands off at most once (guarded by
-// sessionStorage) and otherwise renders the in-app Studio fallback.
+// /studio used to be a one-shot handoff (StudioHub) to a separately-deployed
+// content-hub worker, with a sessionStorage guard against an infinite reload
+// loop. That handoff is GONE: /studio now mounts the ported content hub in-app
+// (src/frontend/content-hub/) behind RequireAuth. These tests preserve the
+// spirit of the old loop regression — "/studio must never break the site or
+// loop" — adapted to the new gated route:
+//   1. Signed out → redirect to /login (rendered inside the shell), no loop.
+//   2. Signed in  → the content-hub home mounts (QueryClient + studio CSS),
+//      no redirect, no loop.
+//
+// The auth state is driven by mocking `useSession` rather than better-auth's
+// async session fetch: RequireAuth's gate (and thus the route under test) is
+// what we're verifying, and the mock makes the signed-in/out states
+// deterministic without depending on the nanostore fetch lifecycle.
+type MockSession = { data: unknown; isPending: boolean };
+let mockSession: MockSession = { data: null, isPending: false };
+
+vi.mock('./lib/auth-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./lib/auth-client')>();
+  return { ...actual, useSession: () => mockSession };
+});
 
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 let replaceSpy: ReturnType<typeof vi.spyOn>;
+let assignSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  vi.stubGlobal('fetch', vi.fn(async () => new Response('null', {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })));
+  // The hub's /api/v1/* list calls return empty collections so the home
+  // renders its empty state without throwing.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify({ items: [], retention_days: 30 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+    ),
+  );
   window.sessionStorage.clear();
   window.sessionStorage.setItem('splash:seen', '1');
   replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+  assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+  mockSession = { data: null, isPending: false };
 });
 
 afterEach(() => {
@@ -46,57 +71,59 @@ afterEach(() => {
   window.sessionStorage.clear();
 });
 
-async function mountAt(route: string): Promise<void> {
+async function mountAt(route: string, settle?: () => boolean): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   await act(async () => {
     root!.render(<RealAppAt route={route} />);
   });
+  // Suspense fallback → lazy chunk → component render takes several event-loop
+  // turns, and /studio nests two lazy boundaries (StudioLayout → ContentHubHome).
+  // Poll until `settle()` is satisfied (or the cap is hit) rather than guessing
+  // a fixed flush count — robust against suite-load slowdowns. Mirrors the
+  // content-based polling in App.shell.dom.test.tsx.
   const yieldMacrotask = () => new Promise<void>((r) => setTimeout(r, 0));
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 100; i++) {
     await act(async () => {
       await yieldMacrotask();
     });
+    if (settle?.()) return;
   }
 }
 
-describe('StudioHub handoff (/studio loop regression)', () => {
-  it('hands off to the zone-routed hub exactly once on first visit', async () => {
+describe('/studio content hub (no-loop regression)', () => {
+  it('redirects to /login when signed out — never loops or blanks the site', async () => {
+    mockSession = { data: null, isPending: false };
     await mountAt('/studio');
-    // One handoff attempt, never a loop.
-    expect(replaceSpy).toHaveBeenCalledTimes(1);
-    expect(replaceSpy.mock.calls[0][0]).toBe('/studio');
-    // Guard marker is set so the post-reload mount knows it already tried.
-    expect(window.sessionStorage.getItem('studio:handoff')).toBe('1');
+    // RequireAuth → <Navigate to="/login">. The site is intact (shell still
+    // renders) rather than reloading itself or going blank.
+    expect(replaceSpy).not.toHaveBeenCalled();
+    expect(container!.querySelector('footer.app-footer')).not.toBeNull();
+    // Something rendered (the login redirect target), not a blank page.
+    expect((container!.textContent ?? '').trim()).not.toBe('');
   });
 
-  it('does NOT redirect again when the reload lands back on the SPA', async () => {
-    // Simulate the state right after the one-shot handoff reload when the zone
-    // route did not intercept (the marker survives the full page reload).
-    window.sessionStorage.setItem('studio:handoff', '1');
-    await mountAt('/studio');
-    // The loop is broken: no further redirect.
+  it('mounts the content-hub home when signed in (no redirect, no loop)', async () => {
+    mockSession = {
+      data: { user: { id: 'u1', email: 'writer@example.com', name: 'Writer' } },
+      isPending: false,
+    };
+    await mountAt('/studio', () =>
+      Array.from(container?.querySelectorAll('a') ?? []).some(
+        (a) => a.getAttribute('href') === '/studio/compose',
+      ),
+    );
+    // No window-level navigation occurred — the hub rendered in-app.
     expect(replaceSpy).not.toHaveBeenCalled();
-    // Marker cleared so a later, intentional visit can attempt the handoff again.
-    expect(window.sessionStorage.getItem('studio:handoff')).toBeNull();
-    // Site is intact (shell still rendered), not a blank reload loop.
-    expect(container!.querySelector('footer.app-footer')).not.toBeNull();
-  });
-
-  it('degrades to the in-app Studio (no redirect) when sessionStorage throws', async () => {
-    // Storage disabled/partitioned (private mode, sandboxed iframe): reading
-    // the guard key throws. Without a guard we must not attempt the handoff, or
-    // it would loop unguarded — so render the fallback instead.
-    const realGetItem = window.sessionStorage.getItem.bind(window.sessionStorage);
-    vi.spyOn(window.sessionStorage, 'getItem').mockImplementation((key: string) => {
-      if (key === 'studio:handoff') throw new Error('storage disabled');
-      return realGetItem(key);
-    });
-    await mountAt('/studio');
-    // No redirect attempted → no infinite loop.
-    expect(replaceSpy).not.toHaveBeenCalled();
-    // Shell still rendered (fallback Studio mounts inside it), not a blank page.
-    expect(container!.querySelector('footer.app-footer')).not.toBeNull();
+    expect(assignSpy).not.toHaveBeenCalled();
+    // The hub home renders the create-actions ("New book"/"New blog"/"New
+    // script"), each linking to the future /studio/compose* paths.
+    const hrefs = Array.from(container!.querySelectorAll('a')).map(
+      (a) => a.getAttribute('href') ?? '',
+    );
+    expect(hrefs).toContain('/studio/compose');
+    expect(hrefs).toContain('/studio/compose-blog');
+    expect(hrefs).toContain('/studio/compose-script');
   });
 });

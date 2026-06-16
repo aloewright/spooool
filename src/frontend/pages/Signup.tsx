@@ -18,7 +18,9 @@ export function Signup(): JSX.Element {
   // Post-signup redirect target carried via `?from=` search param (TanStack
   // has no router `state`); mirrors the Login page.
   const [params] = useSearchParams();
-  const next = params.get('from') ?? '/';
+  const fromParam = params.get('from') ?? '/';
+  // Never bounce back to an auth page (a stale ?from=/login|/signup would loop).
+  const next = /^\/(login|signup)/.test(fromParam) ? '/' : fromParam;
 
   // Memoized so the <Navigate> props identity is stable across re-renders —
   // otherwise TanStack's <Navigate> keeps re-firing (loop). See RequireAuth.

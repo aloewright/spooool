@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { Bell } from 'lucide-react';
 

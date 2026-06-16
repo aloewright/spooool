@@ -16,6 +16,8 @@ vi.mock('./lib/studio-client', async () => {
 // Import the mocked versions after vi.mock is hoisted.
 import { postImage, setThumbnailFromAsset } from './lib/studio-client';
 
+import type { JSX } from "react";
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 

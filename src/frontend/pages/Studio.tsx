@@ -3,6 +3,8 @@ import { useSession } from '../lib/auth-client';
 import { StudioRoot } from '../studio';
 import { Spinner } from '../create/Spinner';
 
+import type { JSX } from "react";
+
 export function Studio(): JSX.Element {
   const location = useLocation();
   const [sp] = useSearchParams();

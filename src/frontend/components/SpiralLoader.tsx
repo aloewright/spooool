@@ -1,6 +1,8 @@
 import * as React from 'react';
 import Lottie, { type LottieRefCurrentProps } from 'lottie-react';
 
+import type { JSX } from "react";
+
 const FAST_REPEATS = 4;
 const SLOW_REPEATS = 2;
 

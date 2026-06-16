@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom';
 
+import type { JSX } from "react";
+
 type Tier = {
   id: 'free' | 'creator';
   name: string;

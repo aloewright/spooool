@@ -1,7 +1,7 @@
 // ALO-179 / E8: full Terms of Service replacing the "pending" stub.
 // These terms govern the spooool video hosting service.
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (

@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // ALO-281: render-time crash fallback for the React tree. Wrapped around
 // <App /> in main.tsx via <Sentry.ErrorBoundary fallback={...}>. Sentry still
 // captures the error; this just keeps the user from staring at a blank page.

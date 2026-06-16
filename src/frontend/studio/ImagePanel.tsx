@@ -3,7 +3,7 @@
 // dataUrl as a preview. When a videoId is provided, offers a "Set as video
 // thumbnail" button that calls POST /api/videos/:id/thumbnail/from-asset.
 
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, type JSX } from 'react';
 import { ApiError, postImage, setThumbnailFromAsset, type GeneratedImage } from './lib/studio-client';
 import { Spinner } from '../create/Spinner';
 

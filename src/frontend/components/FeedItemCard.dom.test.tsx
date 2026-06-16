@@ -6,6 +6,8 @@ import { MemoryRouter } from 'react-router-dom';
 import { FeedItemCard } from './FeedItemCard';
 import type { FeedItem } from '../lib/feeds-client';
 
+import type { JSX } from "react";
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 

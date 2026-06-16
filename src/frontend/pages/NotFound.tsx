@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type JSX } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 
 // ALO-408: real 404 view. Previously `<Route path="*" element={<Navigate to="/">/>`

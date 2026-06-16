@@ -5,6 +5,8 @@ import { act } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import { Subscriptions } from './Subscriptions';
 
+import type { JSX } from "react";
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 

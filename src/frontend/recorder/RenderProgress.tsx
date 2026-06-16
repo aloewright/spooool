@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { fetchRenderStatus, type RenderJobStatus } from './lib/render-jobs';
 
 export function RenderProgress({ jobId }: { jobId: string }): JSX.Element {

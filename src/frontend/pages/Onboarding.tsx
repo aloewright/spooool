@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import {

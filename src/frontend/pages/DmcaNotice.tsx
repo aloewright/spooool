@@ -1,5 +1,7 @@
 import { useParams } from 'react-router-dom';
 
+import type { JSX } from "react";
+
 // LEGAL-REVIEW: this is the public-facing notice page shown in place of a
 // disabled video. Counsel must approve the wording before launch.
 

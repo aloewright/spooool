@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 
 // Strings comply with 17 U.S.C. § 512(c)(3)(A). See ALO-170.
 

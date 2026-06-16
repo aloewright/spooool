@@ -1,4 +1,4 @@
-import { useEffect, useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent, type JSX } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { resendVerificationEmail, signOut, useSession } from '../lib/auth-client';
 import { ActiveSessions } from '../components/ActiveSessions';

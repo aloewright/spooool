@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
 import { VideoPlaceholderIcon } from '../components/Icons';

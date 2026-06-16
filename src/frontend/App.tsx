@@ -50,6 +50,7 @@ const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.P
 const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
 const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
 const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 const Subscriptions = lazy(() =>
   import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
 );
@@ -245,7 +246,8 @@ function HeaderNav(): JSX.Element {
         <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
       {/* Studio is the content hub served by the `editor` worker via the
-          spooool.com/studio* zone route — full page load, not client routing. */}
+          spooool.com/studio* zone route — hard link / full page load so the
+          zone route wins (falls back to the in-app Studio if it's not live). */}
       <a href="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
       </a>
@@ -779,24 +781,49 @@ function useSplash(): { show: boolean; dismiss: () => void } {
   return { show, dismiss };
 }
 
-// The content hub (books/blogs/scripts + AI studio, ALO spec
-// docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
-// at spooool.com/studio via a zone route; a full page load hands the URL to
-// it. The legacy AI Studio component remains for its panels to be absorbed
-// into the hub. This component backs the in-shell `/studio` route as a
-// belt-and-suspenders client redirect for the rare case the SPA serves
-// `/studio` before the zone route intercepts it.
-function StudioHubRedirect() {
+// The content hub (writing studio + AI Studio, spec
+// docs/superpowers/specs/studio-content-hub.md) is served by the `editor`
+// worker via the spooool.com/studio* zone route. spooool hands `/studio` off
+// with a full page load (the nav uses a hard <a> link) so the zone route
+// always wins, and this component never runs in healthy prod.
+//
+// It ONLY runs when the SPA itself served `/studio` — i.e. the zone route is
+// not intercepting (local dev, or before the editor worker is deployed). The
+// previous version unconditionally re-issued `window.location.replace('/studio')`,
+// which re-served the SPA and looped forever, breaking the site. This version
+// hands off at most once (sessionStorage guard); if the reload lands back on
+// the SPA, it stops and renders the in-app Studio as a graceful fallback.
+function StudioHub(): JSX.Element | null {
+  const [fallback, setFallback] = useState(false);
   useEffect(() => {
+    const KEY = 'studio:handoff';
+    // sessionStorage can throw when storage is disabled/partitioned (private
+    // mode, sandboxed iframes). Since this guard is the only thing preventing
+    // an infinite handoff loop, treat any storage failure as "can't guard" and
+    // degrade straight to the in-app Studio rather than risk looping.
+    let alreadyTried: boolean;
+    try {
+      alreadyTried = sessionStorage.getItem(KEY) !== null;
+      if (alreadyTried) sessionStorage.removeItem(KEY);
+      else sessionStorage.setItem(KEY, '1');
+    } catch {
+      setFallback(true);
+      return;
+    }
+    if (alreadyTried) {
+      // We already tried the handoff and came back → the zone route isn't
+      // intercepting. Don't loop; degrade to the in-app Studio.
+      setFallback(true);
+      return;
+    }
     window.location.replace('/studio');
   }, []);
-  return null;
+  return fallback ? <Studio /> : null;
 }
 
 // `App` is the default export mounted by main.tsx — the full spooool shell
-// (header, routed pages, footer). The /studio handoff lives on its own route
-// (StudioHubRedirect) and via the HeaderNav <a href="/studio"> hard link, so
-// the rest of the app keeps client-side routing.
+// (header, routed pages, footer). `/studio` hands off to the content hub
+// (StudioHub) and legacy `/words*` URLs redirect to `/studio`.
 export default function App(): JSX.Element {
   const location = useLocation();
   const splash = useSplash();
@@ -856,7 +883,10 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route path="/studio" element={<StudioHubRedirect />} />
+          <Route path="/studio" element={<StudioHub />} />
+          {/* Legacy base path: /words* → /studio* (matches the old zone-route 301). */}
+          <Route path="/words" element={<Navigate to="/studio" replace />} />
+          <Route path="/words/*" element={<Navigate to="/studio" replace />} />
           <Route
             path="/profile"
             element={

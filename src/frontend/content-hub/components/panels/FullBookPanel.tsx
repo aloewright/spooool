@@ -9,9 +9,8 @@
 //     the bounce is reimplemented with framer-motion (already a dep) — same
 //     intent: a small scale pulse while an export is in flight.
 //   - The per-chapter "Edit" link targets the chapter editor
-//     (/studio/$projectId/chapters/$chapterId), which is a PR-6 route not yet in
-//     the typed route tree. Per the PR-4 brief it stays a plain <a href> and
-//     404s gracefully until PR-6 registers it.
+//     (/studio/$projectId/chapters/$chapterId). PR-6 registered that route, so
+//     the link is now a typed <Link> (was a plain <a href> through PR-4/PR-5).
 //
 // DEFERRED ACTION: the Export PDF / Export EPUB buttons POST to the book-export
 // workflow, which is guarded off until env.RENDER_WORKER / *_WORKFLOW bindings
@@ -19,6 +18,7 @@
 // banner) so a failed export surfaces the backend's "unavailable" message
 // without crashing the panel.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from '@tanstack/react-router';
 import { motion } from 'framer-motion';
 import { CheckCircle2, Download, FileText, LibraryBig, Menu, Pencil, X } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
@@ -178,12 +178,15 @@ export default function FullBookPanel({ projectId }: { projectId: string }): Rea
                       </Badge>
                       <Badge variant="outline">{chapter.word_count.toLocaleString()} words</Badge>
                       {chapter.id ? (
-                        // Chapter editor is PR-6; plain <a href> 404s gracefully.
+                        // Chapter editor route registered in PR-6 — typed <Link>.
                         <Button asChild size="sm" variant="outline">
-                          <a href={`/studio/${projectId}/chapters/${chapter.id}`}>
+                          <Link
+                            to="/studio/$projectId/chapters/$chapterId"
+                            params={{ projectId, chapterId: chapter.id }}
+                          >
                             <Pencil className="h-4 w-4" />
                             Edit
-                          </a>
+                          </Link>
                         </Button>
                       ) : null}
                     </div>

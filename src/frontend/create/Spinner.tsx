@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // Small CSS-only spinner used by the prompt-to-video flow. Sized via the
 // `size` prop (defaults to 24px). Styles live in strand.css as `.spinner`.
 

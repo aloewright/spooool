@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
 import { useParams } from 'react-router-dom';
 import { HlsPlayer } from '../lib/hls-player';
 import { StreamPlayer, type Player } from '../lib/stream-player';

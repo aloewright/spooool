@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { FeedItemCard } from '../components/FeedItemCard';
 import { searchDiscover, ALL_PROVIDERS, type ProviderKey, type DiscoverResponse } from '../lib/discover-client';
 import type { FeedItem } from '../lib/feeds-client';

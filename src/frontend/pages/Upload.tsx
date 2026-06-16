@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';

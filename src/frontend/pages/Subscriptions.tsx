@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { Link } from 'react-router-dom';
 import { VideoPlaceholderIcon } from '../components/Icons';
 import { track } from '../lib/analytics';

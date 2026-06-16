@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type JSX } from 'react';
 import { useSession } from '../lib/auth-client';
 
 type StatusFilter = 'open' | 'actioned' | 'dismissed' | 'all';

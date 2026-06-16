@@ -2,6 +2,8 @@ import { AnimationPanel } from './AnimationPanel';
 import { AIStudio } from './AIStudio';
 import { ImagePanel } from './ImagePanel';
 
+import type { JSX } from "react";
+
 export function StudioRoot({ videoId }: { videoId?: string } = {}): JSX.Element {
   return (
     <div className="stack stack-xl">

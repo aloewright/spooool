@@ -3,7 +3,7 @@
 // 2s. Loading + error states get visible treatment (Spinner, alert, retry)
 // so a stuck or failed job is never invisible.
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState, type JSX } from 'react';
 import { ApiError, createAutoJob, fetchJobStatus, type RenderJobStatus } from './lib/create-client';
 import { Spinner } from './Spinner';
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { useSession } from '../lib/auth-client';
 
 interface PayoutSummary {

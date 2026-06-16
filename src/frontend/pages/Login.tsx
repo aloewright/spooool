@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useState, type JSX } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';

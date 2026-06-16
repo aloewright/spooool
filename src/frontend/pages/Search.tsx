@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type JSX } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { VideoPlaceholderIcon } from '../components/Icons';
 

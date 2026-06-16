@@ -1,3 +1,4 @@
+import type { JSX } from "react";
 // Inline SVG icons used as card placeholders + suggestion glyphs. All four
 // share a single mark: a black squircle with a red record dot in the
 // middle. The differentiation between Upload / Channel / Play / Placeholder

@@ -5,6 +5,8 @@ import { act } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import { SiteFooter } from './App';
 
+import type { JSX } from "react";
+
 // ALO-405: the footer used to live inside <Home>, so any route other than `/`
 // rendered no ToS / Privacy / DMCA links at all. These tests pin the new
 // behavior: SiteFooter is a standalone component mounted by <App>'s shell

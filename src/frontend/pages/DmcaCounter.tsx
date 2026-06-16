@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useSession } from '../lib/auth-client';
 
 // LEGAL-REVIEW: counter-notice form labels and consent statement must match

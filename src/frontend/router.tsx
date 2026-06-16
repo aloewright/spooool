@@ -130,6 +130,32 @@ const ProjectMarketplace = lazy(() =>
     default: m.ProjectMarketplace,
   })),
 );
+// Blog + script workspaces (sub-project #4, PR-5): the LIST + STRUCTURE views,
+// children of the /studio layout so they inherit StudioLayout's QueryClient +
+// studio-scoped Tailwind CSS behind RequireAuth. Lazy so they land in the
+// /studio async chunk. PR-2's blog/script create flows redirect to
+// /studio/blogs/$blogId/structure and /studio/scripts/$scriptId/structure;
+// these routes make those resolve. The post/scene BlockNote editors land in
+// PR-6 (their edit links are plain <a href> until then). See
+// src/frontend/content-hub/routes/.
+const BlogShellRoute = lazy(() =>
+  import('./content-hub/routes/BlogShellRoute').then((m) => ({ default: m.BlogShellRoute })),
+);
+const BlogWorkspace = lazy(() =>
+  import('./content-hub/routes/BlogWorkspace').then((m) => ({ default: m.BlogWorkspace })),
+);
+const BlogStructure = lazy(() =>
+  import('./content-hub/routes/BlogStructure').then((m) => ({ default: m.BlogStructure })),
+);
+const ScriptShellRoute = lazy(() =>
+  import('./content-hub/routes/ScriptShellRoute').then((m) => ({ default: m.ScriptShellRoute })),
+);
+const ScriptWorkspace = lazy(() =>
+  import('./content-hub/routes/ScriptWorkspace').then((m) => ({ default: m.ScriptWorkspace })),
+);
+const ScriptStructure = lazy(() =>
+  import('./content-hub/routes/ScriptStructure').then((m) => ({ default: m.ScriptStructure })),
+);
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
 // 3b: intentionally NOT switched to beforeLoad to minimize behavior change).
@@ -433,11 +459,67 @@ const projectShellRouteTree = projectShellRoute.addChildren([
   projectVoiceRoute,
   projectMarketplaceRoute,
 ]);
+// Blog workspace (sub-project #4, PR-5). `/studio/blogs/$blogId` is a nested
+// LAYOUT route (BlogShellRoute = <Outlet/>) under the /studio layout, mirroring
+// how $projectId is structured, so the workspace (index) + structure children
+// inherit StudioLayout's QueryClient + studio CSS and the RequireAuth gate. The
+// static `blogs` segment is more specific than the sibling `$projectId` dynamic
+// segment, so /studio/blogs/* matches here, not the project shell. The PR-2 blog
+// create flow redirects to /studio/blogs/$blogId/structure — now resolved.
+// `validateSearch: passthroughSearch` keeps any query params surviving the round
+// trip (the useSearchParams compat shim relies on it).
+const blogShellRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/blogs/$blogId',
+  validateSearch: passthroughSearch,
+  component: () => <BlogShellRoute />,
+});
+const blogIndexRoute = createRoute({
+  getParentRoute: () => blogShellRoute,
+  path: '/',
+  validateSearch: passthroughSearch,
+  component: () => <BlogWorkspace />,
+});
+const blogStructureRoute = createRoute({
+  getParentRoute: () => blogShellRoute,
+  path: '/structure',
+  validateSearch: passthroughSearch,
+  component: () => <BlogStructure />,
+});
+const blogShellRouteTree = blogShellRoute.addChildren([blogIndexRoute, blogStructureRoute]);
+// Script workspace (sub-project #4, PR-5). Same shape as the blog workspace:
+// `/studio/scripts/$scriptId` is a nested LAYOUT route (ScriptShellRoute =
+// <Outlet/>) with workspace (index) + structure children. The PR-2 script
+// create flow redirects to /studio/scripts/$scriptId/structure — now resolved.
+const scriptShellRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/scripts/$scriptId',
+  validateSearch: passthroughSearch,
+  component: () => <ScriptShellRoute />,
+});
+const scriptIndexRoute = createRoute({
+  getParentRoute: () => scriptShellRoute,
+  path: '/',
+  validateSearch: passthroughSearch,
+  component: () => <ScriptWorkspace />,
+});
+const scriptStructureRoute = createRoute({
+  getParentRoute: () => scriptShellRoute,
+  path: '/structure',
+  validateSearch: passthroughSearch,
+  component: () => <ScriptStructure />,
+});
+const scriptShellRouteTree = scriptShellRoute.addChildren([
+  scriptIndexRoute,
+  scriptStructureRoute,
+]);
 const studioRouteTree = studioRoute.addChildren([
   studioIndexRoute,
   composeRoute,
   composeBlogRoute,
   composeScriptRoute,
+  blogShellRouteTree,
+  scriptShellRouteTree,
   projectShellRouteTree,
 ]);
 // Legacy base path: /words* → /studio (matches the old zone-route 301).

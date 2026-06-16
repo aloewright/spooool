@@ -87,6 +87,18 @@ const StudioLayout = lazy(() =>
 const ContentHubHome = lazy(() =>
   import('./content-hub/ContentHubHome').then((m) => ({ default: m.ContentHubHome })),
 );
+// The three compose (create) wizards — children of the /studio layout, so they
+// inherit StudioLayout's QueryClient + studio-scoped Tailwind CSS and the
+// existing RequireAuth gate. Lazy so they land in the /studio async chunk.
+const Compose = lazy(() =>
+  import('./content-hub/routes/Compose').then((m) => ({ default: m.Compose })),
+);
+const ComposeBlog = lazy(() =>
+  import('./content-hub/routes/ComposeBlog').then((m) => ({ default: m.ComposeBlog })),
+);
+const ComposeScript = lazy(() =>
+  import('./content-hub/routes/ComposeScript').then((m) => ({ default: m.ComposeScript })),
+);
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
 // 3b: intentionally NOT switched to beforeLoad to minimize behavior change).
@@ -292,7 +304,38 @@ const studioIndexRoute = createRoute({
   path: '/',
   component: () => <ContentHubHome />,
 });
-const studioRouteTree = studioRoute.addChildren([studioIndexRoute]);
+// Compose (create) wizards under /studio (sub-project #4, PR-2). These are
+// children of the /studio LAYOUT route, so they render inside StudioLayout's
+// <Outlet/> — inheriting its QueryClient + studio-scoped Tailwind CSS — behind
+// the same RequireAuth gate the layout already applies. The wizards POST to the
+// live same-origin /api/v1/* backend (content-hub/lib/api.ts) and on success
+// redirect to the project/blog/script detail routes (which land in a later PR).
+// `validateSearch: passthroughSearch` lets the book wizard's post-create
+// `?logline=` redirect survive the round trip.
+const composeRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/compose',
+  validateSearch: passthroughSearch,
+  component: () => <Compose />,
+});
+const composeBlogRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/compose-blog',
+  validateSearch: passthroughSearch,
+  component: () => <ComposeBlog />,
+});
+const composeScriptRoute = createRoute({
+  getParentRoute: () => studioRoute,
+  path: '/compose-script',
+  validateSearch: passthroughSearch,
+  component: () => <ComposeScript />,
+});
+const studioRouteTree = studioRoute.addChildren([
+  studioIndexRoute,
+  composeRoute,
+  composeBlogRoute,
+  composeScriptRoute,
+]);
 // Legacy base path: /words* → /studio (matches the old zone-route 301).
 const wordsRoute = createRoute({
   getParentRoute: () => shellRoute,

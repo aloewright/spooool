@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type JSX } from 'react';
 import { useSession } from '../lib/auth-client';
 import { RecorderRoot } from '../recorder';
 

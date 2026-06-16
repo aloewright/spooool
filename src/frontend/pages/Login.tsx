@@ -1,11 +1,11 @@
-import { FormEvent, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { FormEvent, useMemo, useState, type JSX } from 'react';
+import { Link, Navigate, useNavigate } from '@tanstack/react-router';
 import { signIn, useSession } from '../lib/auth-client';
+import { useSearchParams } from '../lib/use-search-params';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
 
 export function Login(): JSX.Element {
-  const location = useLocation();
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [email, setEmail] = useState('');
@@ -14,10 +14,19 @@ export function Login(): JSX.Element {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const next = (location.state as { from?: string } | null)?.from ?? '/';
+  // Post-login redirect target. TanStack has no router-location `state`, so
+  // RequireAuth (and Signup/Login cross-links) carry it as a `?from=` search
+  // param instead of react-router's `state.from`.
+  const [params] = useSearchParams();
+  const next = params.get('from') ?? '/';
+
+  // Memoized so the <Navigate> props identity is stable across the re-renders
+  // useSession/useSearchParams trigger — otherwise TanStack's <Navigate> keeps
+  // re-firing the redirect (infinite loop). See RequireAuth in router.tsx.
+  const redirect = useMemo(() => <Navigate to={next} replace />, [next]);
 
   if (!isPending && session) {
-    return <Navigate to={next} replace />;
+    return redirect;
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -54,7 +63,7 @@ export function Login(): JSX.Element {
         })
         .catch(() => undefined);
     }
-    navigate(next, { replace: true });
+    void navigate({ to: next, replace: true });
   }
 
   return (
@@ -96,7 +105,7 @@ export function Login(): JSX.Element {
         <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <Link to="/signup" state={{ from: next }} className="ds-meta">
+          <Link to="/signup" search={{ from: next }} className="ds-meta">
             Need an account? Sign up
           </Link>
           <button type="submit" className="btn" disabled={submitting}>

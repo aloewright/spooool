@@ -1,6 +1,8 @@
-import { Link } from 'react-router-dom';
+import { Link } from '@tanstack/react-router';
 import type { FeedItem } from '../lib/feeds-client';
 import { InlineVideoPlayer } from './InlineVideoPlayer';
+
+import type { JSX } from "react";
 
 function SourceBadge({ source }: { source: FeedItem['source'] }): JSX.Element {
   const label =

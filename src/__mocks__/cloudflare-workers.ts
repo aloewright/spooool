@@ -3,3 +3,5 @@
 export class DurableObject {}
 export class WorkerEntrypoint {}
 export class RpcTarget {}
+// Studio content-hub Workflows (src/hub/workflows/*) extend this at module load.
+export class WorkflowEntrypoint {}

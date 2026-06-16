@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState, type JSX } from 'react';
 
 interface UserProfile {
   id: string;

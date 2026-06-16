@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 import { VideoPlaceholderIcon } from '../components/Icons';
 import { track } from '../lib/analytics';
 
@@ -113,12 +113,10 @@ export function Subscriptions(): JSX.Element {
 }
 
 function InboxCard({ item }: { item: InboxItem }): JSX.Element {
-  const channelHref = item.channel_username
-    ? `/channel/${encodeURIComponent(item.channel_username)}`
-    : null;
+  const channelUsername = item.channel_username ?? null;
   return (
     <article className="suggestion-card">
-      <Link to={`/watch/${item.video_id}`} aria-label={item.title}>
+      <Link to="/watch/$id" params={{ id: item.video_id }} aria-label={item.title}>
         {item.thumbnail_url ? (
           <img
             src={item.thumbnail_url}
@@ -139,8 +137,8 @@ function InboxCard({ item }: { item: InboxItem }): JSX.Element {
         <div style={{ fontWeight: 700, fontSize: 'var(--text-base)' }}>{item.title}</div>
       </Link>
       <div className="ds-meta" style={{ marginTop: 4, display: 'flex', gap: 'var(--space-2)' }}>
-        {channelHref ? (
-          <Link to={channelHref} style={{ color: 'inherit', textDecoration: 'underline' }}>
+        {channelUsername ? (
+          <Link to="/channel/$username" params={{ username: channelUsername }} style={{ color: 'inherit', textDecoration: 'underline' }}>
             {item.channel_name ?? item.channel_username}
           </Link>
         ) : (

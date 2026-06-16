@@ -1,8 +1,8 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { RouterProvider } from '@tanstack/react-router';
 import * as Sentry from '@sentry/react';
-import App from './App';
+import { router } from './router';
 import { AppErrorFallback } from './components/AppErrorFallback';
 
 Sentry.init({
@@ -19,9 +19,7 @@ Sentry.init({
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <Sentry.ErrorBoundary fallback={<AppErrorFallback />}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </Sentry.ErrorBoundary>
   </React.StrictMode>,
 );

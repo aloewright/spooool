@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, type JSX } from 'react';
+import { Link, useLocation } from '@tanstack/react-router';
 
 // ALO-408: real 404 view. Previously `<Route path="*" element={<Navigate to="/">/>`
 // silently redirected unknown paths to Home, swallowing deep-link context and

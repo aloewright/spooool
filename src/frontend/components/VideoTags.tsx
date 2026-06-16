@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 
 // ALO-151: lazy chip strip for /watch. Renders nothing until the tags
 // arrive (or if the server returns an empty list) so it never reserves
@@ -38,7 +38,7 @@ export function VideoTags({ videoId }: { videoId: string }): JSX.Element | null 
       style={{ gap: 'var(--space-2)', flexWrap: 'wrap' }}
     >
       {tags.map((t) => (
-        <Link key={t.slug} to={`/tag/${encodeURIComponent(t.slug)}`} className="badge">
+        <Link key={t.slug} to="/tag/$slug" params={{ slug: t.slug }} className="badge">
           #{t.label}
         </Link>
       ))}

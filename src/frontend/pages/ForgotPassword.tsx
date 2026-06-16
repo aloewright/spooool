@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { FormEvent, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 import { requestPasswordReset } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 

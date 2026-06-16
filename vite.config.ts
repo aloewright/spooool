@@ -19,7 +19,11 @@ export default defineConfig({
           // ALO-166: PostHog is dynamic-imported from main.tsx after first
           // paint; isolate so the eager vendor chunk stays small.
           if (id.includes('posthog-js')) return 'posthog';
-          if (id.includes('react-router')) return 'react-router';
+          // The frontend router is @tanstack/react-router (phase 3b migration
+          // off react-router-dom). Isolate it from the eager vendor chunk.
+          if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router') || id.includes('@tanstack/history')) {
+            return 'tanstack-router';
+          }
           if (id.includes('react-dom')) return 'react-dom';
           if (id.includes('/react/')) return 'react';
           if (id.includes('better-auth')) return 'better-auth';

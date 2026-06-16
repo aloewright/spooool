@@ -3,7 +3,7 @@
 // any structured error coming back from the worker so the user can see
 // exactly what's happening without needing wrangler tail.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type JSX } from 'react';
 import { ApiError, fetchJobStatus, type RenderJobStatus } from './lib/create-client';
 import { STAGE_COSTS } from './lib/cost-estimates';
 

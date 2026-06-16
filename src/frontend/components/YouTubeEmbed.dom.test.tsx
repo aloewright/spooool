@@ -4,6 +4,8 @@ import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
 import { YouTubeEmbed } from './YouTubeEmbed';
 
+import type { JSX } from "react";
+
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 

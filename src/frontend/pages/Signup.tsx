@@ -1,11 +1,11 @@
-import { FormEvent, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { FormEvent, useMemo, useState, type JSX } from 'react';
+import { Link, Navigate, useNavigate } from '@tanstack/react-router';
 import { signUp, useSession } from '../lib/auth-client';
+import { useSearchParams } from '../lib/use-search-params';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
 
 export function Signup(): JSX.Element {
-  const location = useLocation();
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [name, setName] = useState('');
@@ -15,10 +15,17 @@ export function Signup(): JSX.Element {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const next = (location.state as { from?: string } | null)?.from ?? '/';
+  // Post-signup redirect target carried via `?from=` search param (TanStack
+  // has no router `state`); mirrors the Login page.
+  const [params] = useSearchParams();
+  const next = params.get('from') ?? '/';
+
+  // Memoized so the <Navigate> props identity is stable across re-renders —
+  // otherwise TanStack's <Navigate> keeps re-firing (loop). See RequireAuth.
+  const redirect = useMemo(() => <Navigate to={next} replace />, [next]);
 
   if (!isPending && session) {
-    return <Navigate to={next} replace />;
+    return redirect;
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -64,7 +71,7 @@ export function Signup(): JSX.Element {
     // ALO-178: send new accounts through the 3-step onboarding unless they
     // hit signup with an explicit redirect target (deep-link / post-login).
     const target = next === '/' ? '/onboarding' : next;
-    navigate(target, { replace: true });
+    void navigate({ to: target, replace: true });
   }
 
   return (
@@ -121,7 +128,7 @@ export function Signup(): JSX.Element {
         <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />
 
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <Link to="/login" state={{ from: next }} className="ds-meta">
+          <Link to="/login" search={{ from: next }} className="ds-meta">
             Already have an account? Sign in
           </Link>
           <button type="submit" className="btn" disabled={submitting}>

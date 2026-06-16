@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 
 const CONSENT_KEY = 'cookie-consent:v1';
 

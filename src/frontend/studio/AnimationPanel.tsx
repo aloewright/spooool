@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { FormEvent, useEffect, useRef, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 import {
   ApiError,
   getRenderJob,
@@ -200,7 +200,7 @@ export function AnimationPanel(): JSX.Element {
 
       {renderStatus?.videoId ? (
         <p>
-          <Link to={`/watch/${renderStatus.videoId}`}>Watch your animation</Link>
+          <Link to="/watch/$id" params={{ id: renderStatus.videoId }}>Watch your animation</Link>
         </p>
       ) : null}
 

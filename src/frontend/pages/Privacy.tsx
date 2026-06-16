@@ -1,6 +1,6 @@
 // ALO-179 / E8: full Privacy Policy replacing the "pending" stub.
 
-import type { ReactNode } from 'react';
+import type { ReactNode, JSX } from 'react';
 
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (

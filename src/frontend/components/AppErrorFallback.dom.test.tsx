@@ -8,6 +8,8 @@ import { act } from 'react-dom/test-utils';
 import * as Sentry from '@sentry/react';
 import { AppErrorFallback } from './AppErrorFallback';
 
+import type { JSX } from "react";
+
 // ALO-281: real-DOM render tests for the render-time crash fallback. The
 // pragma above flips this file (and only this file) into happy-dom so React
 // 18's ErrorBoundary commit phase actually catches the throw — every other

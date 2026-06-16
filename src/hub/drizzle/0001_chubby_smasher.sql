@@ -1,0 +1,1 @@
+ALTER TABLE `publisher_packs` ADD `series_name` text DEFAULT '' NOT NULL;

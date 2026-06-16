@@ -2,7 +2,7 @@
 // Sends messages to ALO-644's POST /api/studio/chat endpoint via SSE.
 // Rate limit: 30 studio requests per hour.
 
-import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState, type JSX } from 'react';
 import type { UIMessage } from '@tanstack/ai-client';
 import { useChat } from '@tanstack/ai-react';
 import { Spinner } from '../create/Spinner';

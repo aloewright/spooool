@@ -4,6 +4,8 @@
 
 import { STAGE_COSTS, totalEstimateUsd, formatUsd } from './lib/cost-estimates';
 
+import type { JSX } from "react";
+
 interface CostPanelProps { collapsed?: boolean }
 
 export function CostPanel({ collapsed }: CostPanelProps): JSX.Element {

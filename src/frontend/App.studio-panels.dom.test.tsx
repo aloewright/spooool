@@ -130,7 +130,12 @@ async function mountAt(route: string, settle?: () => boolean): Promise<void> {
     root!.render(<RealAppAt route={route} />);
   });
   const yieldMacrotask = () => new Promise<void>((r) => setTimeout(r, 0));
-  for (let i = 0; i < 100; i++) {
+  // Generous poll budget: under the full suite these dom tests run alongside
+  // many other files across worker threads, and CPU contention can slow the
+  // lazy /studio chunk + react-query settle past a short window. 300 macrotasks
+  // (returning as soon as `settle` is true) keeps the fast path fast while
+  // staying robust under load.
+  for (let i = 0; i < 300; i++) {
     await act(async () => {
       await yieldMacrotask();
     });

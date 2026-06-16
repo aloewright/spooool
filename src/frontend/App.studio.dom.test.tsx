@@ -84,7 +84,7 @@ async function mountAt(route: string, settle?: () => boolean): Promise<void> {
   // a fixed flush count — robust against suite-load slowdowns. Mirrors the
   // content-based polling in App.shell.dom.test.tsx.
   const yieldMacrotask = () => new Promise<void>((r) => setTimeout(r, 0));
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 300; i++) {
     await act(async () => {
       await yieldMacrotask();
     });

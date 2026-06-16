@@ -2,11 +2,10 @@
 // studio/apps/web/client/components/studio/SideDrawer.tsx.
 //
 // Changes vs the studio source:
-//   - Only the PROJECT drawer (SideDrawer) is ported. The studio file also
-//     exported BlogSideDrawer / ScriptSideDrawer, whose targets (/blogs/$id,
-//     /scripts/$id) aren't in spooool's route tree — those land with the blog/
-//     script workspaces in a later PR. Dropping them keeps this PR to the book
-//     project shell and avoids referencing unregistered routes.
+//   - The PROJECT drawer (SideDrawer) plus the BLOG / SCRIPT drawers
+//     (BlogSideDrawer / ScriptSideDrawer) are ported. The blog/script drawers
+//     were added in PR-5 once their workspace routes (/studio/blogs/$blogId,
+//     /studio/scripts/$scriptId and their /structure children) were registered.
 //   - All navigation is /studio-absolute. Cross-route navigation uses plain
 //     <a href> (the same pattern ContentHubHome already uses) rather than the
 //     typed <Link>, because the hrefs are runtime strings and several targets
@@ -26,11 +25,14 @@ import {
   ChevronRight,
   ChevronsUpDown,
   Download,
+  Film,
   Home,
   ListTree,
   Mic2,
+  Network,
   PanelLeftClose,
   Plus,
+  Rss,
   Settings,
   Share2,
   Store,
@@ -41,6 +43,8 @@ import { setDrawerLayout, useDrawerLayout } from '../../lib/drawer-layout';
 import { SettingsPanel } from './SettingsPanel';
 
 export type StudioSection = 'outline' | 'marketplace' | 'voice' | 'book';
+export type BlogSection = 'posts' | 'structure';
+export type ScriptSection = 'scenes' | 'structure';
 
 type DrawerItem = { key: string; label: string; icon: React.ReactNode; href: string };
 
@@ -116,6 +120,94 @@ export function SideDrawer({
       activeKey={active}
       exportPending={exportMutation.isPending}
       onExport={() => exportMutation.mutate()}
+    />
+  );
+}
+
+export function BlogSideDrawer({ blogId, current }: { blogId: string; current?: BlogSection }) {
+  const location = useLocation();
+  const active = current ?? blogSectionFromPathname(location.pathname, blogId);
+
+  return (
+    <DrawerShell
+      quickLinks={[
+        { key: 'home', label: 'Home', icon: <Home className={iconCls} />, href: '/studio' },
+        {
+          key: 'new',
+          label: 'New blog',
+          icon: <Plus className={iconCls} />,
+          href: '/studio/compose-blog',
+        },
+      ]}
+      groupLabel="This blog"
+      sections={[
+        {
+          key: 'posts',
+          label: 'Posts',
+          icon: <Rss className={iconCls} />,
+          href: `/studio/blogs/${blogId}`,
+        },
+        {
+          key: 'structure',
+          label: 'Structure',
+          icon: <Network className={iconCls} />,
+          href: `/studio/blogs/${blogId}/structure`,
+        },
+      ]}
+      activeKey={active}
+      exportPending={false}
+      // Blog publishing lives in the workspace's em_dash panel; the drawer's
+      // Export menu item just lands back on the blog workspace.
+      onExport={() => {
+        window.location.assign(`/studio/blogs/${blogId}`);
+      }}
+    />
+  );
+}
+
+export function ScriptSideDrawer({
+  scriptId,
+  current,
+}: {
+  scriptId: string;
+  current?: ScriptSection;
+}) {
+  const location = useLocation();
+  const active = current ?? scriptSectionFromPathname(location.pathname, scriptId);
+
+  return (
+    <DrawerShell
+      quickLinks={[
+        { key: 'home', label: 'Home', icon: <Home className={iconCls} />, href: '/studio' },
+        {
+          key: 'new',
+          label: 'New script',
+          icon: <Plus className={iconCls} />,
+          href: '/studio/compose-script',
+        },
+      ]}
+      groupLabel="This script"
+      sections={[
+        {
+          key: 'scenes',
+          label: 'Scenes',
+          icon: <Film className={iconCls} />,
+          href: `/studio/scripts/${scriptId}`,
+        },
+        {
+          key: 'structure',
+          label: 'Structure',
+          icon: <Network className={iconCls} />,
+          href: `/studio/scripts/${scriptId}/structure`,
+        },
+      ]}
+      activeKey={active}
+      exportPending={false}
+      // Scripts have no export yet; the Export menu item lands back on the
+      // script workspace.
+      onExport={() => {
+        window.location.assign(`/studio/scripts/${scriptId}`);
+      }}
     />
   );
 }
@@ -462,6 +554,22 @@ function sectionFromPathname(pathname: string, projectId: string): StudioSection
   // Chapter editor (/studio/$id/chapters/$chId) and the bare /studio/$id (which
   // redirects to /canvas) both fall back to the outline section.
   return 'outline';
+}
+
+function blogSectionFromPathname(pathname: string, blogId: string): BlogSection {
+  const base = `/studio/blogs/${blogId}`;
+  if (pathname === `${base}/structure` || pathname.startsWith(`${base}/structure/`))
+    return 'structure';
+  // Workspace and the post editor (/posts/$postId) both belong to Posts.
+  return 'posts';
+}
+
+function scriptSectionFromPathname(pathname: string, scriptId: string): ScriptSection {
+  const base = `/studio/scripts/${scriptId}`;
+  if (pathname === `${base}/structure` || pathname.startsWith(`${base}/structure/`))
+    return 'structure';
+  // Workspace and the scene editor (/scenes/$sceneId) both belong to Scenes.
+  return 'scenes';
 }
 
 // Cross-route navigation uses plain <a href> with runtime-string hrefs — the

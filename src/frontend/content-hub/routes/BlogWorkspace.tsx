@@ -9,9 +9,8 @@
 //     code-based routes; see ProjectBook/ProjectCanvas).
 //   - In-app navigation is /studio-absolute. The structure link is a typed
 //     <Link to="/studio/blogs/$blogId/structure"> (registered in PR-5).
-//   - The per-post EDIT links (/studio/blogs/$blogId/posts/$postId) are the
-//     BlockNote editor, which lands in PR-6 and is NOT in the route tree yet, so
-//     they stay plain <a href> (404 until PR-6) per the PR-5 scope.
+//   - The per-post EDIT links (/studio/blogs/$blogId/posts/$postId) target the
+//     BlockNote post editor, registered in PR-6, so they are now typed <Link>s.
 //   - Component/lib imports point at the ported copies under ../components,
 //     ../lib, ../shared.
 import type { JSX } from 'react';
@@ -153,14 +152,17 @@ function PostRow({
   });
   const hasDraft = post.draft_md.trim().length > 0;
 
-  // The post BlockNote editor (/studio/blogs/$blogId/posts/$postId) lands in
-  // PR-6 and is not in the route tree yet, so the edit/open links are plain
-  // <a href> (404 until then) per the PR-5 scope.
-  const editHref = `/studio/blogs/${blogId}/posts/${post.id}`;
+  // The post BlockNote editor (/studio/blogs/$blogId/posts/$postId) is
+  // registered in PR-6, so the edit/open links are typed <Link>s.
+  const editParams = { blogId, postId: post.id } as const;
 
   return (
     <li className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 ring-1 ring-black/5 transition hover:shadow-md dark:bg-neutral-900/80 dark:ring-white/5">
-      <a className="group flex min-w-0 flex-1 items-center gap-3" href={editHref}>
+      <Link
+        className="group flex min-w-0 flex-1 items-center gap-3"
+        to="/studio/blogs/$blogId/posts/$postId"
+        params={editParams}
+      >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-100 font-medium text-neutral-600 text-sm dark:bg-white/10 dark:text-neutral-300">
           {post.ordinal}
         </div>
@@ -179,7 +181,7 @@ function PostRow({
             ) : null}
           </div>
         </div>
-      </a>
+      </Link>
       <div className="flex shrink-0 items-center gap-2">
         {post.status === 'published' ? (
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-emerald-700 text-xs dark:text-emerald-400">
@@ -200,13 +202,14 @@ function PostRow({
             {publish.isPending ? 'Publishing…' : 'Publish'}
           </button>
         ) : (
-          <a
+          <Link
             className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 font-medium text-neutral-600 text-xs hover:bg-neutral-200 dark:bg-white/10 dark:text-neutral-300 dark:hover:bg-white/20"
-            href={editHref}
+            to="/studio/blogs/$blogId/posts/$postId"
+            params={editParams}
           >
             <PenLine className="size-3.5" />
             Write
-          </a>
+          </Link>
         )}
       </div>
       {publish.isError && (

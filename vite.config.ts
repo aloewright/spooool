@@ -40,6 +40,18 @@ export default defineConfig({
           // @tanstack/ai* (ai-react + ai-client) is only loaded by the lazy /studio
           // route — keep it out of the eager vendor chunk.
           if (id.includes('@tanstack/ai')) return 'tanstack-ai';
+          // BlockNote rich-text editors (+ their ProseMirror deps + pretext) are
+          // imported ONLY by the lazy /studio editor routes. Isolate them into a
+          // lazy chunk so @blocknote/mantine/style.css — which overrides Mantine
+          // defaults globally — lands in the editor chunk's CSS, NOT the eager
+          // vendor bundle where it would bleed onto spooool's Mantine shell. (#4 PR-6)
+          if (
+            id.includes('@blocknote') ||
+            id.includes('prosemirror') ||
+            id.includes('@chenglou/pretext')
+          ) {
+            return 'blocknote';
+          }
           // The content hub (lazy /studio route) is the only consumer of
           // react-query and the markdown renderer — isolate them so they never
           // inflate the eager vendor chunk.

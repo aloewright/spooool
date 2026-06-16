@@ -156,6 +156,25 @@ const ScriptWorkspace = lazy(() =>
 const ScriptStructure = lazy(() =>
   import('./content-hub/routes/ScriptStructure').then((m) => ({ default: m.ScriptStructure })),
 );
+// The three rich-text EDITORS (sub-project #4, PR-6): the section-level chapter
+// editor, the BlockNote blog-post editor, and the BlockNote script-scene editor.
+// Lazy is LOAD-BEARING here: the post/scene editors import @blocknote/* and its
+// GLOBAL `@blocknote/mantine/style.css`, which would corrupt spooool's
+// Mantine-7 shell if it landed in the eager bundle. lazy() makes Vite
+// code-split each editor (JS + the BlockNote CSS) into the editor's own async
+// chunk, so it loads only on the editor routes and never touches the eager
+// index/vendor CSS. (ProjectChapter has no @blocknote dep — it's per-section
+// textareas + autosave — but is lazy()'d for parity with its siblings.) See
+// src/frontend/content-hub/routes/{ProjectChapter,BlogPostEditor,ScriptSceneEditor}.tsx.
+const ProjectChapter = lazy(() =>
+  import('./content-hub/routes/ProjectChapter').then((m) => ({ default: m.ProjectChapter })),
+);
+const BlogPostEditor = lazy(() =>
+  import('./content-hub/routes/BlogPostEditor').then((m) => ({ default: m.BlogPostEditor })),
+);
+const ScriptSceneEditor = lazy(() =>
+  import('./content-hub/routes/ScriptSceneEditor').then((m) => ({ default: m.ScriptSceneEditor })),
+);
 
 // Render-guard auth gate, preserved from the react-router v6 era (ALO phase
 // 3b: intentionally NOT switched to beforeLoad to minimize behavior change).
@@ -451,6 +470,19 @@ const projectMarketplaceRoute = createRoute({
   validateSearch: passthroughSearch,
   component: () => <ProjectMarketplace />,
 });
+// Chapter editor (sub-project #4, PR-6): /studio/$projectId/chapters/$chapterId,
+// a child of the $projectId layout so it inherits StudioLayout's QueryClient +
+// studio CSS and the RequireAuth gate. FullBookPanel's per-chapter "Edit" link
+// (a plain <a href> until now) becomes a typed <Link> in this PR.
+const projectChapterRoute = createRoute({
+  getParentRoute: () => projectShellRoute,
+  path: '/chapters/$chapterId',
+  validateSearch: passthroughSearch,
+  component: function ProjectChapterRoute(): JSX.Element {
+    const { projectId, chapterId } = projectChapterRoute.useParams();
+    return <ProjectChapter projectId={projectId} chapterId={chapterId} />;
+  },
+});
 const projectShellRouteTree = projectShellRoute.addChildren([
   projectIndexRoute,
   projectCanvasRoute,
@@ -458,6 +490,7 @@ const projectShellRouteTree = projectShellRoute.addChildren([
   projectBookRoute,
   projectVoiceRoute,
   projectMarketplaceRoute,
+  projectChapterRoute,
 ]);
 // Blog workspace (sub-project #4, PR-5). `/studio/blogs/$blogId` is a nested
 // LAYOUT route (BlogShellRoute = <Outlet/>) under the /studio layout, mirroring
@@ -486,7 +519,24 @@ const blogStructureRoute = createRoute({
   validateSearch: passthroughSearch,
   component: () => <BlogStructure />,
 });
-const blogShellRouteTree = blogShellRoute.addChildren([blogIndexRoute, blogStructureRoute]);
+// Post BlockNote editor (sub-project #4, PR-6): /studio/blogs/$blogId/posts/$postId,
+// a child of the blog layout so it inherits StudioLayout's QueryClient + studio
+// CSS and the RequireAuth gate. BlogWorkspace's per-post edit/write links (plain
+// <a href> until now) become typed <Link>s in this PR.
+const blogPostRoute = createRoute({
+  getParentRoute: () => blogShellRoute,
+  path: '/posts/$postId',
+  validateSearch: passthroughSearch,
+  component: function BlogPostRoute(): JSX.Element {
+    const { blogId, postId } = blogPostRoute.useParams();
+    return <BlogPostEditor blogId={blogId} postId={postId} />;
+  },
+});
+const blogShellRouteTree = blogShellRoute.addChildren([
+  blogIndexRoute,
+  blogStructureRoute,
+  blogPostRoute,
+]);
 // Script workspace (sub-project #4, PR-5). Same shape as the blog workspace:
 // `/studio/scripts/$scriptId` is a nested LAYOUT route (ScriptShellRoute =
 // <Outlet/>) with workspace (index) + structure children. The PR-2 script
@@ -509,9 +559,23 @@ const scriptStructureRoute = createRoute({
   validateSearch: passthroughSearch,
   component: () => <ScriptStructure />,
 });
+// Scene BlockNote editor (sub-project #4, PR-6): /studio/scripts/$scriptId/scenes/$sceneId,
+// a child of the script layout so it inherits StudioLayout's QueryClient +
+// studio CSS and the RequireAuth gate. ScriptWorkspace's per-scene open/write
+// links (plain <a href> until now) become typed <Link>s in this PR.
+const scriptSceneRoute = createRoute({
+  getParentRoute: () => scriptShellRoute,
+  path: '/scenes/$sceneId',
+  validateSearch: passthroughSearch,
+  component: function ScriptSceneRoute(): JSX.Element {
+    const { scriptId, sceneId } = scriptSceneRoute.useParams();
+    return <ScriptSceneEditor scriptId={scriptId} sceneId={sceneId} />;
+  },
+});
 const scriptShellRouteTree = scriptShellRoute.addChildren([
   scriptIndexRoute,
   scriptStructureRoute,
+  scriptSceneRoute,
 ]);
 const studioRouteTree = studioRoute.addChildren([
   studioIndexRoute,

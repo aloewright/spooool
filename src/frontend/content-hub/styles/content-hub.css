@@ -96,3 +96,20 @@
   --font-serif: 'Aleo', ui-serif, Georgia, serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
+
+/*
+ * BlockNote editor containment (sub-project #4, PR-6).
+ *
+ * The blog-post / script-scene editors import `@blocknote/mantine/style.css`, a
+ * GLOBAL stylesheet whose JS+CSS Vite code-splits into the lazy editor chunk
+ * (never the eager index/vendor bundle — see router.tsx). To keep BlockNote's
+ * Mantine theme from bleeding onto the surrounding studio chrome even after that
+ * chunk loads, the editors wrap their <BlockNoteView> in `.bn-scope`:
+ *   - `isolation: isolate` gives the editor its own stacking context so its
+ *     z-indexed popovers/menus layer correctly without escaping the box.
+ *   - this rule lives in the StudioLayout chunk's CSS (already code-split off the
+ *     eager bundle), so it adds nothing to spooool's global stylesheet.
+ */
+.bn-scope {
+  isolation: isolate;
+}

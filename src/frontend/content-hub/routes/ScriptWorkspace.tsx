@@ -8,9 +8,9 @@
 //   - Params read via useParams({ strict: false }).
 //   - In-app navigation is /studio-absolute. The structure link is a typed
 //     <Link to="/studio/scripts/$scriptId/structure"> (registered in PR-5).
-//   - The per-scene EDIT links (/studio/scripts/$scriptId/scenes/$sceneId) are
-//     the BlockNote editor, which lands in PR-6 and is NOT in the route tree
-//     yet, so they stay plain <a href> (404 until PR-6) per the PR-5 scope.
+//   - The per-scene EDIT links (/studio/scripts/$scriptId/scenes/$sceneId)
+//     target the BlockNote scene editor, registered in PR-6, so they are now
+//     typed <Link>s.
 //   - Component/lib/shared imports point at the ported copies.
 import type { JSX } from 'react';
 import { getScriptFormat } from '../shared/script-formats';
@@ -119,14 +119,17 @@ function sceneProgress(items: ScriptScene[]): string {
 function SceneRow({ scriptId, scene }: { scriptId: string; scene: ScriptScene }) {
   const hasDraft = scene.draft_md.trim().length > 0;
 
-  // The scene BlockNote editor (/studio/scripts/$scriptId/scenes/$sceneId) lands
-  // in PR-6 and is not in the route tree yet, so the open/write links are plain
-  // <a href> (404 until then) per the PR-5 scope.
-  const editHref = `/studio/scripts/${scriptId}/scenes/${scene.id}`;
+  // The scene BlockNote editor (/studio/scripts/$scriptId/scenes/$sceneId) is
+  // registered in PR-6, so the open/write links are typed <Link>s.
+  const editParams = { scriptId, sceneId: scene.id } as const;
 
   return (
     <li className="flex min-w-0 items-center justify-between gap-3 rounded-2xl bg-white/80 p-4 ring-1 ring-black/5 transition hover:shadow-md dark:bg-neutral-900/80 dark:ring-white/5">
-      <a className="group flex min-w-0 flex-1 items-center gap-3" href={editHref}>
+      <Link
+        className="group flex min-w-0 flex-1 items-center gap-3"
+        to="/studio/scripts/$scriptId/scenes/$sceneId"
+        params={editParams}
+      >
         <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-neutral-100 font-medium text-neutral-600 text-sm dark:bg-white/10 dark:text-neutral-300">
           {scene.ordinal}
         </div>
@@ -145,7 +148,7 @@ function SceneRow({ scriptId, scene }: { scriptId: string; scene: ScriptScene })
             ) : null}
           </div>
         </div>
-      </a>
+      </Link>
       <div className="flex shrink-0 items-center gap-2">
         {scene.status === 'drafted' ? (
           <span className="flex items-center gap-1.5 rounded-full bg-sky-500/10 px-3 py-1.5 text-sky-700 text-xs dark:text-sky-400">
@@ -153,20 +156,22 @@ function SceneRow({ scriptId, scene }: { scriptId: string; scene: ScriptScene })
             Drafted
           </span>
         ) : hasDraft ? (
-          <a
+          <Link
             className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 font-medium text-neutral-600 text-xs hover:bg-neutral-200 dark:bg-white/10 dark:text-neutral-300 dark:hover:bg-white/20"
-            href={editHref}
+            to="/studio/scripts/$scriptId/scenes/$sceneId"
+            params={editParams}
           >
             Open
-          </a>
+          </Link>
         ) : (
-          <a
+          <Link
             className="flex items-center gap-1.5 rounded-full bg-neutral-100 px-3 py-1.5 font-medium text-neutral-600 text-xs hover:bg-neutral-200 dark:bg-white/10 dark:text-neutral-300 dark:hover:bg-white/20"
-            href={editHref}
+            to="/studio/scripts/$scriptId/scenes/$sceneId"
+            params={editParams}
           >
             <PenLine className="size-3.5" />
             Write
-          </a>
+          </Link>
         )}
       </div>
     </li>

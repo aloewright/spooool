@@ -9,6 +9,7 @@ import {
 } from '@tanstack/react-router';
 import { MantineProvider } from '@mantine/core';
 import '@mantine/core/styles.css';
+import { spoolCssVarsResolver, spoolTheme } from './styles/mantine-theme';
 import { useSession } from './lib/auth-client';
 // App.tsx holds the eager shell (header/footer/splash/Home) and is always in
 // the initial chunk, so Home is imported statically here — lazy()ing it from
@@ -255,7 +256,11 @@ const rootRoute = createRootRoute({
   component: function RootComponent(): JSX.Element {
     const colorScheme = useHtmlColorScheme();
     return (
-      <MantineProvider forceColorScheme={colorScheme}>
+      <MantineProvider
+        theme={spoolTheme}
+        cssVariablesResolver={spoolCssVarsResolver}
+        forceColorScheme={colorScheme}
+      >
         <Outlet />
       </MantineProvider>
     );

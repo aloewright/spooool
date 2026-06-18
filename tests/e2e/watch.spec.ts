@@ -196,7 +196,7 @@ test.describe('/watch happy path', () => {
     await expect(video).toBeVisible();
     await expect(video).toHaveJSProperty('controls', true);
     // Channel name is surfaced as a badge.
-    await expect(page.getByText(CHANNEL_NAME, { exact: false })).toBeVisible();
+    await expect(page.getByText(CHANNEL_NAME, { exact: true })).toBeVisible();
     // Up next list (mocked related endpoint).
     await expect(page.getByRole('heading', { name: /up next/i })).toBeVisible();
     await expect(page.getByText('Next clip')).toBeVisible();

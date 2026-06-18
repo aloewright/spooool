@@ -46,13 +46,29 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Resolve staging target
+        id: staging
+        env:
+          PLAYWRIGHT_STAGING_URL: ${{ secrets.PLAYWRIGHT_STAGING_URL }}
+        run: |
+          if [ -z "$PLAYWRIGHT_STAGING_URL" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice ::PLAYWRIGHT_STAGING_URL is not configured; skipping staging E2E."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Staging E2E target is configured."
+          fi
+
       - name: Install dependencies
+        if: steps.staging.outputs.configured == 'true'
         run: npm ci
 
       - name: Install Playwright browsers
+        if: steps.staging.outputs.configured == 'true'
         run: npx playwright install --with-deps chromium webkit
 
       - name: Run E2E tests against staging
+        if: steps.staging.outputs.configured == 'true'
         env:
           # Set this GitHub secret to the deployed staging URL, e.g.
           # https://spooool-staging.<account>.workers.dev
@@ -60,7 +76,7 @@ jobs:
         run: npx playwright test --project=chromium
 
       - name: Upload Playwright report
-        if: always()
+        if: always() && steps.staging.outputs.configured == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ github.run_id }}

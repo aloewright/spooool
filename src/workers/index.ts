@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { purgeTrendingEdgeCache } from './edge-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
@@ -112,6 +112,20 @@ type Variables = {
 };
 
 const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
+
+type AppContext = Context<{ Bindings: EnvBindings; Variables: Variables }>;
+
+async function serveSpaShell(c: AppContext): Promise<Response> {
+  const indexUrl = new URL('/', c.req.url);
+  const assetResponse = await c.env.ASSETS.fetch(new Request(indexUrl, c.req.raw));
+  const headers = new Headers(assetResponse.headers);
+  headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return new Response(assetResponse.body, {
+    status: assetResponse.status,
+    statusText: assetResponse.statusText,
+    headers,
+  });
+}
 
 // First thing on every request: funnel alias hosts (www, the auth custom
 // domain, etc.) to the canonical origin. OAuth state/session cookies are
@@ -314,6 +328,13 @@ app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
 app.route('/', waitlistRoutes);
+// Keep the merged Studio app on the Worker path. Without run_worker_first +
+// this explicit shell route, the static asset layer can serve a cached old
+// /studio HTML shell after deploy, which resurrects the old self-replace loop.
+app.get('/studio', serveSpaShell);
+app.get('/studio/*', serveSpaShell);
+app.get('/words', serveSpaShell);
+app.get('/words/*', serveSpaShell);
 // /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
 // relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);

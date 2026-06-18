@@ -43,6 +43,12 @@ run_worker_first = [
   # ALO-158: intercept /watch/:id so the worker can inject per-video OG /
   # Twitter card meta tags via HTMLRewriter before serving the SPA HTML.
   "/watch/*",
+  # Studio is a Worker-backed authenticated app route. Serve its SPA shell via
+  # the Worker so deploys cannot leave a stale asset-layer /studio HTML cached.
+  "/studio",
+  "/studio/*",
+  "/words",
+  "/words/*",
 ]
 
 # R2 Bucket - Video Storage

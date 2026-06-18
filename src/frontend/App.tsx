@@ -271,9 +271,13 @@ type Theme = 'light' | 'dark';
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
-  const stored = window.localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  try {
+    const stored = window.localStorage?.getItem('theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // Storage can be unavailable in hardened browsers and DOM test runtimes.
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function ThemeToggle(): JSX.Element {
@@ -283,7 +287,11 @@ function ThemeToggle(): JSX.Element {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     root.style.colorScheme = theme;
-    window.localStorage.setItem('theme', theme);
+    try {
+      window.localStorage?.setItem('theme', theme);
+    } catch {
+      // Ignore storage failures; the in-memory theme state still applies.
+    }
   }, [theme]);
 
   // Springy cross-fade between Sun and Moon. Both glyphs are absolutely

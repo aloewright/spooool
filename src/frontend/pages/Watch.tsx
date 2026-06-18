@@ -725,7 +725,8 @@ export function Watch(): JSX.Element {
           <HlsPlayer
             src={`/api/videos/${video.id}/hls/master.m3u8`}
             startTime={startAt ?? undefined}
-            onReady={() => setPlayerEpoch((n) => n + 1)}
+            onReady={handlePlayerReady}
+            onTeardown={handlePlayerTeardown}
           />
         ) : (
           <div

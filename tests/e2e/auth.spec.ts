@@ -57,8 +57,11 @@ test.describe('signup → home', () => {
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(PASSWORD);
     await Promise.all([
-      page.waitForURL('**/'),
-      page.getByRole('button', { name: /sign up|create account/i }).click(),
+      page.waitForURL(/\/(onboarding)?$/),
+      page
+        .getByRole('main')
+        .getByRole('button', { name: /create account/i })
+        .click(),
     ]);
     // Signed-in surface should expose an upload entry point.
     await expect(page.getByRole('link', { name: /upload/i })).toBeVisible();
@@ -70,8 +73,13 @@ test.describe('signup → home', () => {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('does-not-exist@spooool-e2e.test');
     await page.getByLabel(/password/i).fill('wrong-password');
-    await page.getByRole('button', { name: /sign in|log in/i }).click();
+    await page
+      .getByRole('main')
+      .getByRole('button', { name: /sign in/i })
+      .click();
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('alert').or(page.getByText(/invalid|incorrect|wrong/i))).toBeVisible();
+    await expect(
+      page.getByRole('alert').or(page.getByText(/invalid|incorrect|wrong/i)),
+    ).toBeVisible();
   });
 });

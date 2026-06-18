@@ -11,6 +11,7 @@ type CallbackArgs = {
 
 type CapturedOptions = {
   appName?: string;
+  trustedOrigins?: string[];
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
@@ -83,6 +84,7 @@ describe('createAuth', () => {
     expect(captured.options?.emailAndPassword?.autoSignIn).toBe(true);
     expect(typeof captured.options?.emailAndPassword?.sendResetPassword).toBe('function');
     expect(typeof captured.options?.emailAndPassword?.onPasswordReset).toBe('function');
+    expect(captured.options?.trustedOrigins).toContain('https://spooool-staging.lazee.workers.dev');
   });
 
   it('sendResetPassword forwards to the email module with the reset url', async () => {

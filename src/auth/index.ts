@@ -111,13 +111,14 @@ export function createAuth(env: AuthEnv) {
     // Canonical origin first. The alias hosts (www, the auth custom domain)
     // are trusted too so a pre-redirect sign-in POST isn't rejected during the
     // brief window before src/workers/canonical-host.ts 301s them to the apex.
-    // The previous 'https://spooool.workers.dev' entry was a bogus URL shape
-    // (the real one is spooool.<account>.workers.dev) and is dropped.
+    // Staging E2E signs up against the deployed workers.dev host directly.
+    // Keep this explicit so production aliases stay intentional.
     trustedOrigins: [
       'http://localhost:5173',
       'https://spooool.com',
       'https://www.spooool.com',
       'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
     ],
   });
 }

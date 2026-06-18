@@ -65,7 +65,7 @@ jobs:
 
       - name: Install Playwright browsers
         if: steps.staging.outputs.configured == 'true'
-        run: npx playwright install --with-deps chromium webkit
+        run: npx playwright install --with-deps chromium
 
       - name: Run E2E tests against staging
         if: steps.staging.outputs.configured == 'true'

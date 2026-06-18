@@ -16,7 +16,11 @@ test.describe('home page', () => {
     // Either a Sign in link or the wordmark + Get started copy must be present.
     const signIn = page.getByRole('link', { name: /sign in/i });
     const getStarted = page.getByRole('heading', { name: /start here/i });
-    await expect(signIn.or(getStarted)).toBeVisible();
+    if (await signIn.count()) {
+      await expect(signIn.first()).toBeVisible();
+    } else {
+      await expect(getStarted).toBeVisible();
+    }
   });
 
   test('does not 5xx on a deep link to a non-existent video', async ({ page }) => {

@@ -5,7 +5,7 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 //
 //   * Worker API responses are stubbed via `page.route` so the spec is
 //     independent of D1 / R2 / Stream state.
-//   * The `<video>` element is patched in `addInitScript` so video.js sees
+//   * The `<video>` element is patched in `addInitScript` so the HLS player sees
 //     `loadedmetadata` + a non-zero duration without us shipping a real MP4
 //     fixture. We're testing the React/UI surface, not media decoding.
 //
@@ -22,8 +22,8 @@ const CHANNEL_NAME = 'E2E Channel';
 const POSITIONS_KEY = 'spooool:watch:positions:v1';
 
 async function stubVideoElement(page: Page): Promise<void> {
-  // The video.js adapter waits for `loadedmetadata` on the underlying media
-  // element before deciding whether to seek to a stored / ?t= position. We
+  // The Watch page waits for `loadedmetadata` on the underlying media element
+  // before deciding whether to seek to a stored / ?t= position. We
   // don't ship a real fixture in the repo, so we patch the prototype to make
   // every <video> behave as if a 100s clip just finished loading.
   await page.addInitScript(() => {
@@ -63,11 +63,8 @@ async function stubVideoElement(page: Page): Promise<void> {
         this.dispatchEvent(new Event('canplay'));
       });
     };
-    // Setting `.src` should also nudge videojs forward.
-    const origSrcDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLMediaElement.prototype,
-      'src',
-    );
+    // Setting `.src` should also nudge the media element forward.
+    const origSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
     Object.defineProperty(proto, 'src', {
       configurable: true,
       get(): string {
@@ -101,34 +98,59 @@ function jsonRoute(body: unknown, status = 200) {
 async function stubWatchApis(page: Page): Promise<void> {
   await page.route(`**/api/auth/get-session`, jsonRoute(null));
   await page.route(`**/api/users/me/history**`, jsonRoute({ items: [] }));
-  await page.route(`**/api/videos/${VIDEO_ID}`, jsonRoute({
-    id: VIDEO_ID,
-    title: VIDEO_TITLE,
-    description: 'fixture body',
-    view_count: 42,
-    channel_name: CHANNEL_NAME,
-    channel_username: CHANNEL_USERNAME,
-    r2_key: `${VIDEO_ID}.mp4`,
-    status: 'uploaded',
-  }));
-  await page.route(`**/api/videos/${VIDEO_ID}/related**`, jsonRoute({
-    videos: [
-      { id: 'next-1', title: 'Next clip', view_count: 7, channel_name: CHANNEL_NAME },
-    ],
-  }));
+  await page.route(
+    `**/api/videos/${VIDEO_ID}`,
+    jsonRoute({
+      id: VIDEO_ID,
+      title: VIDEO_TITLE,
+      description: 'fixture body',
+      view_count: 42,
+      channel_name: CHANNEL_NAME,
+      channel_username: CHANNEL_USERNAME,
+      r2_key: `${VIDEO_ID}.mp4`,
+      status: 'ready',
+    }),
+  );
+  await page.route(
+    `**/api/videos/${VIDEO_ID}/related**`,
+    jsonRoute({
+      videos: [{ id: 'next-1', title: 'Next clip', view_count: 7, channel_name: CHANNEL_NAME }],
+    }),
+  );
   await page.route(`**/api/videos/${VIDEO_ID}/like`, jsonRoute({ likes: 0, liked: false }));
   await page.route(`**/api/videos/${VIDEO_ID}/tags`, jsonRoute({ tags: [] }));
   await page.route(`**/api/videos/${VIDEO_ID}/comments**`, jsonRoute({ comments: [] }));
   await page.route(`**/api/videos/${VIDEO_ID}/heartbeat`, (route) =>
     route.fulfill({ status: 204, body: '' }),
   );
-  await page.route(`**/api/channels/${CHANNEL_USERNAME}/subscription`, jsonRoute({
-    subscribed: false,
-    subscriberCount: 0,
-  }));
-  // Stream URL is requested by the <video>; harmless 200 keeps the network log clean.
+  await page.route(
+    `**/api/channels/${CHANNEL_USERNAME}/subscription`,
+    jsonRoute({
+      subscribed: false,
+      subscriberCount: 0,
+    }),
+  );
+  // Legacy stream URL is harmless if requested; HLS is the expected path here.
   await page.route(`**/api/videos/${VIDEO_ID}/stream**`, (route) =>
     route.fulfill({ status: 200, contentType: 'video/mp4', body: '' }),
+  );
+  await page.route(`**/api/videos/${VIDEO_ID}/hls/master.m3u8`, (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/vnd.apple.mpegurl',
+      body: [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:1',
+        '#EXT-X-MEDIA-SEQUENCE:0',
+        '#EXTINF:1.0,',
+        'segment0.ts',
+        '#EXT-X-ENDLIST',
+      ].join('\n'),
+    }),
+  );
+  await page.route(`**/api/videos/${VIDEO_ID}/hls/segment0.ts`, (route) =>
+    route.fulfill({ status: 200, contentType: 'video/mp2t', body: '' }),
   );
 }
 
@@ -222,8 +244,6 @@ test.describe('/watch happy path', () => {
     // ALO-213 regression — the stored position must be cleared, so a reload
     // doesn't re-offer the same banner.
     await page.reload();
-    await expect(
-      page.getByRole('status').filter({ hasText: /resumed at/i }),
-    ).toBeHidden();
+    await expect(page.getByRole('status').filter({ hasText: /resumed at/i })).toBeHidden();
   });
 });

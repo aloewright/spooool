@@ -1,6 +1,11 @@
 name = "spooool"
 main = "src/workers/index.ts"
-compatibility_date = "2024-03-29"
+# Bumped 2024-03-29 → 2024-09-23: the merged studio hub pulls in a dependency
+# that uses Node's global `Buffer` under `nodejs_compat`, which Workers only
+# exposes as a global from compatibility_date 2024-09-23+. On the old date every
+# hub /api/v1/* route 500'd with "Buffer is not defined" (studio showed no
+# books/blogs/scripts and creation failed). See the studio single-worker merge.
+compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
@@ -38,6 +43,12 @@ run_worker_first = [
   # ALO-158: intercept /watch/:id so the worker can inject per-video OG /
   # Twitter card meta tags via HTMLRewriter before serving the SPA HTML.
   "/watch/*",
+  # Studio is a Worker-backed authenticated app route. Serve its SPA shell via
+  # the Worker so deploys cannot leave a stale asset-layer /studio HTML cached.
+  "/studio",
+  "/studio/*",
+  "/words",
+  "/words/*",
 ]
 
 # R2 Bucket - Video Storage
@@ -53,6 +64,11 @@ bucket_name = "spooool-videos"
 binding = "LOGS"
 bucket_name = "spooool-logs"
 
+# R2 - Studio content hub assets (the existing `bookgenerators` bucket).
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "bookgenerators"
+
 # D1 Database - Metadata, Users, Comments
 # Recreated 2026-05-20 as part of the cloudflare-tube → spooool rename
 # (D1 has no in-place rename and `wrangler d1 export` chokes on the FTS5
@@ -64,6 +80,17 @@ database_name = "spooool-prod"
 database_id = "bbdd0163-a3d8-4bc7-805a-c23d2b08d4d7"
 migrations_dir = "src/db/migrations"
 
+# D1 - Studio content hub (books/blogs/scripts). The existing `bookgenerators`
+# database, rebound into the merged worker as STUDIO_DB (studio merge #1; spec:
+# docs/superpowers/specs/2026-06-15-studio-single-worker-merge-design.md).
+# Content preserved; only the binding name changed (was `DB` in the old
+# `editor` worker). Migrations are the relocated studio set in src/hub/drizzle.
+[[d1_databases]]
+binding = "STUDIO_DB"
+database_name = "bookgenerators"
+database_id = "12308aa2-4101-4c20-8cce-fd0fd7a85a48"
+migrations_dir = "src/hub/drizzle"
+
 # KV Namespace - Cache
 [[kv_namespaces]]
 binding = "CACHE"
@@ -73,6 +100,11 @@ id = "3926c69276244c558e2d8aebb42c01e2"
 [[kv_namespaces]]
 binding = "SESSIONS"
 id = "0b560dd1327445bd8b5eb6efca3e82e0"
+
+# KV Namespace - Studio content hub (cache / ephemeral state).
+[[kv_namespaces]]
+binding = "KV"
+id = "550e0e2af0c9454c8e256d94fcac4d47"
 
 # Queue - Video Encoding Pipeline
 [[queues.producers]]
@@ -195,12 +227,24 @@ new_sqlite_classes = ["ComposerAgent"]
 tag = "do_v5"
 new_sqlite_classes = ["EncoderContainer"]
 
+# Studio content-hub Workflows (book-export, audiobook-mastering, gtm-brief)
+# are intentionally DEFERRED here, alongside the render CONTAINER they depend
+# on. Reason: those three Workflow names are still owned by the live `editor`
+# worker (a Cloudflare Workflow name belongs to exactly one script), so
+# registering them on the spooool worker without a `script_name` would fail the
+# deploy / steal them from `editor`. They get registered (owned by spooool)
+# once the `editor` worker is terminated (#5) and the render image is pre-built
+# to the CF registry. Every env.*_WORKFLOW use in the hub is guarded, so the
+# trigger routes just return "unavailable" until then. ALOYSIUS/agents are
+# likewise deferred.
+
 # Daily 02:00 UTC sweep that hard-deletes users whose 30-day GDPR grace
 # window has elapsed (ALO-132), runs DMCA restore, fires cost alerts.
 # The */5 cron runs the render-job timeout sweep — marks any render_job
 # stuck in `rendering` for >15min as `failed`. See src/workers/render.ts.
 [triggers]
-crons = ["0 2 * * *", "0 8 * * *", "*/5 * * * *"]
+# "0 4 * * 1" — weekly studio content-hub scout market-dataset refresh.
+crons = ["0 2 * * *", "0 8 * * *", "*/5 * * * *", "0 4 * * 1"]
 
 [vars]
 # YOUTUBE_API_KEY is a SECRET, not a [vars] entry. Set it with:

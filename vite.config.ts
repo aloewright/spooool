@@ -1,8 +1,14 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  plugins: [react()],
+  // Tailwind v4 powers ONLY the ported content hub (src/frontend/content-hub).
+  // Its single CSS entry (content-hub/styles/content-hub.css) imports just the
+  // theme + utilities layers (NO Preflight), so the global design system
+  // (strand.css) is untouched. The plugin auto-detects class usage from the
+  // sources Tailwind scans; spooool's other pages emit no Tailwind utilities.
+  plugins: [react(), tailwindcss()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,
@@ -19,7 +25,11 @@ export default defineConfig({
           // ALO-166: PostHog is dynamic-imported from main.tsx after first
           // paint; isolate so the eager vendor chunk stays small.
           if (id.includes('posthog-js')) return 'posthog';
-          if (id.includes('react-router')) return 'react-router';
+          // The frontend router is @tanstack/react-router (phase 3b migration
+          // off react-router-dom). Isolate it from the eager vendor chunk.
+          if (id.includes('@tanstack/react-router') || id.includes('@tanstack/router') || id.includes('@tanstack/history')) {
+            return 'tanstack-router';
+          }
           if (id.includes('react-dom')) return 'react-dom';
           if (id.includes('/react/')) return 'react';
           if (id.includes('better-auth')) return 'better-auth';
@@ -30,6 +40,35 @@ export default defineConfig({
           // @tanstack/ai* (ai-react + ai-client) is only loaded by the lazy /studio
           // route — keep it out of the eager vendor chunk.
           if (id.includes('@tanstack/ai')) return 'tanstack-ai';
+          // BlockNote rich-text editors (+ their ProseMirror deps + pretext) are
+          // imported ONLY by the lazy /studio editor routes. Isolate them into a
+          // lazy chunk so @blocknote/mantine/style.css — which overrides Mantine
+          // defaults globally — lands in the editor chunk's CSS, NOT the eager
+          // vendor bundle where it would bleed onto spooool's Mantine shell. (#4 PR-6)
+          if (
+            id.includes('@blocknote') ||
+            id.includes('prosemirror') ||
+            id.includes('@chenglou/pretext')
+          ) {
+            return 'blocknote';
+          }
+          // The content hub (lazy /studio route) is the only consumer of
+          // react-query and the markdown renderer — isolate them so they never
+          // inflate the eager vendor chunk.
+          if (id.includes('@tanstack/react-query') || id.includes('@tanstack/query-core')) {
+            return 'react-query';
+          }
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-') ||
+            id.includes('micromark') ||
+            id.includes('mdast') ||
+            id.includes('hast') ||
+            id.includes('unist') ||
+            id.includes('unified')
+          ) {
+            return 'markdown';
+          }
           // Remotion + sub-packages are only used by the lazy /record route;
           // keep them out of vendor so they never inflate the eager bundle.
           if (id.includes('remotion') || id.includes('@remotion')) return 'remotion';

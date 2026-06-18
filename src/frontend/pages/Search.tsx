@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
+import { useSearchParams } from '../lib/use-search-params';
 import { VideoPlaceholderIcon } from '../components/Icons';
 
 interface SearchResult {
@@ -77,7 +78,7 @@ export function Search(): JSX.Element {
         >
           {results.map((v) => (
             <li key={v.id}>
-              <Link to={`/watch/${v.id}`} className="suggestion-card">
+              <Link to="/watch/$id" params={{ id: v.id }} className="suggestion-card">
                 {v.thumbnail_url ? (
                   <img
                     src={v.thumbnail_url}
@@ -99,7 +100,7 @@ export function Search(): JSX.Element {
                 <div className="ds-meta" style={{ marginTop: 4 }}>
                   {v.channel_username ? (
                     <>
-                      <Link to={`/channel/${v.channel_username}`}>
+                      <Link to="/channel/$username" params={{ username: v.channel_username }}>
                         {v.channel_name ?? v.channel_username}
                       </Link>{' '}
                       ·{' '}

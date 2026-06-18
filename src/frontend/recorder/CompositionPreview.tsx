@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, type JSX } from "react";
 import { Player } from "@remotion/player";
 import { AbsoluteFill, Sequence, Video } from "remotion";
 

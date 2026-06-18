@@ -8,7 +8,7 @@
 // access pattern. If the Stream Player API surface ever grows or changes,
 // the adapter is the only place to update.
 import { Stream, type StreamPlayerApi } from '@cloudflare/stream-react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, type JSX } from 'react';
 
 // Customer-scoped subdomain for the Stream iframe.
 //   customer-<CODE>.cloudflarestream.com

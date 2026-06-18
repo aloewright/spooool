@@ -4,7 +4,7 @@
 // Uses hls.js on browsers that don't natively support HLS (Chrome, Firefox)
 // and falls back to native <video> on browsers that do (Safari, iOS).
 
-import { useEffect, useRef, useCallback, type CSSProperties } from 'react';
+import { useEffect, useRef, useCallback, type CSSProperties, type JSX } from 'react';
 import Hls from 'hls.js';
 
 export interface HlsPlayerProps {

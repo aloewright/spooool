@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import Hls from 'hls.js';
 import { Video } from '@gfazioli/mantine-video';
 import '@gfazioli/mantine-video/styles.css';

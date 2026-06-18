@@ -2,17 +2,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter } from 'react-router-dom';
+import { RouterHarness } from '../test-utils/router';
 import { Subscriptions } from './Subscriptions';
+
+import type { JSX } from "react";
+
+// TanStack RouterProvider commits its first matched route on a transition, so
+// mount inside an async act() with the flag set (was synchronous under
+// the old MemoryRouter).
+(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
 
-function mount(element: JSX.Element): void {
+async function mount(element: JSX.Element): Promise<void> {
   container = document.createElement('div');
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
-  act(() => {
+  await act(async () => {
     root!.render(element);
   });
 }
@@ -74,11 +81,7 @@ describe('Subscriptions page', () => {
     });
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    mount(
-      <MemoryRouter>
-        <Subscriptions />
-      </MemoryRouter>,
-    );
+    await mount(<RouterHarness element={<Subscriptions />} />);
     await flush();
 
     expect(container!.textContent).toContain('A wonderful new video');
@@ -100,11 +103,7 @@ describe('Subscriptions page', () => {
       }),
     ) as unknown as typeof fetch;
 
-    mount(
-      <MemoryRouter>
-        <Subscriptions />
-      </MemoryRouter>,
-    );
+    await mount(<RouterHarness element={<Subscriptions />} />);
     await flush();
 
     expect(container!.textContent).toContain("You're not subscribed to any channels yet");
@@ -115,11 +114,7 @@ describe('Subscriptions page', () => {
   it('surfaces an error message when the inbox fetch fails', async () => {
     globalThis.fetch = vi.fn(async () => new Response('boom', { status: 500 })) as unknown as typeof fetch;
 
-    mount(
-      <MemoryRouter>
-        <Subscriptions />
-      </MemoryRouter>,
-    );
+    await mount(<RouterHarness element={<Subscriptions />} />);
     await flush();
 
     expect(container!.textContent).toContain('Failed to load subscriptions');

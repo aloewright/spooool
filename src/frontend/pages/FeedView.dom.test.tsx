@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ReactDOM from 'react-dom/client';
 import { act } from 'react-dom/test-utils';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { RouterHarness } from '../test-utils/router';
 import { FeedView } from './FeedView';
 
 let container: HTMLDivElement | null = null;
@@ -14,11 +14,7 @@ function mountAt(path: string): void {
   root = ReactDOM.createRoot(container);
   act(() =>
     root!.render(
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/feeds/:id" element={<FeedView />} />
-        </Routes>
-      </MemoryRouter>,
+      <RouterHarness element={<FeedView />} path="/feeds/$id" initialEntries={[path]} />,
     ),
   );
 }

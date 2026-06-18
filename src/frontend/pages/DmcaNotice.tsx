@@ -1,10 +1,12 @@
-import { useParams } from 'react-router-dom';
+import { useParams } from '@tanstack/react-router';
+
+import type { JSX } from "react";
 
 // LEGAL-REVIEW: this is the public-facing notice page shown in place of a
 // disabled video. Counsel must approve the wording before launch.
 
 export function DmcaNotice(): JSX.Element {
-  const { videoId } = useParams<{ videoId: string }>();
+  const { videoId } = useParams({ strict: false });
   return (
     <main className="app-main stack-lg">
       <h1 className="ds-h2">Unavailable for legal reasons</h1>

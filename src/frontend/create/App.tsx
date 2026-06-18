@@ -2,7 +2,7 @@
 // Auto / Guided modes, and (when `debug` is true) renders the live debug
 // panel with model + cost breakdown.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type JSX } from 'react';
 import { ApiError, listTemplates } from './lib/create-client';
 import type { TemplateMetadata } from './lib/template';
 import { AutoMode } from './AutoMode';

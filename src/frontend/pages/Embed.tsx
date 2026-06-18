@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState, type JSX } from 'react';
+import { useParams } from '@tanstack/react-router';
 import { HlsPlayer } from '../lib/hls-player';
 import { StreamPlayer, type Player } from '../lib/stream-player';
 
@@ -13,7 +13,7 @@ type VideoResponse = {
 };
 
 export function Embed(): JSX.Element {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ strict: false });
   const [video, setVideo] = useState<VideoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const playerRef = useRef<Player | null>(null);

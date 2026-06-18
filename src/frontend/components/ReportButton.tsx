@@ -3,7 +3,7 @@
 // the resulting state inline. The backend already exists from ALO-171
 // (moderation queue), so this component is purely the UX surface.
 
-import { useState } from 'react';
+import { useState, type JSX } from 'react';
 import { useSession } from '../lib/auth-client';
 
 export type ReportTargetType = 'video' | 'comment';

@@ -1,70 +1,25 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { lazy, useEffect, useState, type JSX } from 'react';
+import { Link, useNavigate, type LinkProps } from '@tanstack/react-router';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
-import { MantineProvider } from '@mantine/core';
-import { CookieBanner } from './components/CookieBanner';
-import '@mantine/core/styles.css';
+import { useSearchParams } from './lib/use-search-params';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
 import './styles/strand.css';
 
-// Route-level code splitting: each page (and the @cloudflare/stream-react
-// SDK loader the /watch chunk depends on) is fetched only when navigated to.
-// Cuts the initial JS payload on the home route to the React-vendor + Home
-// shell. History: ALO-199 set up the split; ALO-204 swapped hls.js for
-// video.js; we then ripped both out in favour of @cloudflare/stream-react
-// once playback was unified on Cloudflare Stream.
-const Watch = lazy(() => import('./pages/Watch').then((m) => ({ default: m.Watch })));
-const Upload = lazy(() => import('./pages/Upload').then((m) => ({ default: m.Upload })));
-const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
-const Signup = lazy(() => import('./pages/Signup').then((m) => ({ default: m.Signup })));
-const Profile = lazy(() => import('./pages/Profile').then((m) => ({ default: m.Profile })));
-const Channel = lazy(() => import('./pages/Channel').then((m) => ({ default: m.Channel })));
-const Search = lazy(() => import('./pages/Search').then((m) => ({ default: m.Search })));
-const AdminModeration = lazy(() =>
-  import('./pages/AdminModeration').then((m) => ({ default: m.AdminModeration })),
-);
-const AdminRoles = lazy(() =>
-  import('./pages/AdminRoles').then((m) => ({ default: m.AdminRoles })),
-);
-const AccountSettings = lazy(() =>
-  import('./pages/AccountSettings').then((m) => ({ default: m.AccountSettings })),
-);
-const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
-const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
-const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
-const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
-const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
-const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
-const ForgotPassword = lazy(() =>
-  import('./pages/ForgotPassword').then((m) => ({ default: m.ForgotPassword })),
-);
-const ResetPassword = lazy(() =>
-  import('./pages/ResetPassword').then((m) => ({ default: m.ResetPassword })),
-);
-const Onboarding = lazy(() =>
-  import('./pages/Onboarding').then((m) => ({ default: m.Onboarding })),
-);
-const Pricing = lazy(() => import('./pages/Pricing').then((m) => ({ default: m.Pricing })));
-const NotFound = lazy(() => import('./pages/NotFound').then((m) => ({ default: m.NotFound })));
-const Record = lazy(() => import('./pages/Record').then((m) => ({ default: m.Record })));
-const Create = lazy(() => import('./pages/Create').then((m) => ({ default: m.Create })));
-const Subscriptions = lazy(() =>
-  import('./pages/Subscriptions').then((m) => ({ default: m.Subscriptions })),
-);
-const Payouts = lazy(() => import('./pages/Payouts').then((m) => ({ default: m.Payouts })));
-const Status = lazy(() => import('./pages/Status').then((m) => ({ default: m.Status })));
-const AdminStatus = lazy(() =>
-  import('./pages/AdminStatus').then((m) => ({ default: m.AdminStatus })),
-);
-const Feeds = lazy(() => import('./pages/Feeds').then((m) => ({ default: m.Feeds })));
-const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m.FeedView })));
-const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
-const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
-const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+// Route-level code splitting lives in router.tsx (the page components are
+// lazy()-imported there and rendered under <Suspense>). App.tsx now only
+// holds the shell building blocks (header, footer, splash, Home) plus the
+// StudioHub handoff, all consumed by the code-based route tree in router.tsx.
+// History: ALO-199 set up the split; ALO-204 swapped hls.js for video.js;
+// we then ripped both out in favour of @cloudflare/stream-react once playback
+// was unified on Cloudflare Stream; phase 3b migrated the tree to TanStack
+// Router (this file's route tree moved to router.tsx).
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 
-function RouteFallback(): JSX.Element {
+// Shared Suspense fallback for the shell's <Outlet/> (router.tsx) and the
+// 404 component.
+export function RouteFallback(): JSX.Element {
   return (
     <main className="app-main stack">
       <p className="ds-meta">Loading…</p>
@@ -245,7 +200,8 @@ function HeaderNav(): JSX.Element {
         <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
       {/* Studio is the content hub served by the `editor` worker via the
-          spooool.com/studio* zone route — full page load, not client routing. */}
+          spooool.com/studio* zone route — hard link / full page load so the
+          zone route wins (falls back to the in-app Studio if it's not live). */}
       <a href="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
       </a>
@@ -268,7 +224,7 @@ function HeaderNav(): JSX.Element {
           // ALO-166: tear down the PostHog identity before navigating so
           // the next visitor on a shared device starts a fresh session.
           void import('./lib/analytics').then(({ reset }) => reset());
-          void signOut().then(() => navigate('/', { replace: true }));
+          void signOut().then(() => navigate({ to: '/', replace: true }));
         }}
       >
         <LogOut aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -295,7 +251,7 @@ function HeaderSearch(): JSX.Element {
         e.preventDefault();
         const q = value.trim();
         if (q.length === 0) return;
-        navigate(`/search?q=${encodeURIComponent(q)}`);
+        void navigate({ to: '/search', search: { q } });
       }}
     >
       <input
@@ -315,9 +271,13 @@ type Theme = 'light' | 'dark';
 
 function getInitialTheme(): Theme {
   if (typeof window === 'undefined') return 'light';
-  const stored = window.localStorage.getItem('theme');
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  try {
+    const stored = window.localStorage?.getItem('theme');
+    if (stored === 'light' || stored === 'dark') return stored;
+  } catch {
+    // Storage can be unavailable in hardened browsers and DOM test runtimes.
+  }
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 function ThemeToggle(): JSX.Element {
@@ -327,7 +287,11 @@ function ThemeToggle(): JSX.Element {
     const root = document.documentElement;
     root.classList.toggle('dark', theme === 'dark');
     root.style.colorScheme = theme;
-    window.localStorage.setItem('theme', theme);
+    try {
+      window.localStorage?.setItem('theme', theme);
+    } catch {
+      // Ignore storage failures; the in-memory theme state still applies.
+    }
   }, [theme]);
 
   // Springy cross-fade between Sun and Moon. Both glyphs are absolutely
@@ -382,7 +346,7 @@ function ThemeToggle(): JSX.Element {
   );
 }
 
-function AppHeader(): JSX.Element {
+export function AppHeader(): JSX.Element {
   return (
     <header className="app-header">
       <Wordmark size="sm" />
@@ -395,20 +359,24 @@ function AppHeader(): JSX.Element {
   );
 }
 
+// `link` holds TanStack Link navigation props (typed `to` + dynamic `params`)
+// spread directly onto <Link>. Preserves the original concrete targets
+// (/upload, /channel/explore, /watch/demo) now that dynamic segments use
+// the $param form.
 const SUGGESTIONS: {
   title: string;
   helper: string;
-  to: string;
+  link: LinkProps;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
 }[] = [
-  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
-  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
-  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
+  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', link: { to: '/upload' }, Icon: UploadIcon },
+  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', link: { to: '/channel/$username', params: { username: 'explore' } }, Icon: ChannelIcon },
+  { title: 'Watch something', helper: 'Jump into a video by id.', link: { to: '/watch/$id', params: { id: 'demo' } }, Icon: PlayIcon },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
   return (
-    <Link to={`/watch/${video.id}`} className="suggestion-card">
+    <Link to="/watch/$id" params={{ id: video.id }} className="suggestion-card">
       {video.thumbnail_url ? (
         <img
           src={video.thumbnail_url}
@@ -436,7 +404,7 @@ function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
 
 function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
   return (
-    <Link to={`/watch/${item.video_id}`} className="suggestion-card">
+    <Link to="/watch/$id" params={{ id: item.video_id }} className="suggestion-card">
       {item.thumbnail_url ? (
         <img
           src={item.thumbnail_url}
@@ -462,7 +430,7 @@ function HistoryCard({ item }: { item: HistoryItem }): JSX.Element {
   );
 }
 
-function Home(): JSX.Element {
+export function Home(): JSX.Element {
   const { data: session } = useSession();
   const [trending, setTrending] = useState<TrendingVideo[] | null>(null);
   const [trendingError, setTrendingError] = useState<string | null>(null);
@@ -683,7 +651,7 @@ function Home(): JSX.Element {
           {SUGGESTIONS.map((item, i) => (
             <Link
               key={item.title}
-              to={item.to}
+              {...item.link}
               className="suggestion-card suggestion-card--glow"
               // Hover-only border-trace; per-card duration so consecutive
               // hovers feel slightly different.
@@ -745,25 +713,6 @@ export function SiteFooter(): JSX.Element {
   );
 }
 
-function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
-  const { data: session, isPending } = useSession();
-  const location = useLocation();
-
-  if (isPending) {
-    return (
-      <main className="app-main stack">
-        <p className="ds-meta">Loading…</p>
-      </main>
-    );
-  }
-
-  if (!session) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
-  }
-
-  return children;
-}
-
 function useSplash(): { show: boolean; dismiss: () => void } {
   // First-visit splash. sessionStorage scopes it per browser tab session
   // so users don't see it on every internal navigation.
@@ -779,190 +728,56 @@ function useSplash(): { show: boolean; dismiss: () => void } {
   return { show, dismiss };
 }
 
-// The content hub (books/blogs/scripts + AI studio, ALO spec
-// docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
-// at spooool.com/studio via a zone route; a full page load hands the URL to
-// it. The legacy AI Studio component remains for its panels to be absorbed
-// into the hub. This component backs the in-shell `/studio` route as a
-// belt-and-suspenders client redirect for the rare case the SPA serves
-// `/studio` before the zone route intercepts it.
-function StudioHubRedirect() {
+// The content hub (writing studio + AI Studio, spec
+// docs/superpowers/specs/studio-content-hub.md) is served by the `editor`
+// worker via the spooool.com/studio* zone route. spooool hands `/studio` off
+// with a full page load (the nav uses a hard <a> link) so the zone route
+// always wins, and this component never runs in healthy prod.
+//
+// It ONLY runs when the SPA itself served `/studio` — i.e. the zone route is
+// not intercepting (local dev, or before the editor worker is deployed). The
+// previous version unconditionally re-issued `window.location.replace('/studio')`,
+// which re-served the SPA and looped forever, breaking the site. This version
+// hands off at most once (sessionStorage guard); if the reload lands back on
+// the SPA, it stops and renders the in-app Studio as a graceful fallback.
+export function StudioHub(): JSX.Element | null {
+  const [fallback, setFallback] = useState(false);
   useEffect(() => {
+    const KEY = 'studio:handoff';
+    // sessionStorage can throw when storage is disabled/partitioned (private
+    // mode, sandboxed iframes). Since this guard is the only thing preventing
+    // an infinite handoff loop, treat any storage failure as "can't guard" and
+    // degrade straight to the in-app Studio rather than risk looping.
+    let alreadyTried: boolean;
+    try {
+      alreadyTried = sessionStorage.getItem(KEY) !== null;
+      if (alreadyTried) sessionStorage.removeItem(KEY);
+      else sessionStorage.setItem(KEY, '1');
+    } catch {
+      setFallback(true);
+      return;
+    }
+    if (alreadyTried) {
+      // We already tried the handoff and came back → the zone route isn't
+      // intercepting. Don't loop; degrade to the in-app Studio.
+      setFallback(true);
+      return;
+    }
     window.location.replace('/studio');
   }, []);
-  return null;
+  return fallback ? <Studio /> : null;
 }
 
-// `App` is the default export mounted by main.tsx — the full spooool shell
-// (header, routed pages, footer). The /studio handoff lives on its own route
-// (StudioHubRedirect) and via the HeaderNav <a href="/studio"> hard link, so
-// the rest of the app keeps client-side routing.
-export default function App(): JSX.Element {
-  const location = useLocation();
+// First-visit splash gate. Wraps the app shell (and the 404 component) in
+// router.tsx: shows the full-screen Splash on the very first visit to `/`,
+// then renders its children (the shell) once dismissed. Splits the old
+// default-export `App` so the shell can be a TanStack pathless layout route
+// while the splash behavior is preserved exactly (sessionStorage-scoped,
+// path-gated to `/`, click/timeout to dismiss).
+export function SplashGate({ children }: { children: JSX.Element }): JSX.Element {
   const splash = useSplash();
-
-  // Embed pages render as a bare player with no app shell so they can be
-  // iframed into third-party sites without nav chrome. They still go through
-  // React Router (so Embed's useParams() resolves :id) and MantineProvider,
-  // but skip the header/nav/footer shell.
-  if (location.pathname.startsWith('/embed/')) {
-    return (
-      <MantineProvider>
-        <Suspense fallback={<div style={{ background: '#000', height: '100dvh' }} />}>
-          <Routes>
-            <Route path="/embed/:id" element={<Embed />} />
-          </Routes>
-        </Suspense>
-      </MantineProvider>
-    );
-  }
-
   if (splash.show) {
     return <Splash onDone={splash.dismiss} />;
   }
-  return (
-    <MantineProvider>
-    <div className="app-shell">
-      <AppHeader />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/watch/:id" element={<Watch />} />
-          <Route
-            path="/upload"
-            element={
-              <RequireAuth>
-                <Upload />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/record"
-            element={
-              <RequireAuth>
-                <Record />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/create"
-            element={
-              <RequireAuth>
-                <Create />
-              </RequireAuth>
-            }
-          />
-          <Route path="/studio" element={<StudioHubRedirect />} />
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth>
-                <Profile />
-              </RequireAuth>
-            }
-          />
-          <Route path="/channel/:username" element={<Channel />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/tag/:slug" element={<Tag />} />
-          <Route
-            path="/admin/moderation"
-            element={
-              <RequireAuth>
-                <AdminModeration />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/roles"
-            element={
-              <RequireAuth>
-                <AdminRoles />
-              </RequireAuth>
-            }
-          />
-          <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
-          <Route
-            path="/settings/account"
-            element={
-              <RequireAuth>
-                <AccountSettings />
-              </RequireAuth>
-            }
-          />
-          <Route path="/legal/dmca" element={<DmcaForm />} />
-          <Route
-            path="/legal/dmca/counter"
-            element={
-              <RequireAuth>
-                <DmcaCounter />
-              </RequireAuth>
-            }
-          />
-          <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
-          <Route path="/legal/tos" element={<Tos />} />
-          <Route path="/legal/privacy" element={<Privacy />} />
-          <Route path="/pricing" element={<Pricing />} />
-          <Route
-            path="/subscriptions"
-            element={
-              <RequireAuth>
-                <Subscriptions />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/feeds"
-            element={
-              <RequireAuth>
-                <Feeds />
-              </RequireAuth>
-            }
-          />
-          <Route path="/feeds/:id" element={<FeedView />} />
-          <Route
-            path="/discover"
-            element={
-              <RequireAuth>
-                <Discover />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/onboarding"
-            element={
-              <RequireAuth>
-                <Onboarding />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/payouts"
-            element={
-              <RequireAuth>
-                <Payouts />
-              </RequireAuth>
-            }
-          />
-          <Route path="/status" element={<Status />} />
-          <Route
-            path="/admin/status"
-            element={
-              <RequireAuth>
-                <AdminStatus />
-              </RequireAuth>
-            }
-          />
-          <Route path="/waitlist" element={<Waitlist />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
-      <SiteFooter />
-      <CookieBanner />
-    </div>
-    </MantineProvider>
-  );
+  return children;
 }

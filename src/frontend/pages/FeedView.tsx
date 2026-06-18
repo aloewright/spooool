@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useState, type JSX } from 'react';
+import { useParams } from '@tanstack/react-router';
 import {
   addSource,
   fetchFeedItems,
@@ -47,7 +47,7 @@ function loadFeedSize(): FeedSize {
 }
 
 export function FeedView(): JSX.Element {
-  const { id = '' } = useParams();
+  const { id = '' } = useParams({ strict: false });
   const [data, setData] = useState<FeedItemsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [kind, setKind] = useState<FeedSourceKind>('youtube_channel');

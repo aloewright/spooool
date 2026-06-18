@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type JSX } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { createFeed, listFeeds, type Feed } from '../lib/feeds-client';
 
 export function Feeds(): JSX.Element {
@@ -24,7 +24,7 @@ export function Feeds(): JSX.Element {
     setError(null);
     try {
       const feed = await createFeed({ name: name.trim() });
-      navigate(`/feeds/${feed.id}`);
+      void navigate({ to: '/feeds/$id', params: { id: feed.id } });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create feed');
       setCreating(false);
@@ -63,7 +63,7 @@ export function Feeds(): JSX.Element {
         <ul className="feed-list stack-sm" style={{ listStyle: 'none', padding: 0 }}>
           {feeds.map((f) => (
             <li key={f.id}>
-              <Link to={`/feeds/${f.id}`} className="feed-list__item">
+              <Link to="/feeds/$id" params={{ id: f.id }} className="feed-list__item">
                 <span className="feed-list__name">{f.name}</span>
                 {f.is_public ? <span className="feed-badge">Public</span> : null}
               </Link>

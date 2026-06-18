@@ -1,5 +1,5 @@
-import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { FormEvent, useState, type JSX } from 'react';
+import { Link } from '@tanstack/react-router';
 
 export function Waitlist(): JSX.Element {
   const [email, setEmail] = useState('');

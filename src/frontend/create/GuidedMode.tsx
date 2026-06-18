@@ -3,7 +3,7 @@
 // kicks off the same toolchain Auto mode uses. Stage indicator + spinner +
 // alert blocks replace the bare-text states this used to render.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { ApiError, connectSessionStream, createSession, fetchJobStatus } from './lib/create-client';
 import type { Question } from './lib/template';
 import { Spinner } from './Spinner';

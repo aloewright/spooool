@@ -1,5 +1,6 @@
-import { FormEvent, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { FormEvent, useState, type JSX } from 'react';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { useSearchParams } from '../lib/use-search-params';
 import { resetPassword } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 
@@ -46,9 +47,10 @@ export function ResetPassword(): JSX.Element {
       setError(result.error ?? 'Could not reset password');
       return;
     }
-    navigate('/login', {
+    void navigate({
+      to: '/login',
       replace: true,
-      state: { from: '/' },
+      search: { from: '/' },
     });
   }
 

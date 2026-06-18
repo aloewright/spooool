@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { purgeTrendingEdgeCache } from './edge-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
@@ -59,6 +59,9 @@ import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import { payoutsRoutes, type PayoutsEnv } from './payouts';
 import { monetizeRoutes, type MonetizeEnv } from './monetize';
+// Studio content hub, merged into this single worker (studio merge #1; spec:
+// docs/superpowers/specs/2026-06-15-studio-single-worker-merge-design.md).
+import { hubRoutes, refreshMarketDataset, type HubEnv } from '../hub';
 import * as Sentry from '@sentry/cloudflare';
 
 type SessionUser = {
@@ -68,7 +71,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & HubEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
@@ -109,6 +112,20 @@ type Variables = {
 };
 
 const app = new Hono<{ Bindings: EnvBindings; Variables: Variables }>();
+
+type AppContext = Context<{ Bindings: EnvBindings; Variables: Variables }>;
+
+async function serveSpaShell(c: AppContext): Promise<Response> {
+  const indexUrl = new URL('/', c.req.url);
+  const assetResponse = await c.env.ASSETS.fetch(new Request(indexUrl, c.req.raw));
+  const headers = new Headers(assetResponse.headers);
+  headers.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+  return new Response(assetResponse.body, {
+    status: assetResponse.status,
+    statusText: assetResponse.statusText,
+    headers,
+  });
+}
 
 // First thing on every request: funnel alias hosts (www, the auth custom
 // domain, etc.) to the canonical origin. OAuth state/session cookies are
@@ -298,6 +315,8 @@ app.route('/', renderRoutes);
 app.route('/', createRoutes);
 app.route('/', studioAnimationRoutes);
 app.route('/', studioRoutes);
+// Content-hub API (/api/v1/*) — merged studio backend (src/hub).
+app.route('/', hubRoutes);
 app.route('/', streamUploadRoutes);
 app.route('/', watchHistoryRoutes);
 app.route('/', payoutsRoutes);
@@ -309,6 +328,13 @@ app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
 app.route('/', waitlistRoutes);
+// Keep the merged Studio app on the Worker path. Without run_worker_first +
+// this explicit shell route, the static asset layer can serve a cached old
+// /studio HTML shell after deploy, which resurrects the old self-replace loop.
+app.get('/studio', serveSpaShell);
+app.get('/studio/*', serveSpaShell);
+app.get('/words', serveSpaShell);
+app.get('/words/*', serveSpaShell);
 // /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
 // relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);
@@ -317,6 +343,10 @@ app.route('/', embedPageRoutes);
 export { ChannelSubscriberDO, RateLimiterDO };
 export { RenderContainer } from './render-container';
 export { EncoderContainer } from './encoder-container';
+// Content-hub Workflows + RenderWorkerContainer are DEFERRED (not exported /
+// not registered in wrangler.toml): the 3 workflow names are still owned by the
+// live `editor` worker, and the container needs a pre-built image. They get
+// wired up once `editor` is terminated (#5) + the render image ships.
 export { ComposerAgent } from './composer-agent-do';
 
 const workerHandlers = {
@@ -359,6 +389,12 @@ const workerHandlers = {
           if (controller.cron === '0 8 * * *') {
             const digest = await runEmailDigestSweep(env);
             console.log('[email-digest]', { cron: controller.cron, ...digest });
+            return;
+          }
+          if (controller.cron === '0 4 * * 1') {
+            // Content hub (src/hub): weekly scout market-dataset refresh.
+            await refreshMarketDataset(env);
+            console.log('[hub-market-dataset]', { cron: controller.cron, refreshed: true });
             return;
           }
           if (controller.cron !== '0 2 * * *') {

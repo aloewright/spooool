@@ -49,6 +49,7 @@ import { studioRoutes, type StudioEnv } from './studio';
 import { studioAnimationRoutes, type StudioAnimationEnv } from './studio-animation';
 import { feedRoutes, type FeedsEnv } from './feeds';
 import { waitlistRoutes, type WaitlistEnv } from './waitlist';
+import { contactRoutes, type ContactEnv } from './contact';
 import { discoverRoutes } from './discover';
 import { runEmailDigestSweep, sendNewUploadEmails } from './notification-email';
 import { warmFeedCaches } from './feed-warm';
@@ -68,7 +69,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & ContactEnv & TurnstileEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
@@ -309,6 +310,7 @@ app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
 app.route('/', waitlistRoutes);
+app.route('/', contactRoutes);
 // /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
 // relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);

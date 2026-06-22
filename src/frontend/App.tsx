@@ -63,6 +63,10 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+const HelpCenter = lazy(() =>
+  import('./pages/HelpCenter').then((m) => ({ default: m.HelpCenter })),
+);
+const Contact = lazy(() => import('./pages/Contact').then((m) => ({ default: m.Contact })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -736,9 +740,11 @@ export function SiteFooter(): JSX.Element {
         borderTop: '1px solid var(--border)',
       }}
     >
+      <Link to="/help">Help</Link>
+      <Link to="/contact">Contact</Link>
+      <Link to="/pricing">Pricing</Link>
       <Link to="/legal/tos">Terms of Service</Link>
       <Link to="/legal/privacy">Privacy Policy</Link>
-      <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
       <Link to="/status">Status</Link>
     </footer>
@@ -957,6 +963,10 @@ export default function App(): JSX.Element {
             }
           />
           <Route path="/waitlist" element={<Waitlist />} />
+          <Route path="/help" element={<HelpCenter />} />
+          <Route path="/help/:categoryId" element={<HelpCenter />} />
+          <Route path="/help/:categoryId/:articleId" element={<HelpCenter />} />
+          <Route path="/contact" element={<Contact />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

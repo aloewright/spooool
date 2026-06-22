@@ -52,6 +52,8 @@ type CachedVideoMeta = {
   r2_key: string;
   stream_video_id: string | null;
   status: string;
+  playback_hls_url: string | null;
+  thumbnail_url: string | null;
   view_count: number;
   created_at: string;
   updated_at: string;
@@ -136,7 +138,8 @@ videoRoutes.get('/api/videos', edgeCache({ ttl: 30, swr: 60 }), async (c) => {
   const offset = (page - 1) * limit;
 
   const { results } = await c.env.DB.prepare(
-    `SELECT id, user_id, title, description, r2_key, stream_video_id, status, view_count, created_at, updated_at
+    `SELECT id, user_id, title, description, r2_key, stream_video_id, status,
+            thumbnail_url, view_count, created_at, updated_at
      FROM videos
      WHERE deleted_at IS NULL AND hidden_at IS NULL AND status != 'uploading'
      ORDER BY created_at DESC
@@ -158,6 +161,7 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
   if (!video) {
     video = await c.env.DB.prepare(
       `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id, v.status,
+              v.playback_hls_url, v.thumbnail_url,
               v.view_count, v.created_at, v.updated_at, v.hidden_at, v.dmca_status,
               u.name AS channel_name, u.username AS channel_username
        FROM videos v
@@ -731,7 +735,13 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   const uploadedPart = await multipart.uploadPart(chunkIndex + 1, rawFile.stream());
 
   uploadedPartsMap[String(chunkIndex + 1)] = { etag: uploadedPart.etag, size: rawFile.size };
-  await env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), { expirationTtl: 86400 });
+  // Refresh TTL on all three keys so a slow upload doesn't expire mpidKey/metaKey
+  // (written once at chunk 0) while partsKey (updated every chunk) stays alive.
+  await Promise.all([
+    env.SESSIONS.put(mpidKey, multipartUploadId, { expirationTtl: 86400 }),
+    env.SESSIONS.put(metaKey, uploadMetaJson, { expirationTtl: 86400 }),
+    env.SESSIONS.put(partsKey, JSON.stringify(uploadedPartsMap), { expirationTtl: 86400 }),
+  ]);
 
   if (chunkIndex < chunkCount - 1) {
     return c.json({ status: 'chunk_received', chunkIndex, chunkCount }, 202);
@@ -797,18 +807,26 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   await bumpTrendingCacheVersion(env.CACHE);
   purgeTrendingEdgeCache(c);
 
-  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
-
-  // Write a short-lived sentinel so a retry of the final chunk (e.g. when
-  // the 201 response was dropped in transit) gets the same 201 rather than
-  // a 400 "Missing upload session". 300 s is well within any retry window.
+  // Write the sentinel BEFORE deleting session keys. If the connection drops
+  // after the deletes but before the sentinel write, a client retry of the
+  // final chunk would get 400 "Missing upload session" instead of the correct
+  // 201. Writing first ensures the sentinel is always present when the session
+  // keys are gone.
   await env.SESSIONS.put(
     `upload-done:${user.id}:${resolvedUploadId}`,
     JSON.stringify({ videoId: uploadMeta.videoId }),
     { expirationTtl: 300 },
   );
+  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
+});
+
+videoRoutes.get('/api/account/storage', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  const usage = await getStorageUsage(c.env, user.id);
+  return c.json(usage);
 });
 
 videoRoutes.delete('/api/videos/:id', async (c) => {

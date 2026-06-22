@@ -1,8 +1,16 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
 import { TurnstileWidget } from '../components/TurnstileWidget';
+
+type StorageUsage = { used: number; quota: number; remaining: number };
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
+  return `${(bytes / 1e3).toFixed(0)} KB`;
+}
 const MAX_SIZE = 30 * 1024 * 1024 * 1024;
 // Must match server-side ALLOWED_EXTENSIONS in upload-validation.ts.
 const ALLOWED_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'mov', 'mkv']);
@@ -57,8 +65,17 @@ export function Upload(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [uploadedVideoId, setUploadedVideoId] = useState<string | null>(null);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const [storage, setStorage] = useState<StorageUsage | null>(null);
 
   const isEmailVerified = session?.user?.emailVerified !== false;
+
+  useEffect(() => {
+    if (!session?.user) return;
+    void fetch('/api/account/storage', { credentials: 'same-origin' })
+      .then(async (r) => r.ok ? (await r.json() as StorageUsage) : null)
+      .then((s) => { if (s) setStorage(s); })
+      .catch(() => undefined);
+  }, [session?.user]);
   const isValidFile = useMemo(() => {
     if (!file) {
       return false;
@@ -196,6 +213,35 @@ export function Upload(): JSX.Element {
             required
           />
           <span className="ds-meta">MP4, MOV, MKV, WebM, or M4V. 30GB max.</span>
+          {storage ? (
+            <div className="stack-sm" style={{ marginTop: 'var(--space-2)' }}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="ds-meta">Storage used</span>
+                <span className="ds-meta">{formatBytes(storage.used)} / {formatBytes(storage.quota)}</span>
+              </div>
+              <div
+                className="meter"
+                role="progressbar"
+                aria-valuenow={storage.used}
+                aria-valuemin={0}
+                aria-valuemax={storage.quota}
+                aria-label="Storage quota"
+              >
+                <div
+                  className="meter__bar"
+                  style={{
+                    width: `${Math.min(100, (storage.used / storage.quota) * 100).toFixed(1)}%`,
+                    background: storage.remaining === 0 ? 'var(--error, #c00)' : undefined,
+                  }}
+                />
+              </div>
+              {storage.remaining === 0 ? (
+                <p className="status-error" style={{ margin: 0 }}>
+                  Storage quota reached. Delete some videos to free up space.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <TurnstileWidget onSuccess={(token) => setCaptchaToken(token)} />

@@ -668,6 +668,211 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
   });
 });
 
+describe('GET /api/account/storage', () => {
+  it('returns 401 when not signed in', async () => {
+    const fetcher = mountWithUser(fakeEnv({ used: 0, quota: 5 * 1024 * 1024 * 1024 }), null);
+    const res = await fetcher('/api/account/storage');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns used/quota/remaining for signed-in user', async () => {
+    const fetcher = mountWithUser(
+      fakeEnv({ used: 1_000_000, quota: 5 * 1024 * 1024 * 1024 }),
+      { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true },
+    );
+    const res = await fetcher('/api/account/storage');
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { used: number; quota: number; remaining: number };
+    expect(body.used).toBe(1_000_000);
+    expect(body.quota).toBe(5 * 1024 * 1024 * 1024);
+    expect(body.remaining).toBe(5 * 1024 * 1024 * 1024 - 1_000_000);
+  });
+});
+
+describe('KV TTL refresh on middle chunks', () => {
+  const USER_ID = 'u_ttl';
+  const MP4_MAGIC = new Uint8Array([0, 0, 0, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
+
+  function ttlEnv() {
+    // Tracks each KV put() call so we can verify mpidKey and metaKey are
+    // refreshed alongside partsKey on middle chunks.
+    const kvPuts: { key: string; ttl: number | undefined }[] = [];
+    const kv: Record<string, string> = {};
+
+    const SESSIONS = {
+      put: async (k: string, v: string, opts?: { expirationTtl?: number }) => {
+        kvPuts.push({ key: k, ttl: opts?.expirationTtl });
+        kv[k] = v;
+      },
+      get: async (k: string) => kv[k] ?? null,
+      delete: async (k: string) => { delete kv[k]; },
+    } as unknown as KVNamespace;
+
+    const DB = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        const stmt = {
+          bind(...v: unknown[]) { bound = v; return stmt; },
+          async run() { return { success: true, meta: { changes: 1 } }; },
+          async first() {
+            if (sql.includes('SUM(bytes)')) return { used: 0 };
+            if (sql.includes('storage_bytes_quota')) return { quota: 10 * 1024 * 1024 * 1024 };
+            return null;
+          },
+          async all() { return { results: [] }; },
+        };
+        void bound;
+        return stmt;
+      },
+    } as unknown as D1Database;
+
+    const VIDEOS = {
+      put: async () => {},
+      createMultipartUpload: async (key: string) => ({
+        uploadId: `mpid-${key}`,
+        uploadPart: async (n: number) => ({ etag: `e${n}` }),
+      }),
+      resumeMultipartUpload: (key: string, mpid: string) => ({
+        uploadPart: async (n: number) => ({ etag: `e${n}` }),
+        complete: async () => {},
+        abort: async () => {},
+      }),
+    } as unknown as R2Bucket;
+
+    const env = {
+      DB, VIDEOS, SESSIONS,
+      CACHE: { get: async () => null, put: async () => {}, delete: async () => {} } as unknown as KVNamespace,
+      VIDEO_ENCODING: { send: async () => {} } as unknown as Queue,
+    } as unknown as VideoRoutesEnv;
+    return { env, kvPuts };
+  }
+
+  it('refreshes mpidKey and metaKey TTL on middle chunks', async () => {
+    const { env, kvPuts } = ttlEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    // 3-chunk upload: send chunk 0, then chunk 1 (middle), and observe KV writes
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '3');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    expect(res0.status).toBe(202);
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+
+    kvPuts.length = 0; // reset: only observe middle-chunk writes
+
+    const fd1 = new FormData();
+    fd1.set('title', 'vid');
+    fd1.set('description', '');
+    fd1.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1.set('chunkIndex', '1');
+    fd1.set('chunkCount', '3');
+    fd1.set('uploadId', uploadId);
+    const res1 = await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
+    expect(res1.status).toBe(202);
+
+    // All three KV keys must have been written with a TTL (=refreshed)
+    const baseKey = `upload:${USER_ID}:${uploadId}`;
+    const refreshed = kvPuts.filter((p) => p.ttl === 86400).map((p) => p.key);
+    expect(refreshed).toContain(`${baseKey}:mpid`);
+    expect(refreshed).toContain(`${baseKey}:meta`);
+    expect(refreshed).toContain(`${baseKey}:parts`);
+  });
+});
+
+describe('sentinel written before KV session cleanup', () => {
+  const USER_ID = 'u_sentinel';
+  const MP4_MAGIC = new Uint8Array([0, 0, 0, 0x10, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
+
+  it('sentinel key exists in KV when session keys are deleted', async () => {
+    // We need to observe the exact order: sentinel written, then session deleted.
+    const events: string[] = [];
+    const kv: Record<string, string> = {};
+
+    const SESSIONS = {
+      put: async (k: string, v: string, _opts?: unknown) => {
+        kv[k] = v;
+        if (k.startsWith('upload-done:')) events.push(`write:${k}`);
+      },
+      get: async (k: string) => kv[k] ?? null,
+      delete: async (k: string) => {
+        events.push(`delete:${k}`);
+        delete kv[k];
+      },
+    } as unknown as KVNamespace;
+
+    const DB = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        const stmt = {
+          bind(...v: unknown[]) { bound = v; return stmt; },
+          async run() { return { success: true, meta: { changes: 1 } }; },
+          async first() {
+            if (sql.includes('SUM(bytes)')) return { used: 0 };
+            if (sql.includes('storage_bytes_quota')) return { quota: 10 * 1024 * 1024 * 1024 };
+            return null;
+          },
+          async all() { return { results: [] }; },
+        };
+        void bound;
+        return stmt;
+      },
+    } as unknown as D1Database;
+
+    const VIDEOS = {
+      put: async () => {},
+      createMultipartUpload: async (key: string) => ({
+        uploadId: `mpid-${key}`,
+        uploadPart: async (n: number) => ({ etag: `e${n}` }),
+      }),
+      resumeMultipartUpload: (_key: string, _mpid: string) => ({
+        uploadPart: async (n: number) => ({ etag: `e${n}` }),
+        complete: async () => {},
+        abort: async () => {},
+      }),
+    } as unknown as R2Bucket;
+
+    const env = {
+      DB, VIDEOS, SESSIONS,
+      CACHE: { get: async () => null, put: async () => {}, delete: async () => {} } as unknown as KVNamespace,
+      VIDEO_ENCODING: { send: async () => {} } as unknown as Queue,
+    } as unknown as VideoRoutesEnv;
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    // chunk 0
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '2');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    expect(res0.status).toBe(202);
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+
+    events.length = 0; // only care about final-chunk ordering
+
+    // chunk 1 (final)
+    const fd1 = new FormData();
+    fd1.set('title', 'vid');
+    fd1.set('description', '');
+    fd1.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1.set('chunkIndex', '1');
+    fd1.set('chunkCount', '2');
+    fd1.set('uploadId', uploadId);
+    const res1 = await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
+    expect(res1.status).toBe(201);
+
+    const sentinelWriteIdx = events.findIndex((e) => e.startsWith('write:upload-done:'));
+    const firstDeleteIdx = events.findIndex((e) => e.startsWith('delete:'));
+    expect(sentinelWriteIdx).toBeGreaterThanOrEqual(0);
+    expect(firstDeleteIdx).toBeGreaterThan(sentinelWriteIdx);
+  });
+});
+
 describe('DELETE /api/videos/:id cache invalidation (ALO-431)', () => {
   it('deletes videoMetaCacheKey from KV when the owner deletes their video', async () => {
     const cacheDeletes: string[] = [];

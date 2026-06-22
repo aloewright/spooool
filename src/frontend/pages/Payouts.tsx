@@ -18,7 +18,7 @@ interface EarningsTransaction {
   platform_fee_cents: number;
   currency: string;
   description: string | null;
-  created_at: string;
+  created_at: number;
 }
 
 interface LocalPayout {
@@ -27,8 +27,8 @@ interface LocalPayout {
   currency: string;
   status: 'pending' | 'in_transit' | 'paid' | 'failed';
   polar_payout_id: string | null;
-  paid_at: string | null;
-  created_at: string;
+  paid_at: number | null;
+  created_at: number;
 }
 
 interface PolarPayoutItem {
@@ -47,8 +47,8 @@ function fmtMoney(cents: number, currency = 'usd'): string {
   }).format(cents / 100);
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
+function fmtDate(ts: number | string): string {
+  return new Date(ts as string).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -179,9 +179,11 @@ export function Payouts(): JSX.Element {
       .filter((p) => !seenPolarIds.has(p.id))
       .map((item) => ({ source: 'polar' as const, item })),
   ].sort((a, b) => {
-    const aDate = a.source === 'local' ? a.item.created_at : a.item.created_at;
-    const bDate = b.source === 'local' ? b.item.created_at : b.item.created_at;
-    return bDate.localeCompare(aDate);
+    const toMs = (row: typeof a): number =>
+      row.source === 'local'
+        ? (row.item as LocalPayout).created_at
+        : new Date((row.item as PolarPayoutItem).created_at).getTime();
+    return toMs(b) - toMs(a);
   });
 
   return (

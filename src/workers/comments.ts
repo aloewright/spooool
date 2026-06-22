@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { isLikelySpam, scoreCommentWithAi } from './spam-filter';
 import type { AiSpamEnv } from './spam-filter';
-import { sendCommentNotificationEmail } from './notification-email';
+import {
+  sendCommentNotificationEmail,
+  sendReplyNotificationEmail,
+} from './notification-email';
 import { waitUntilBackground } from './wait-until';
 
 export interface CommentsEnv extends AiSpamEnv {
@@ -10,6 +13,7 @@ export interface CommentsEnv extends AiSpamEnv {
   EMAIL?: import('./email').EmailBinding;
   EMAIL_FROM?: string;
   EMAIL_FROM_NAME?: string;
+  EMAIL_UNSUBSCRIBE_SECRET?: string;
 }
 
 type SessionUser = { id: string; name?: string } | null;
@@ -168,18 +172,20 @@ commentRoutes.post('/api/videos/:id/comments', async (c) => {
   if (!video) return c.json({ error: 'Video not found' }, 404);
 
   let resolvedParent: string | null = null;
+  let parentAuthorUserId: string | null = null;
   if (parentCommentId) {
     const parent = await c.env.DB.prepare(
-      `SELECT id, parent_comment_id FROM comments
+      `SELECT id, user_id, parent_comment_id FROM comments
        WHERE id = ? AND video_id = ? AND deleted_at IS NULL`,
     )
       .bind(parentCommentId, videoId)
-      .first<{ id: string; parent_comment_id: string | null }>();
+      .first<{ id: string; user_id: string; parent_comment_id: string | null }>();
     if (!parent) return c.json({ error: 'Parent comment not found' }, 404);
     if (parent.parent_comment_id !== null) {
       return c.json({ error: 'Replies are limited to one level deep' }, 400);
     }
     resolvedParent = parent.id;
+    parentAuthorUserId = parent.user_id;
   }
 
   const owner = await c.env.DB.prepare(
@@ -199,16 +205,39 @@ commentRoutes.post('/api/videos/:id/comments', async (c) => {
     .bind(id, videoId, user.id, resolvedParent, trimmed)
     .run();
 
+  const origin = new URL(c.req.url).origin;
+  const replierName = owner?.commenter_name ?? user.name ?? 'Someone';
+
   if (owner && owner.user_id !== user.id) {
     waitUntilBackground(c, sendCommentNotificationEmail(c.env, {
       ownerUserId: owner.user_id,
-      commenterName: owner.commenter_name ?? user.name ?? 'Someone',
+      commenterName: replierName,
       videoId,
       videoTitle: owner.title,
       excerpt: trimmed,
-      origin: new URL(c.req.url).origin,
+      origin,
     }).catch((err) => {
       console.warn('comment email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
+    }));
+  }
+
+  // Notify the parent commenter when someone replies to their comment,
+  // unless they are the video creator (already notified above) or the replier.
+  if (
+    resolvedParent &&
+    parentAuthorUserId &&
+    parentAuthorUserId !== user.id &&
+    parentAuthorUserId !== owner?.user_id
+  ) {
+    waitUntilBackground(c, sendReplyNotificationEmail(c.env, {
+      parentCommentUserId: parentAuthorUserId,
+      replierName,
+      videoId,
+      videoTitle: owner?.title ?? '',
+      excerpt: trimmed,
+      origin,
+    }).catch((err) => {
+      console.warn('reply email failed', { videoId, error: err instanceof Error ? err.message : String(err) });
     }));
   }
 

@@ -47,15 +47,25 @@ export function clampForMeta(value: string | null | undefined, max: number): str
 export function buildOgMetaTags(args: {
   origin: string;
   watchUrl: string;
+  /** Video ID used to build the SVG card fallback when no thumbnail_url is set. */
+  videoId?: string;
   video: Pick<VideoMetaRow, 'title' | 'description' | 'thumbnail_url' | 'channel_name'>;
 }): string {
-  const { origin, watchUrl, video } = args;
+  const { origin, watchUrl, videoId, video } = args;
   const title = clampForMeta(video.title, TITLE_MAX) || 'Spooool';
   const description = clampForMeta(
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // Prefer the real thumbnail (JPEG/PNG accepted by all crawlers including
+  // Twitter and Facebook). When absent, fall back to the per-video SVG card
+  // (Discord, Slack, Telegram, LinkedIn, WhatsApp all render SVG), or the
+  // generic icon if no videoId is available.
+  const image =
+    video.thumbnail_url ??
+    (videoId
+      ? `${origin}/api/og-image/${encodeURIComponent(videoId)}`
+      : `${origin}/icon.png`);
 
   const escape = (v: string): string =>
     v
@@ -133,7 +143,7 @@ ogMetaRoutes.get('/watch/:id', async (c) => {
 
   const origin = new URL(c.req.url).origin;
   const watchUrl = `${origin}/watch/${encodeURIComponent(video.id)}`;
-  const tags = buildOgMetaTags({ origin, watchUrl, video });
+  const tags = buildOgMetaTags({ origin, watchUrl, videoId: video.id, video });
 
   // Strip any pre-existing og:* / twitter:* meta from the static HTML so we
   // don't emit duplicates. Then inject the per-video tags before </head>.

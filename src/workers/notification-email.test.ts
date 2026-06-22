@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildDigestEmail, buildNewUploadEmail, buildCommentEmail } from './notification-email';
+import { buildDigestEmail, buildNewUploadEmail, buildCommentEmail, buildReplyEmail } from './notification-email';
 
 describe('notification-email templates (ALO-157)', () => {
   it('buildNewUploadEmail includes watch URL', () => {
@@ -21,6 +21,19 @@ describe('notification-email templates (ALO-157)', () => {
     });
     expect(mail.html).toContain('Pat');
     expect(mail.text).toContain('Nice work');
+  });
+
+  it('buildReplyEmail mentions the replier and video title', () => {
+    const mail = buildReplyEmail({
+      replierName: 'Sam',
+      videoTitle: 'Cool talk',
+      watchUrl: 'https://spooool.com/watch/v3',
+      excerpt: 'Totally agree!',
+    });
+    expect(mail.subject).toContain('Sam');
+    expect(mail.text).toContain('Cool talk');
+    expect(mail.text).toContain('Totally agree!');
+    expect(mail.html).toContain('Sam');
   });
 
   it('buildDigestEmail lists multiple uploads', () => {

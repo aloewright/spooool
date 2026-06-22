@@ -199,6 +199,76 @@ export async function sendCommentNotificationEmail(
   });
 }
 
+export function buildReplyEmail(args: {
+  replierName: string;
+  videoTitle: string;
+  watchUrl: string;
+  excerpt: string;
+  unsubscribeUrl?: string;
+}): { subject: string; html: string; text: string } {
+  const unsubLine = args.unsubscribeUrl
+    ? `\n\nUnsubscribe from comment emails: ${args.unsubscribeUrl}`
+    : '';
+  const unsubHtml = args.unsubscribeUrl
+    ? `<p style="font-size:12px;color:#666"><a href="${args.unsubscribeUrl}">Unsubscribe</a> from comment emails.</p>`
+    : '';
+  return {
+    subject: `${args.replierName} replied to your comment`,
+    text:
+      `${args.replierName} replied to your comment on "${args.videoTitle}":\n` +
+      `${args.excerpt}\n\nWatch: ${args.watchUrl}` +
+      unsubLine,
+    html:
+      `<p><strong>${escapeHtml(args.replierName)}</strong> replied to your comment on ` +
+      `<em>${escapeHtml(args.videoTitle)}</em>:</p>` +
+      `<blockquote>${escapeHtml(args.excerpt)}</blockquote>` +
+      `<p><a href="${args.watchUrl}">View reply</a></p>` +
+      unsubHtml,
+  };
+}
+
+export async function sendReplyNotificationEmail(
+  env: NotificationDbEnv,
+  args: {
+    parentCommentUserId: string;
+    replierName: string;
+    videoId: string;
+    videoTitle: string;
+    excerpt: string;
+    origin: string;
+  },
+): Promise<EmailResult | { ok: false; skipped: true; reason: string }> {
+  const owner = await env.DB.prepare(
+    `SELECT email, notify_email_comments FROM user WHERE id = ?`,
+  )
+    .bind(args.parentCommentUserId)
+    .first<{ email: string; notify_email_comments: number }>();
+
+  if (!owner?.email || owner.notify_email_comments === 0) {
+    return { ok: false, skipped: true, reason: 'comments email disabled' };
+  }
+
+  const origin = args.origin.replace(/\/$/, '');
+  const watchUrl = `${origin}/watch/${args.videoId}`;
+  const secret = env.EMAIL_UNSUBSCRIBE_SECRET;
+  let unsubscribeUrl: string | undefined;
+  if (secret) {
+    const tok = await generateUnsubToken(secret, args.parentCommentUserId, 'comments');
+    unsubscribeUrl = `${origin}/api/account/unsubscribe?uid=${encodeURIComponent(args.parentCommentUserId)}&tok=${tok}&pref=comments`;
+  }
+
+  return send(env, {
+    to: owner.email,
+    ...buildReplyEmail({
+      replierName: args.replierName,
+      videoTitle: args.videoTitle,
+      watchUrl,
+      excerpt: args.excerpt.slice(0, 280),
+      unsubscribeUrl,
+    }),
+  });
+}
+
 /** Daily digest: email subscribers about inbox items from the last 24 hours. */
 export async function runEmailDigestSweep(env: NotificationDbEnv): Promise<{ users: number; sent: number }> {
   const { results } = await env.DB.prepare(

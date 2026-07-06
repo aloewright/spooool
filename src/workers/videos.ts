@@ -811,6 +811,52 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });
 
+// Lightweight status endpoint for polling after upload. Returns only the
+// fields the client needs to know when to redirect to the watch page.
+// Cached in KV for 10 s (short enough to feel responsive, long enough to
+// avoid hammering D1 during HLS segment playback on other routes).
+videoRoutes.get('/api/videos/:id/status', async (c) => {
+  const id = c.req.param('id');
+  const cacheKey = `video-status:${id}`;
+
+  type StatusRow = {
+    id: string;
+    status: string;
+    playback_hls_url: string | null;
+    thumbnail_url: string | null;
+    thumbnail_candidates: string | null;
+    user_id: string;
+    hidden_at: string | null;
+    dmca_status: string | null;
+  };
+
+  let row = await c.env.CACHE.get<StatusRow>(cacheKey, 'json');
+  if (!row) {
+    row = await c.env.DB.prepare(
+      `SELECT id, status, playback_hls_url, thumbnail_url, thumbnail_candidates,
+              user_id, hidden_at, dmca_status
+       FROM videos WHERE id = ? AND deleted_at IS NULL`,
+    ).bind(id).first<StatusRow>();
+
+    if (row) {
+      await c.env.CACHE.put(cacheKey, JSON.stringify(row), { expirationTtl: 10 });
+    }
+  }
+
+  if (!row) return c.json({ error: 'Video not found' }, 404);
+  if (row.dmca_status === 'disabled') return c.json({ error: 'Unavailable for legal reasons', dmca: true }, 451);
+  const user = c.get('user');
+  if (row.hidden_at && row.user_id !== user?.id) return c.json({ error: 'Video not found' }, 404);
+
+  return c.json({
+    id: row.id,
+    status: row.status,
+    playback_hls_url: row.playback_hls_url,
+    thumbnail_url: row.thumbnail_url,
+    thumbnail_candidates: row.thumbnail_candidates,
+  });
+});
+
 videoRoutes.delete('/api/videos/:id', async (c) => {
   const user = c.get('user');
   if (!user) {

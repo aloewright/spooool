@@ -277,9 +277,29 @@ async function bootstrap(): Promise<void> {
     return { ok: false, error: heavyServerError ?? 'unknown init failure' };
   }
 
+  function forwardToHeavyServer(
+    init: { ok: true; app: ReturnType<typeof createServer> } | { ok: false; error: string },
+    rawBody: string,
+    originalReq: Request,
+  ): Response | ReturnType<ReturnType<typeof createServer>['fetch']> {
+    if (!init.ok) {
+      return Response.json({ error: 'container init failed', detail: init.error.slice(0, 800) }, { status: 503 });
+    }
+    // Strip framing headers — the body we forward is already-decoded text, so
+    // the original wire framing (content-length/encoding/transfer-encoding) no
+    // longer applies. Let the Request constructor derive a fresh content-length.
+    const innerHeaders = new Headers(originalReq.headers);
+    innerHeaders.delete('content-length');
+    innerHeaders.delete('content-encoding');
+    innerHeaders.delete('transfer-encoding');
+    return init.app.fetch(new Request(originalReq.url, {
+      method: 'POST',
+      headers: innerHeaders,
+      body: rawBody,
+    }));
+  }
+
   app.post('/render', async (c) => {
-    // Buffer the body so we can both inspect it (for the failure callback
-    // path) and forward an intact stream to the inner heavy server.
     const rawBody = await c.req.text();
     let parsedJobId: string | undefined;
     try {
@@ -297,28 +317,33 @@ async function bootstrap(): Promise<void> {
           body: JSON.stringify({ error: `Container init failed: ${init.error.slice(0, 800)}` }),
         }).catch(() => {});
       }
-      return c.json({ error: 'container init failed', detail: init.error.slice(0, 800) }, 503);
     }
-    // Reconstruct the inner Request with the body buffered above. The
-    // original c.req.raw has been consumed by the .text() read.
-    //
-    // Strip framing headers from the original request: content-length,
-    // content-encoding, and transfer-encoding all describe the *original*
-    // wire framing. The body we forward is the already-decoded string from
-    // c.req.text(), so the old framing no longer applies — leaving these
-    // headers in place causes length mismatches, double-decoding, or a
-    // hung/truncated read on the inner server. Let the Request constructor
-    // recompute content-length from the new body.
-    const innerHeaders = new Headers(c.req.raw.headers);
-    innerHeaders.delete('content-length');
-    innerHeaders.delete('content-encoding');
-    innerHeaders.delete('transfer-encoding');
-    const innerReq = new Request(c.req.raw.url, {
-      method: 'POST',
-      headers: innerHeaders,
-      body: rawBody,
-    });
-    return init.app.fetch(innerReq);
+    return forwardToHeavyServer(init, rawBody, c.req.raw);
+  });
+
+  // The R2+FFmpeg encoding path (ALO-136) dispatches jobs via POST /encode.
+  // This bootstrap handler mirrors the /render proxy: it ensures the heavy
+  // server is initialised, then forwards the request. On init failure it fires
+  // the /fail webhook so the Worker marks the video as failed rather than
+  // leaving it stuck in 'encoding'.
+  app.post('/encode', async (c) => {
+    const rawBody = await c.req.text();
+    let parsedVideoId: string | undefined;
+    try {
+      parsedVideoId = (JSON.parse(rawBody) as { videoId?: string }).videoId;
+    } catch { /* malformed JSON */ }
+
+    const init = await ensureHeavyServer();
+    if (!init.ok && parsedVideoId) {
+      const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
+      const callbackSecret = process.env.RENDER_CALLBACK_SECRET ?? '';
+      void fetch(`${workerBase}/api/webhooks/encode/${parsedVideoId}/fail`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
+        body: JSON.stringify({ error: `Container init failed: ${init.error.slice(0, 800)}` }),
+      }).catch(() => {});
+    }
+    return forwardToHeavyServer(init, rawBody, c.req.raw);
   });
 
   serve({ fetch: app.fetch, port });

@@ -372,14 +372,40 @@ const workerHandlers = {
           // Clean up DB rows left in `uploading` state by uploads that never
           // finished (KV session TTL is 24h, so anything older than 25h is
           // definitively abandoned and will never transition to queued).
-          const { meta: uploadCleanupMeta } = await env.DB.prepare(
-            `DELETE FROM videos
+          // Fetch r2_keys first so we can also remove any R2 objects that were
+          // committed before the DB transition succeeded (edge case where the
+          // multipart.complete() call won but the subsequent DB UPDATE failed).
+          const staleUploading = await env.DB.prepare(
+            `SELECT id, r2_key FROM videos
              WHERE status = 'uploading'
                AND updated_at < datetime('now', '-25 hours')`,
-          ).run();
-          const abandonedUploads = (uploadCleanupMeta?.changes as number | undefined) ?? 0;
-          if (abandonedUploads > 0) {
+          ).all<{ id: string; r2_key: string }>();
+          if (staleUploading.results.length > 0) {
+            await Promise.all(
+              staleUploading.results.map((row) => env.VIDEOS.delete(row.r2_key).catch(() => {})),
+            );
+            const ids = staleUploading.results.map((r) => `'${r.id.replace(/'/g, "''")}'`).join(',');
+            const { meta: uploadCleanupMeta } = await env.DB.prepare(
+              `DELETE FROM videos WHERE id IN (${ids})`,
+            ).run();
+            const abandonedUploads = (uploadCleanupMeta?.changes as number | undefined) ?? 0;
             console.log('[upload-cleanup]', { abandoned: abandonedUploads });
+          }
+
+          // Time out videos stuck in `encoding` for more than 6 hours. This
+          // covers two failure modes: (a) Cloudflare Stream webhook was never
+          // delivered, (b) the EncoderContainer crashed without posting /fail.
+          // 6h is conservative — a 1 GB video encodes in < 30 min on the
+          // FFmpeg path and Stream typically finishes within minutes.
+          const { meta: staleEncodingMeta } = await env.DB.prepare(
+            `UPDATE videos
+             SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+             WHERE status = 'encoding'
+               AND updated_at < datetime('now', '-6 hours')`,
+          ).run();
+          const staleEncoding = (staleEncodingMeta?.changes as number | undefined) ?? 0;
+          if (staleEncoding > 0) {
+            console.warn('[encoding-timeout]', { timed_out: staleEncoding });
           }
 
           const stats = await runDeletionSweep(env);

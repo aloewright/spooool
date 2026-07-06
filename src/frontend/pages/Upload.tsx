@@ -1,4 +1,4 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { uploadInChunks as runChunkedUpload, CHUNK_SIZE } from '../lib/chunked-upload';
@@ -47,6 +47,8 @@ export function classifyUploadError(message: string): string {
 }
 
 
+type EncodingStatus = 'uploading' | 'queued' | 'encoding' | 'ready' | 'failed';
+
 export function Upload(): JSX.Element {
   const { data: session } = useSession();
   const [file, setFile] = useState<File | null>(null);
@@ -56,7 +58,34 @@ export function Upload(): JSX.Element {
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [uploadedVideoId, setUploadedVideoId] = useState<string | null>(null);
+  const [encodingStatus, setEncodingStatus] = useState<EncodingStatus | null>(null);
   const [resendStatus, setResendStatus] = useState<string | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Poll /api/videos/:id/status every 5s after upload completes until the
+  // video is ready (or failed). Clears itself on unmount or when terminal.
+  useEffect(() => {
+    if (!uploadedVideoId || encodingStatus === 'ready' || encodingStatus === 'failed') return;
+    let cancelled = false;
+    async function poll() {
+      if (cancelled || !uploadedVideoId) return;
+      try {
+        const res = await fetch(`/api/videos/${uploadedVideoId}/status`);
+        if (res.ok) {
+          const data = (await res.json()) as { status?: EncodingStatus };
+          if (!cancelled && data.status) setEncodingStatus(data.status);
+        }
+      } catch { /* network hiccup — try again next tick */ }
+      if (!cancelled) {
+        pollTimerRef.current = setTimeout(() => void poll(), 5000);
+      }
+    }
+    void poll();
+    return () => {
+      cancelled = true;
+      if (pollTimerRef.current !== null) clearTimeout(pollTimerRef.current);
+    };
+  }, [uploadedVideoId, encodingStatus]);
 
   const isEmailVerified = session?.user?.emailVerified !== false;
   const isValidFile = useMemo(() => {
@@ -70,6 +99,7 @@ export function Upload(): JSX.Element {
     event.preventDefault();
     setError(null);
     setUploadedVideoId(null);
+    setEncodingStatus(null);
 
     if (!file) {
       setError('Please choose a file');
@@ -107,7 +137,10 @@ export function Upload(): JSX.Element {
 
     try {
       const result = await uploadInChunks(file, title, description, setProgress, captchaToken);
-      if (result.videoId) setUploadedVideoId(result.videoId);
+      if (result.videoId) {
+        setUploadedVideoId(result.videoId);
+        setEncodingStatus('queued');
+      }
       dispatch('upload_completed', { size_mb: sizeMb });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Upload failed';
@@ -225,10 +258,25 @@ export function Upload(): JSX.Element {
 
       {error ? <p className="status-error">{error}</p> : null}
       {uploadedVideoId ? (
-        <p className="status-ok">
-          Upload complete — encoding in progress.{' '}
-          <Link to={`/watch/${uploadedVideoId}`}>Track encoding progress</Link>
-        </p>
+        <div className="card stack-sm">
+          {encodingStatus === 'ready' ? (
+            <p className="status-ok">
+              Your video is ready.{' '}
+              <Link to={`/watch/${uploadedVideoId}`}>Watch it now</Link>
+            </p>
+          ) : encodingStatus === 'failed' ? (
+            <p className="status-error">
+              Encoding failed.{' '}
+              <Link to={`/watch/${uploadedVideoId}`}>View details</Link>
+            </p>
+          ) : (
+            <p className="ds-meta">
+              Upload complete —{' '}
+              {encodingStatus === 'encoding' ? 'encoding…' : 'queued for encoding…'}{' '}
+              <Link to={`/watch/${uploadedVideoId}`}>Watch page</Link>
+            </p>
+          )}
+        </div>
       ) : null}
     </main>
   );

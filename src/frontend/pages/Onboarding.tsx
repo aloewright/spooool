@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { useSession } from '../lib/auth-client';
+import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import {
   getSafeStorage,
   hasCompletedOnboarding,
@@ -59,6 +59,7 @@ export function Onboarding(): JSX.Element {
   const navigate = useNavigate();
   const { data: session, isPending } = useSession();
   const [stepIndex, setStepIndex] = useState(0);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
   // Latest stepIndex in a ref so advance()/skip() decide based on the
   // live value, not the value captured when the in-flight async handler
   // was created. Without this, a Skip click during an upload would let
@@ -198,6 +199,8 @@ export function Onboarding(): JSX.Element {
     return <Navigate to="/" replace />;
   }
 
+  const isEmailUnverified = session?.user?.emailVerified === false;
+
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
       <div className="stack-sm" style={{ paddingTop: 'var(--space-6)' }}>
@@ -205,6 +208,36 @@ export function Onboarding(): JSX.Element {
         <h1 className="ds-h2">Get set up in a minute</h1>
         <p className="ds-lede">Three quick steps and you're ready to upload.</p>
       </div>
+
+      {isEmailUnverified && (
+        <div
+          className="stack-xs"
+          style={{
+            padding: 'var(--space-3)',
+            borderRadius: 8,
+            border: '1px solid var(--color-border, #e0e0e0)',
+            background: 'var(--color-surface-raised, #f9f9f9)',
+          }}
+        >
+          <p className="ds-meta">
+            <strong>Check your inbox</strong> — we sent a verification link to{' '}
+            <strong>{session?.user?.email}</strong>. Click it to verify your account.
+          </p>
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            onClick={() => {
+              setResendStatus(null);
+              void resendVerificationEmail(session?.user?.email ?? '').then((r) =>
+                setResendStatus(r.ok ? 'Verification email resent.' : r.error ?? 'Failed to resend'),
+              );
+            }}
+          >
+            Resend verification email
+          </button>
+          {resendStatus ? <p className="ds-meta">{resendStatus}</p> : null}
+        </div>
+      )}
 
       {step === 'username' ? (
         <form onSubmit={(e) => void submitUsername(e)} className="card stack">

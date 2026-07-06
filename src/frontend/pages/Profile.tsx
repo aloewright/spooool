@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 
 interface UserProfile {
   id: string;
@@ -112,7 +113,14 @@ export function Profile(): JSX.Element {
     <main className="app-main app-main--narrow stack-xl fade-in">
       <div className="stack-sm">
         <span className="ds-label">Profile</span>
-        <h1 className="ds-h2">Your channel</h1>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-3)', flexWrap: 'wrap' }}>
+          <h1 className="ds-h2" style={{ margin: 0 }}>Your channel</h1>
+          {profile?.username ? (
+            <Link to={`/channel/${profile.username}`} className="ds-meta">
+              View public channel →
+            </Link>
+          ) : null}
+        </div>
       </div>
 
       <form onSubmit={(event) => void onSubmit(event)} className="card stack">

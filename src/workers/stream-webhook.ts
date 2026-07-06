@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { Context, MiddlewareHandler } from 'hono';
 import { buildThumbnailCandidates } from './thumbnails';
 import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
+import { triggerFanOut } from './channel-do';
 import { sendNewUploadEmails, type NotificationDbEnv } from './notification-email';
 import { waitUntilBackground } from './wait-until';
 
@@ -116,6 +117,7 @@ export async function verifyWebhookSignature(
 
 export interface StreamWebhookEnv extends NotificationDbEnv {
   CF_STREAM_WEBHOOK_SECRET?: string;
+  CHANNEL_SUBSCRIBER_DO?: DurableObjectNamespace;
 }
 
 export interface StreamWebhookDeps {
@@ -190,7 +192,7 @@ export const handleStreamWebhook =
       return c.json({ ok: true, matched: 0, status }, 202);
     }
 
-    // Notify subscribers by email once the video is actually watchable.
+    // Notify subscribers (in-app inbox + email) once the video is actually watchable.
     if (status === 'ready') {
       waitUntilBackground(c, (async () => {
         try {
@@ -200,15 +202,21 @@ export const handleStreamWebhook =
              WHERE v.stream_video_id = ?`,
           ).bind(payload.uid).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
           if (!video) return;
-          await sendNewUploadEmails(c.env, {
-            videoId: video.id,
-            channelUserId: video.user_id,
-            channelName: video.channel_name ?? '',
-            videoTitle: video.title,
-            origin: 'https://spooool.com',
-          });
+          await Promise.all([
+            triggerFanOut(c.env.CHANNEL_SUBSCRIBER_DO, {
+              videoId: video.id,
+              channelUserId: video.user_id,
+            }),
+            sendNewUploadEmails(c.env, {
+              videoId: video.id,
+              channelUserId: video.user_id,
+              channelName: video.channel_name ?? '',
+              videoTitle: video.title,
+              origin: 'https://spooool.com',
+            }),
+          ]);
         } catch (err) {
-          console.warn('[stream-webhook] new-upload email failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });
+          console.warn('[stream-webhook] subscriber notification failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });
         }
       })());
     }

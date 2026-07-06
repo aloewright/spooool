@@ -1,7 +1,6 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
-import { triggerFanOut } from './channel-do';
 import {
   UPLOAD_INIT_BUCKET,
   rateLimit,
@@ -630,10 +629,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       .run();
 
     await env.VIDEO_ENCODING.send({ videoId, r2Key });
-    await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
-      videoId,
-      channelUserId: user.id,
-    });
     await bumpTrendingCacheVersion(env.CACHE);
     purgeTrendingEdgeCache(c);
 
@@ -790,10 +785,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   }
 
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
-  await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
-    videoId: uploadMeta.videoId,
-    channelUserId: user.id,
-  });
   await bumpTrendingCacheVersion(env.CACHE);
   purgeTrendingEdgeCache(c);
 

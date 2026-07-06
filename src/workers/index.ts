@@ -5,7 +5,7 @@ import { bumpTrendingCacheVersion } from './trending-cache';
 import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
-import { ChannelSubscriberDO } from './channel-do';
+import { ChannelSubscriberDO, triggerFanOut } from './channel-do';
 import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
 import { handleEncodingMessage } from './encoding';
@@ -182,7 +182,7 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
   purgeTrendingEdgeCache(c);
 
-  // Notify subscribers by email now that the video is actually watchable.
+  // Notify subscribers (in-app inbox + email) now that the video is actually watchable.
   waitUntilBackground(c, (async () => {
     try {
       const video = await c.env.DB.prepare(
@@ -191,15 +191,21 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
          WHERE v.id = ?`,
       ).bind(videoId).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
       if (!video) return;
-      await sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
-        videoId: video.id,
-        channelUserId: video.user_id,
-        channelName: video.channel_name ?? '',
-        videoTitle: video.title,
-        origin: new URL(c.req.url).origin,
-      });
+      await Promise.all([
+        triggerFanOut(c.env.CHANNEL_SUBSCRIBER_DO, {
+          videoId: video.id,
+          channelUserId: video.user_id,
+        }),
+        sendNewUploadEmails(c.env as Parameters<typeof sendNewUploadEmails>[0], {
+          videoId: video.id,
+          channelUserId: video.user_id,
+          channelName: video.channel_name ?? '',
+          videoTitle: video.title,
+          origin: new URL(c.req.url).origin,
+        }),
+      ]);
     } catch (err) {
-      console.warn('[encode] new-upload email failed', { videoId, err: err instanceof Error ? err.message : String(err) });
+      console.warn('[encode] subscriber notification failed', { videoId, err: err instanceof Error ? err.message : String(err) });
     }
   })());
 

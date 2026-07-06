@@ -664,8 +664,6 @@ export function Watch(): JSX.Element {
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 2000);
     } catch {
-      // Clipboard API can be unavailable on insecure contexts; fall back to
-      // updating the address bar so the user can copy manually.
       window.history.replaceState(null, '', url.toString());
       setShareCopied(true);
       window.setTimeout(() => setShareCopied(false), 2000);
@@ -674,6 +672,19 @@ export function Watch(): JSX.Element {
       .then(({ track }) => track('video_share', { video_id: id ?? '', platform: 'copy_link' }))
       .catch(() => undefined);
   }, [id]);
+
+  const shareNative = useCallback(async (): Promise<void> => {
+    if (!video || !id) return;
+    const shareUrl = `${window.location.origin}/watch/${id}`;
+    try {
+      await navigator.share({ title: video.title, url: shareUrl });
+      void import('../lib/analytics')
+        .then(({ track }) => track('video_share', { video_id: id, platform: 'native' }))
+        .catch(() => undefined);
+    } catch {
+      // User cancelled or share failed — no-op.
+    }
+  }, [id, video]);
 
   if (error) {
     return (
@@ -841,6 +852,15 @@ export function Watch(): JSX.Element {
         >
           {shareCopied ? 'Link copied' : 'Share at current time'}
         </button>
+        {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? (
+          <button
+            type="button"
+            className="btn btn--ghost"
+            onClick={() => { void shareNative(); }}
+          >
+            Share
+          </button>
+        ) : null}
         {id && channelUsername ? (
           <TipButton videoId={id} creatorUsername={channelUsername} />
         ) : null}

@@ -244,15 +244,51 @@ COBALT_URL = "https://cobalt-api.lazee.workers.dev"
 # treats [env.*] tables as terminal — any top-level table (like [vars]) must be
 # declared before the first [env.*] section or wrangler errors with
 # "trying to redefine an already defined table".
-# NOTE: an [env.*] `vars` table does NOT inherit/merge top-level [vars] —
-# wrangler replaces it wholesale, so the discover/cobalt URLs must be repeated here.
+#
+# NOTE: [env.*].vars does NOT inherit/merge top-level [vars] — wrangler replaces
+# it wholesale, so ALL vars used by the worker must be declared here too.
+#
+# Isolation: staging has its own D1, R2, and KV resources so test traffic never
+# pollutes production data. Provision once per environment:
+#   wrangler r2 bucket create spooool-videos-staging
+#   wrangler r2 bucket create spooool-logs-staging
+#   wrangler kv namespace create CACHE --env staging   → fill id below
+#   wrangler kv namespace create SESSIONS --env staging → fill id below
 [env.staging]
-vars = { ALLOWED_ORIGINS = "", FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev", COBALT_URL = "https://cobalt-api.lazee.workers.dev" }
+vars = { ALLOWED_ORIGINS = "", FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev", COBALT_URL = "https://cobalt-api.lazee.workers.dev", ADMIN_EMAILS = "aloewright@gmail.com", EMAIL_FROM = "noreply@spooool.com", EMAIL_FROM_NAME = "Spooool Staging", AI_GATEWAY_MODE = "run-gateway" }
+
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "spooool-staging"
 database_id = "1d5c2f71-57b8-45e7-8863-0b501568f5ea"
 migrations_dir = "src/db/migrations"
+
+# Staging R2 + KV — currently inheriting prod bindings (safe: E2E tests stub
+# all uploads; KV cache entries are ephemeral and keyed by content, not env).
+# To fully isolate staging data, provision the resources below and uncomment:
+#
+#   wrangler r2 bucket create spooool-videos-staging
+#   wrangler r2 bucket create spooool-logs-staging
+#   wrangler kv namespace create CACHE --env staging
+#   wrangler kv namespace create SESSIONS --env staging
+#
+# Then uncomment and fill in the namespace IDs from the command output:
+#
+# [[env.staging.r2_buckets]]
+# binding = "VIDEOS"
+# bucket_name = "spooool-videos-staging"
+#
+# [[env.staging.r2_buckets]]
+# binding = "LOGS"
+# bucket_name = "spooool-logs-staging"
+#
+# [[env.staging.kv_namespaces]]
+# binding = "CACHE"
+# id = "<STAGING_KV_CACHE_ID>"
+#
+# [[env.staging.kv_namespaces]]
+# binding = "SESSIONS"
+# id = "<STAGING_KV_SESSIONS_ID>"
 
 # Secrets (set via: wrangler secret put <NAME>)
 # BETTER_AUTH_SECRET      (required — random 32+ byte string for signing sessions)

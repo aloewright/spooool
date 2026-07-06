@@ -60,6 +60,16 @@ export const STUDIO_GEN_BUCKET: RateLimitBucket = {
   refillPerSecond: 30 / 3600,
 };
 
+// 600 stream chunk requests per minute per IP (~10/sec sustained) — generous
+// enough for 10 simultaneous viewers behind a single NAT, tight enough to
+// block bot-level bulk download scrapers. Applied to /api/videos/:id/stream
+// and /api/videos/:id/hls/* (ALO-E7 signed-URL / abuse defense).
+export const STREAM_BUCKET: RateLimitBucket = {
+  name: 'stream',
+  capacity: 600,
+  refillPerSecond: 10,
+};
+
 interface RateLimiterBinding {
   idFromName(name: string): DurableObjectId;
   get(id: DurableObjectId): DurableObjectStub;

@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { ensureSessionId, shouldCountView } from './analytics';
 import { triggerFanOut } from './channel-do';
 import {
+  STREAM_BUCKET,
   UPLOAD_INIT_BUCKET,
+  clientIp,
   rateLimit,
   rateLimitHeaders,
 } from './rate-limit';
@@ -226,6 +228,17 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
 // require Range support for seekable <video> playback. When stream_video_id is
 // present and status='ready', clients should use the HLS manifest instead.
 videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
+  // ALO-E7: rate-limit stream chunk fetches per IP to block bulk scrapers.
+  // Fail-open on missing binding so dev environments without RateLimiterDO work.
+  const streamRl = await rateLimit({
+    ns: c.env.RATE_LIMITER,
+    bucket: STREAM_BUCKET,
+    identity: `ip:${clientIp(c.req.raw)}`,
+  });
+  if (!streamRl.allowed) {
+    return c.json({ error: 'Stream rate limit exceeded. Try again shortly.' }, 429, rateLimitHeaders(streamRl));
+  }
+
   const id = c.req.param('id');
   const video = await c.env.DB.prepare(
     `SELECT user_id, r2_key, hidden_at, dmca_status

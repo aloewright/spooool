@@ -63,6 +63,7 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -244,11 +245,9 @@ function HeaderNav(): JSX.Element {
       <Link to="/discover">
         <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
-      {/* Studio is the content hub served by the `editor` worker via the
-          spooool.com/studio* zone route — full page load, not client routing. */}
-      <a href="/studio">
+      <Link to="/studio">
         <button type="button" className="btn btn--ghost btn--sm">Studio</button>
-      </a>
+      </Link>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
 
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -779,24 +778,8 @@ function useSplash(): { show: boolean; dismiss: () => void } {
   return { show, dismiss };
 }
 
-// The content hub (books/blogs/scripts + AI studio, ALO spec
-// docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
-// at spooool.com/studio via a zone route; a full page load hands the URL to
-// it. The legacy AI Studio component remains for its panels to be absorbed
-// into the hub. This component backs the in-shell `/studio` route as a
-// belt-and-suspenders client redirect for the rare case the SPA serves
-// `/studio` before the zone route intercepts it.
-function StudioHubRedirect() {
-  useEffect(() => {
-    window.location.replace('/studio');
-  }, []);
-  return null;
-}
-
 // `App` is the default export mounted by main.tsx — the full spooool shell
-// (header, routed pages, footer). The /studio handoff lives on its own route
-// (StudioHubRedirect) and via the HeaderNav <a href="/studio"> hard link, so
-// the rest of the app keeps client-side routing.
+// (header, routed pages, footer).
 export default function App(): JSX.Element {
   const location = useLocation();
   const splash = useSplash();
@@ -856,7 +839,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route path="/studio" element={<StudioHubRedirect />} />
+          <Route path="/studio" element={<Studio />} />
           <Route
             path="/profile"
             element={

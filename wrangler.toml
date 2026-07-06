@@ -117,6 +117,15 @@ name = "EMAIL"
 [ai]
 binding = "AI"
 
+# Cloudflare Media Transformations binding (E10/E11). Used by media-transform.ts
+# to extract audio for STT (captions) and for E10 video transform helpers
+# (auto-poster, social crop, preview GIF, trim-to-share).
+# Manual op required: enable Media Transformations on the spooool zone via the
+# Cloudflare dashboard, and ensure the R2 public origin answers HEAD + range.
+# Falls back gracefully to raw R2 get when absent (dev / zones without MT).
+[media]
+binding = "MEDIA"
+
 # Cloudflare Stream binding (ALO-???). Used by /api/stream/upload-url to
 # mint one-time direct creator upload URLs for the client without ever
 # exposing CF_STREAM_API_TOKEN to the browser, and to manage video

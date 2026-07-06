@@ -276,3 +276,32 @@ export async function sendDmcaUploaderNotifyEmail(
 ): Promise<EmailResult> {
   return send(env, { to: args.to, ...buildDmcaUploaderNotifyEmail(args) });
 }
+
+export function buildInviteEmail(args: {
+  name?: string;
+  inviteUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { name, inviteUrl } = args;
+  const greet = name ? `Hey ${name},` : 'Hey there,';
+  return {
+    subject: "You're invited to spooool",
+    text:
+      `${greet}\n\n` +
+      `Your spot on spooool is ready. Click the link below to create your account:\n` +
+      `${inviteUrl}\n\n` +
+      `This link expires in 7 days. Once you're in, upload your first video and start building your audience.\n\n` +
+      `— The spooool team`,
+    html:
+      `<p>${escapeHtml(greet)}</p>` +
+      `<p>Your spot on spooool is ready.</p>` +
+      `<p><a href="${escapeHtml(inviteUrl)}">Accept your invite</a> — this link expires in 7 days.</p>` +
+      `<p>Once you're in, upload your first video and start building your audience.</p>`,
+  };
+}
+
+export async function sendInviteEmail(
+  env: EmailEnv,
+  args: { to: string; name?: string; inviteUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildInviteEmail(args) });
+}

@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signUp, useSession } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
@@ -7,14 +7,16 @@ import { SocialAuthButtons } from '../components/SocialAuthButtons';
 export function Signup(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { data: session, isPending } = useSession();
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [name, setName] = useState(searchParams.get('name') ?? '');
+  const [email, setEmail] = useState(searchParams.get('email') ?? '');
   const [password, setPassword] = useState('');
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const inviteToken = searchParams.get('invite');
   const next = (location.state as { from?: string } | null)?.from ?? '/';
 
   if (!isPending && session) {
@@ -39,6 +41,14 @@ export function Signup(): JSX.Element {
     if (signUpError) {
       setError(signUpError.message ?? 'Sign up failed');
       return;
+    }
+    // Mark invite as accepted (fire-and-forget — must not block navigation).
+    if (inviteToken) {
+      void fetch(`/api/invite/${encodeURIComponent(inviteToken)}/accept`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+      }).catch(() => undefined);
     }
     // Best-effort welcome-email trigger. Fire-and-forget — a missing
     // EMAIL binding, an unverified domain, or a transient send failure

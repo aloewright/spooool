@@ -63,6 +63,8 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+const Guidelines = lazy(() => import('./pages/Guidelines').then((m) => ({ default: m.Guidelines })));
+const InviteAccept = lazy(() => import('./pages/InviteAccept').then((m) => ({ default: m.InviteAccept })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -738,6 +740,7 @@ export function SiteFooter(): JSX.Element {
     >
       <Link to="/legal/tos">Terms of Service</Link>
       <Link to="/legal/privacy">Privacy Policy</Link>
+      <Link to="/legal/guidelines">Community Guidelines</Link>
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
       <Link to="/status">Status</Link>
@@ -957,6 +960,8 @@ export default function App(): JSX.Element {
             }
           />
           <Route path="/waitlist" element={<Waitlist />} />
+          <Route path="/legal/guidelines" element={<Guidelines />} />
+          <Route path="/invite/:token" element={<InviteAccept />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

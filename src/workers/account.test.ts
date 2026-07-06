@@ -344,3 +344,113 @@ describe('account delete + cancel window', () => {
     expect(args.cancelUrl).toBe('http://t/settings');
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/account/earnings
+// ---------------------------------------------------------------------------
+
+interface EarningsDBOpts {
+  polarStatus?: string;
+  polarOrgId?: string | null;
+  grossCents?: number;
+  netCents?: number;
+}
+
+function earningsApp(opts: EarningsDBOpts = {}, asUser: { id: string } | null = null) {
+  const {
+    polarStatus = 'not_connected',
+    polarOrgId = null,
+    grossCents = 0,
+    netCents = 0,
+  } = opts;
+
+  const db = {
+    prepare(sql: string) {
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...v: unknown[]) { bound = v; return stmt; },
+        async first() {
+          void bound;
+          if (sql.includes('polar_organization_id') && sql.includes('polar_account_status')) {
+            return { polar_organization_id: polarOrgId, polar_account_status: polarStatus };
+          }
+          if (sql.includes('FROM creator_earnings') && sql.includes('SUM(amount_cents)')) {
+            return { gross_cents: grossCents };
+          }
+          if (sql.includes('FROM creator_payouts') && sql.includes('SUM(amount_cents)')) {
+            return { net_cents: netCents };
+          }
+          return null;
+        },
+        async all() { return { results: [] }; },
+        async run() { return { meta: { changes: 0 } }; },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+  } as unknown as D1Database;
+
+  const app = new Hono<{ Variables: { user: { id: string; email: string; name: string } | null } }>();
+  app.use('*', async (c, next) => {
+    c.set('user', asUser ? { id: asUser.id, email: 'a@b.com', name: 'A' } : null);
+    await next();
+  });
+  app.route('/', accountRoutes);
+  return (path: string) => app.fetch(new Request(`http://t${path}`), { DB: db, CACHE: { get: async () => null, put: async () => {}, delete: async () => {} } } as never);
+}
+
+describe('GET /api/account/earnings', () => {
+  it('returns 401 when not signed in', async () => {
+    const res = await earningsApp()('/api/account/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns zero earnings for a new creator with no activity', async () => {
+    const res = await earningsApp({}, { id: 'u1' })('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      grossEarningsUsd: number;
+      netPayoutsUsd: number;
+      year: number;
+      currency: string;
+    };
+    expect(body.grossEarningsUsd).toBe(0);
+    expect(body.netPayoutsUsd).toBe(0);
+    expect(typeof body.year).toBe('number');
+    expect(body.currency).toBe('USD');
+  });
+
+  it('converts cents to dollars correctly', async () => {
+    const res = await earningsApp({ grossCents: 12345, netCents: 9000 }, { id: 'u1' })('/api/account/earnings');
+    const body = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(body.grossEarningsUsd).toBeCloseTo(123.45, 2);
+    expect(body.netPayoutsUsd).toBeCloseTo(90.00, 2);
+  });
+
+  it('includes polar status in the response', async () => {
+    const res = await earningsApp(
+      { polarStatus: 'active', polarOrgId: 'org_abc' },
+      { id: 'u1' },
+    )('/api/account/earnings');
+    const body = await res.json() as {
+      polar: { accountStatus: string; organizationId: string | null; needsOnboarding: boolean };
+    };
+    expect(body.polar.accountStatus).toBe('active');
+    expect(body.polar.organizationId).toBe('org_abc');
+    expect(body.polar.needsOnboarding).toBe(false);
+  });
+
+  it('sets needsOnboarding=true when status is not active', async () => {
+    const res = await earningsApp(
+      { polarStatus: 'pending' },
+      { id: 'u1' },
+    )('/api/account/earnings');
+    const body = await res.json() as { polar: { needsOnboarding: boolean } };
+    expect(body.polar.needsOnboarding).toBe(true);
+  });
+
+  it('includes taxDocStatus field', async () => {
+    const res = await earningsApp({}, { id: 'u1' })('/api/account/earnings');
+    const body = await res.json() as { taxDocStatus: string };
+    expect(body.taxDocStatus).toBe('polar-pending');
+  });
+});

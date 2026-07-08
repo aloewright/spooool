@@ -432,7 +432,10 @@ export type GtmBrief = {
 };
 
 export const api = {
-  listProjects: () => fetchJson<{ items: Project[] }>("/api/v1/projects"),
+  listProjects: (params?: { page?: number; limit?: number }) =>
+    fetchJson<{ items: Project[]; total: number; page: number; limit: number }>(
+      `/api/v1/projects?page=${params?.page ?? 1}&limit=${params?.limit ?? 20}`,
+    ),
   listDeletedProjects: () =>
     fetchJson<{ items: Project[]; retention_days: number }>("/api/v1/projects/deleted/recent"),
   createProject: (input: {

@@ -2,16 +2,22 @@ import { getBlogFormat } from "@/shared/blog-formats";
 import { getScriptFormat } from "@/shared/script-formats";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { BookOpen, Clapperboard, Plus, RotateCcw, Rss, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { BookOpen, ChevronLeft, ChevronRight, Clapperboard, Plus, RotateCcw, Rss, Trash2 } from "lucide-react";
+import { type ReactNode, useState } from "react";
 import { type Project, api, queryKeys } from "../lib/api";
 
 export const Route = createFileRoute("/_hub/")({ component: StudioHome });
 
+const PAGE_SIZE = 20;
+
 function StudioHome() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const projects = useQuery({ queryKey: queryKeys.projects(), queryFn: api.listProjects });
+  const [projectPage, setProjectPage] = useState(1);
+  const projects = useQuery({
+    queryKey: [...queryKeys.projects(), { page: projectPage, limit: PAGE_SIZE }],
+    queryFn: () => api.listProjects({ page: projectPage, limit: PAGE_SIZE }),
+  });
   const deletedProjects = useQuery({
     queryKey: queryKeys.deletedProjects(),
     queryFn: api.listDeletedProjects,
@@ -27,6 +33,8 @@ function StudioHome() {
     queryFn: api.listDeletedScripts,
   });
   const items = projects.data?.items ?? [];
+  const projectTotal = projects.data?.total ?? 0;
+  const projectTotalPages = Math.max(1, Math.ceil(projectTotal / PAGE_SIZE));
   const blogItems = blogs.data?.items ?? [];
   const scriptItems = scripts.data?.items ?? [];
   const deletedItems = deletedProjects.data?.items ?? [];
@@ -36,20 +44,24 @@ function StudioHome() {
 
   const deleteProject = useMutation({
     mutationFn: api.deleteProject,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      setProjectPage(1);
+      return Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.projects() }),
         qc.invalidateQueries({ queryKey: queryKeys.deletedProjects() }),
-      ]),
+      ]);
+    },
   });
 
   const restoreProject = useMutation({
     mutationFn: api.restoreProject,
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: () => {
+      setProjectPage(1);
+      return Promise.all([
         qc.invalidateQueries({ queryKey: queryKeys.projects() }),
         qc.invalidateQueries({ queryKey: queryKeys.deletedProjects() }),
-      ]),
+      ]);
+    },
   });
 
   const deleteBlog = useMutation({
@@ -139,6 +151,7 @@ function StudioHome() {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* books */}
           {items.map((p) => (
             <div className="group relative h-44" key={p.id}>
               <Link
@@ -270,6 +283,32 @@ function StudioHome() {
             </div>
           ))}
         </div>
+
+        {projectTotalPages > 1 && (
+          <div className="mt-6 flex items-center justify-center gap-3">
+            <button
+              className="flex items-center gap-1.5 rounded-full border border-neutral-300 bg-transparent px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+              disabled={projectPage <= 1}
+              onClick={() => setProjectPage((p) => p - 1)}
+              type="button"
+            >
+              <ChevronLeft className="size-4" />
+              Previous
+            </button>
+            <span className="text-neutral-500 text-sm">
+              {projectPage} / {projectTotalPages}
+            </span>
+            <button
+              className="flex items-center gap-1.5 rounded-full border border-neutral-300 bg-transparent px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+              disabled={projectPage >= projectTotalPages}
+              onClick={() => setProjectPage((p) => p + 1)}
+              type="button"
+            >
+              Next
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+        )}
 
         {deletedItems.length + deletedBlogItems.length + deletedScriptItems.length > 0 ? (
           <details className="mt-10 rounded-2xl bg-white/60 p-5 ring-1 ring-black/5 dark:bg-neutral-900/60 dark:ring-white/5">

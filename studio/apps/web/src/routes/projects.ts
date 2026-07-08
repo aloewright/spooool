@@ -111,13 +111,50 @@ projectsRoute.use("*", requireUser);
 
 projectsRoute.get("/", async (c) => {
   const user = c.get("user");
+
+  const rawPage = Number(c.req.query("page") ?? "1");
+  const rawLimit = Number(c.req.query("limit") ?? "20");
+  const page = Number.isFinite(rawPage) && rawPage >= 1 ? Math.floor(rawPage) : 1;
+  const limit = Number.isFinite(rawLimit) && rawLimit >= 1 && rawLimit <= 100 ? Math.floor(rawLimit) : 20;
+
+  // Synthetic cache key scoped to the user so entries are never shared across accounts.
+  const cacheKey = new Request(
+    `https://cache.internal/users/${user.id}/projects?page=${page}&limit=${limit}`,
+  );
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    const hit = new Response(cached.body, cached);
+    hit.headers.set("X-Cache", "HIT");
+    return hit;
+  }
+
   const db = drizzle(c.env.DB);
+  const where = and(eq(projects.user_id, user.id), isNull(projects.deleted_at));
+
+  const [{ total }] = await db
+    .select({ total: sql<number>`count(*)` })
+    .from(projects)
+    .where(where);
+
   const items = await db
     .select()
     .from(projects)
-    .where(and(eq(projects.user_id, user.id), isNull(projects.deleted_at)))
-    .orderBy(desc(projects.updated_at));
-  return c.json({ items });
+    .where(where)
+    .orderBy(desc(projects.updated_at))
+    .limit(limit)
+    .offset((page - 1) * limit);
+
+  const body = JSON.stringify({ items, total, page, limit });
+  const miss = new Response(body, {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "max-age=60",
+      "X-Cache": "MISS",
+    },
+  });
+  await cache.put(cacheKey, miss.clone());
+  return miss;
 });
 
 projectsRoute.get("/deleted/recent", async (c) => {

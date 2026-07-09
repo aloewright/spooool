@@ -134,7 +134,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
         return {
           uploadId: mpid,
           uploadPart: async (partNumber: number, body: unknown) => {
-            r2Parts[key]!.parts.push({ partNumber, body });
+            r2Parts[key].parts.push({ partNumber, body });
             return { etag: `etag-${partNumber}` };
           },
         };
@@ -143,7 +143,7 @@ describe('POST /api/videos/upload (target=recorder)', () => {
         return {
           uploadPart: async (partNumber: number, body: unknown) => {
             if (!r2Parts[key]) r2Parts[key] = { parts: [] };
-            r2Parts[key]!.parts.push({ partNumber, body });
+            r2Parts[key].parts.push({ partNumber, body });
             return { etag: `etag-${partNumber}` };
           },
           complete: async (_parts: unknown) => {
@@ -479,7 +479,7 @@ describe('upload storage-quota gate', () => {
 describe('POST /api/videos/upload multi-chunk (target=video)', () => {
   const USER_ID = 'u_mc';
 
-  function multiChunkEnv() {
+  function multiChunkEnv(options: { failAbort?: boolean } = {}) {
     const dbInserts: { sql: string; bound: unknown[] }[] = [];
     const dbUpdates: { sql: string; bound: unknown[] }[] = [];
     const dbDeletes: { sql: string; bound: unknown[] }[] = [];
@@ -519,7 +519,7 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
         return {
           uploadId: `mpid-${key}`,
           uploadPart: async (partNumber: number) => {
-            r2Parts[key]!.push({ partNumber });
+            r2Parts[key].push({ partNumber });
             return { etag: `etag-${partNumber}` };
           },
         };
@@ -527,11 +527,14 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
       resumeMultipartUpload: (key: string) => ({
         uploadPart: async (partNumber: number) => {
           if (!r2Parts[key]) r2Parts[key] = [];
-          r2Parts[key]!.push({ partNumber });
+          r2Parts[key].push({ partNumber });
           return { etag: `etag-${partNumber}` };
         },
         complete: async () => { r2Completed.push(key); },
-        abort: async () => { r2Aborted.push(key); },
+        abort: async () => {
+          if (options.failAbort) throw new Error('abort failed');
+          r2Aborted.push(key);
+        },
       }),
     } as unknown as R2Bucket;
 
@@ -578,10 +581,11 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     // DB INSERT with status='uploading'
     expect(dbInserts).toHaveLength(1);
     const [insert] = dbInserts;
-    expect(insert!.sql).toContain('uploading');
+    expect(insert).toBeDefined();
+    expect(insert.sql).toContain('uploading');
     // bound: [videoId, userId, title, description, r2Key]
-    expect(insert!.bound[1]).toBe(USER_ID);
-    expect(insert!.bound[2]).toBe('my video');
+    expect(insert.bound[1]).toBe(USER_ID);
+    expect(insert.bound[2]).toBe('my video');
   });
 
   it('retrying the final chunk after KV cleanup returns 201 via done sentinel', async () => {
@@ -659,6 +663,26 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     expect(body.fileName).toBe('v.mp4');
   });
 
+  it('falls back to the chunk size when fileSize metadata is invalid', async () => {
+    const { env } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('fileSize', 'not-a-number');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '3');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+
+    const status = await fetcher(`/api/videos/upload/${uploadId}/status`);
+    expect(status.status).toBe(200);
+    const body = (await status.json()) as { fileSize: number };
+    expect(body.fileSize).toBe(MP4_MAGIC.byteLength);
+  });
+
   it('returns an empty uploaded chunk list when parts metadata is malformed', async () => {
     const { env, kv } = multiChunkEnv();
     const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
@@ -699,6 +723,30 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     expect(Object.keys(kv).filter((key) => key.includes(uploadId))).toEqual([]);
   });
 
+  it('preserves upload session state when cancel cannot abort R2 multipart', async () => {
+    const { env, dbDeletes, r2Aborted, kv } = multiChunkEnv({ failAbort: true });
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '3');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+
+    const cancel = await fetcher(`/api/videos/upload/${uploadId}`, { method: 'DELETE' });
+    expect(cancel.status).toBe(503);
+    expect(r2Aborted).toHaveLength(0);
+    expect(dbDeletes).toHaveLength(0);
+    expect(Object.keys(kv).filter((key) => key.includes(uploadId)).sort()).toEqual([
+      `upload:${USER_ID}:${uploadId}:meta`,
+      `upload:${USER_ID}:${uploadId}:mpid`,
+      `upload:${USER_ID}:${uploadId}:parts`,
+    ]);
+  });
+
   it('cleans the uploading row on cancel even when multipart id is missing', async () => {
     const { env, dbDeletes, r2Aborted, kv } = multiChunkEnv();
     const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
@@ -721,7 +769,7 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
   });
 
   it('does not double-count bytes when the final chunk is retried before completion', async () => {
-    const { env, kv } = multiChunkEnv();
+    const { env, dbUpdates, kv } = multiChunkEnv();
     const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
 
     const fd0 = new FormData();
@@ -736,7 +784,7 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     const partsKey = `upload:${USER_ID}:${uploadId}:parts`;
     kv[partsKey] = JSON.stringify({
       '1': { etag: 'etag-1', size: MP4_MAGIC.byteLength },
-      '2': { etag: 'etag-old', size: 512 },
+      '2': { etag: 'etag-old', size: 10 * 1024 * 1024 * 1024 - MP4_MAGIC.byteLength },
     });
 
     const fd1 = new FormData();
@@ -748,6 +796,9 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     fd1.set('uploadId', uploadId);
     const res1 = await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
     expect(res1.status).toBe(201);
+    const [queuedUpdate] = dbUpdates;
+    expect(queuedUpdate).toBeDefined();
+    expect(queuedUpdate.bound[0]).toBe(MP4_MAGIC.byteLength + 512);
   });
 
   it('final chunk transitions existing row to queued, returns same videoId', async () => {
@@ -783,7 +834,9 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     // INSERT at chunk 0, UPDATE at final chunk (no second INSERT)
     expect(dbInserts).toHaveLength(1);
     expect(dbUpdates).toHaveLength(1);
-    expect(dbUpdates[0]!.sql).toContain("SET status = 'queued'");
+    const [queuedUpdate] = dbUpdates;
+    expect(queuedUpdate).toBeDefined();
+    expect(queuedUpdate.sql).toContain("SET status = 'queued'");
 
     // Encoding queue received the job
     expect(queueSends).toHaveLength(1);

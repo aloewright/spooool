@@ -176,6 +176,10 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
               startChunk = chunkCount - 1;
             }
             saveProgress(key, stored.uploadId, startChunk, chunkCount);
+          } else {
+            removeProgress(key);
+            uploadId = null;
+            startChunk = 0;
           }
         } catch {
           // Keep local progress on transient status lookup failures; the next
@@ -233,13 +237,17 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     onProgress((i + 1) / chunkCount);
   }
 
+  if (!lastResponse) {
+    throw new Error('upload finished without a server response');
+  }
+
   // Extract videoId from the final 201 response.
   let videoId: string | null = null;
   try {
-    const body = (await lastResponse!.clone().json()) as { id?: string };
+    const body = (await lastResponse.clone().json()) as { id?: string };
     if (body.id) videoId = body.id;
   } catch { /* ignore */ }
 
   removeProgress(key);
-  return { ok: true, uploadId, videoId, lastResponse: lastResponse! };
+  return { ok: true, uploadId, videoId, lastResponse };
 }

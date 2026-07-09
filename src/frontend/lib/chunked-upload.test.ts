@@ -190,6 +190,41 @@ describe('uploadInChunks', () => {
     expect(chunks).toEqual([1, 2]);
   });
 
+  it('restarts when the stored upload does not match the server chunk layout', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'layout-mismatch.mp4', 'video/mp4');
+    const key = `chunk-upload:layout-mismatch.mp4:${file.size}:${file.lastModified}`;
+    ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 1, chunkCount: 3 }));
+
+    const chunks: Array<{ chunkIndex: number; uploadId: string | null }> = [];
+    mockFetch(async (_url, init) => {
+      if (!init?.body) {
+        return new Response(JSON.stringify({
+          status: 'uploading',
+          chunkCount: 2,
+          uploadedChunks: [0],
+        }), { status: 200 });
+      }
+      const fd = init.body as FormData;
+      chunks.push({
+        chunkIndex: Number(fd.get('chunkIndex')),
+        uploadId: (fd.get('uploadId') as string | null) ?? null,
+      });
+      return new Response(JSON.stringify(chunks.length === 3 ? { id: 'v1' } : { uploadId: 'new-id' }), {
+        status: chunks.length === 3 ? 201 : 202,
+      });
+    });
+
+    await uploadInChunks({
+      file, endpoint: '/api/upload', target: 'video', fields: {}, onProgress: () => {},
+      _sleep: noSleep,
+    });
+    expect(chunks).toEqual([
+      { chunkIndex: 0, uploadId: null },
+      { chunkIndex: 1, uploadId: 'new-id' },
+      { chunkIndex: 2, uploadId: 'new-id' },
+    ]);
+  });
+
   it('forwards custom headers to the resume status request', async () => {
     const file = makeFile(30 * 1024 * 1024, 'headers.mp4', 'video/mp4');
     const key = `chunk-upload:headers.mp4:${file.size}:${file.lastModified}`;
@@ -240,6 +275,24 @@ describe('uploadInChunks', () => {
       _sleep: noSleep,
     });
     expect(chunks).toEqual([1, 2]);
+  });
+
+  it('retains stored progress when status lookup and upload retry fail transiently', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'status-err-fail.mp4', 'video/mp4');
+    const key = `chunk-upload:status-err-fail.mp4:${file.size}:${file.lastModified}`;
+    const stored = JSON.stringify({ uploadId: 'stored-id', nextChunk: 1, chunkCount: 3 });
+    ssMap.set(key, stored);
+
+    mockFetch(async (_url, init) => {
+      if (!init?.body) return new Response('temporary', { status: 503 });
+      return new Response('server down', { status: 503 });
+    });
+
+    await expect(uploadInChunks({
+      file, endpoint: '/api/upload', target: 'video', fields: {}, onProgress: () => {},
+      _sleep: noSleep,
+    })).rejects.toThrow(/chunk 1 failed: 503/);
+    expect(ssMap.get(key)).toBe(stored);
   });
 
   it('extracts videoId from the final 201 response', async () => {

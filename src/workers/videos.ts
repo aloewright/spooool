@@ -114,6 +114,12 @@ function parseUploadedChunks(partsJson: string | null): number[] {
   }
 }
 
+function parseOptionalFileSize(value: FormDataEntryValue | null, fallback: number): number {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
 videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
@@ -582,7 +588,11 @@ videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
     try {
       const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
       if (multipartUploadId) {
-        await c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId).abort().catch(() => {});
+        try {
+          await c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId).abort();
+        } catch {
+          return c.json({ error: 'Failed to abort upload session' }, 503);
+        }
       }
       await c.env.DB.prepare(
         `DELETE FROM videos WHERE id = ? AND user_id = ? AND status = 'uploading'`,
@@ -779,7 +789,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         description: metadataParsed.data.description,
         chunkCount,
         fileName: rawFile.name,
-        fileSize: Number(formData.get('fileSize') ?? rawFile.size),
+        fileSize: parseOptionalFileSize(formData.get('fileSize'), rawFile.size),
       }),
       { expirationTtl: 86400 },
     );

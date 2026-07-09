@@ -126,8 +126,12 @@ function statusEndpoint(endpoint: string, uploadId: string): string {
   return `${normalized}/${encodeURIComponent(uploadId)}/status`;
 }
 
-async function fetchUploadStatus(endpoint: string, uploadId: string): Promise<UploadStatus | null> {
-  const res = await fetch(statusEndpoint(endpoint, uploadId), { method: 'GET' });
+async function fetchUploadStatus(
+  endpoint: string,
+  uploadId: string,
+  headers?: Record<string, string>,
+): Promise<UploadStatus | null> {
+  const res = await fetch(statusEndpoint(endpoint, uploadId), { method: 'GET', headers });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`resume status failed: ${res.status}`);
   return (await res.json()) as UploadStatus;
@@ -151,7 +155,7 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
       uploadId = stored.uploadId;
       startChunk = stored.nextChunk;
       try {
-        const status = await fetchUploadStatus(endpoint, stored.uploadId);
+        const status = await fetchUploadStatus(endpoint, stored.uploadId, headers);
         if (!status) {
           removeProgress(key);
           uploadId = null;

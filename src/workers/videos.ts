@@ -103,11 +103,15 @@ function videoUploadKeys(userId: string, uploadId: string) {
 
 function parseUploadedChunks(partsJson: string | null): number[] {
   if (!partsJson) return [];
-  const uploadedPartsMap = JSON.parse(partsJson) as Record<string, { etag: string; size: number }>;
-  return Object.keys(uploadedPartsMap)
-    .map((partNumber) => Number(partNumber) - 1)
-    .filter((chunkIndex) => Number.isInteger(chunkIndex) && chunkIndex >= 0)
-    .sort((a, b) => a - b);
+  try {
+    const uploadedPartsMap = JSON.parse(partsJson) as Record<string, { etag: string; size: number }>;
+    return Object.keys(uploadedPartsMap)
+      .map((partNumber) => Number(partNumber) - 1)
+      .filter((chunkIndex) => Number.isInteger(chunkIndex) && chunkIndex >= 0)
+      .sort((a, b) => a - b);
+  } catch {
+    return [];
+  }
 }
 
 videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async (c) => {
@@ -574,14 +578,18 @@ videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
     c.env.SESSIONS.get(metaKey),
   ]);
 
-  if (multipartUploadId && uploadMetaJson) {
-    const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
-    await c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId).abort().catch(() => {});
-    await c.env.DB.prepare(
-      `DELETE FROM videos WHERE id = ? AND user_id = ? AND status = 'uploading'`,
-    )
-      .bind(uploadMeta.videoId, user.id)
-      .run();
+  if (uploadMetaJson) {
+    try {
+      const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+      if (multipartUploadId) {
+        await c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId).abort().catch(() => {});
+      }
+      await c.env.DB.prepare(
+        `DELETE FROM videos WHERE id = ? AND user_id = ? AND status = 'uploading'`,
+      )
+        .bind(uploadMeta.videoId, user.id)
+        .run();
+    } catch { /* stale malformed metadata should not block session cleanup */ }
   }
 
   await Promise.all([

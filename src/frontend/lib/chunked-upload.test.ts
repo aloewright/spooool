@@ -190,6 +190,36 @@ describe('uploadInChunks', () => {
     expect(chunks).toEqual([1, 2]);
   });
 
+  it('forwards custom headers to the resume status request', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'headers.mp4', 'video/mp4');
+    const key = `chunk-upload:headers.mp4:${file.size}:${file.lastModified}`;
+    ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 1, chunkCount: 3 }));
+
+    const seenHeaders: HeadersInit[] = [];
+    mockFetch(async (_url, init) => {
+      if (!init?.body) {
+        seenHeaders.push(init?.headers ?? {});
+        return new Response(JSON.stringify({
+          status: 'uploading',
+          chunkCount: 3,
+          uploadedChunks: [0, 1],
+        }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ id: 'v1' }), { status: 201 });
+    });
+
+    await uploadInChunks({
+      file,
+      endpoint: '/api/upload',
+      target: 'video',
+      fields: {},
+      headers: { authorization: 'Bearer token' },
+      onProgress: () => {},
+      _sleep: noSleep,
+    });
+    expect(seenHeaders).toEqual([{ authorization: 'Bearer token' }]);
+  });
+
   it('keeps stored progress on transient resume status failures', async () => {
     const file = makeFile(30 * 1024 * 1024, 'status-err.mp4', 'video/mp4');
     const key = `chunk-upload:status-err.mp4:${file.size}:${file.lastModified}`;

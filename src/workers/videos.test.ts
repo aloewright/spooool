@@ -659,6 +659,26 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     expect(body.fileName).toBe('v.mp4');
   });
 
+  it('returns an empty uploaded chunk list when parts metadata is malformed', async () => {
+    const { env, kv } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '3');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+    kv[`upload:${USER_ID}:${uploadId}:parts`] = '{not-json';
+
+    const status = await fetcher(`/api/videos/upload/${uploadId}/status`);
+    expect(status.status).toBe(200);
+    const body = (await status.json()) as { uploadedChunks: number[] };
+    expect(body.uploadedChunks).toEqual([]);
+  });
+
   it('aborts and clears a resumable upload session on cancel', async () => {
     const { env, dbDeletes, r2Aborted, kv } = multiChunkEnv();
     const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
@@ -675,6 +695,27 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     const cancel = await fetcher(`/api/videos/upload/${uploadId}`, { method: 'DELETE' });
     expect(cancel.status).toBe(200);
     expect(r2Aborted).toHaveLength(1);
+    expect(dbDeletes).toHaveLength(1);
+    expect(Object.keys(kv).filter((key) => key.includes(uploadId))).toEqual([]);
+  });
+
+  it('cleans the uploading row on cancel even when multipart id is missing', async () => {
+    const { env, dbDeletes, r2Aborted, kv } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '3');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    const { uploadId } = (await res0.json()) as { uploadId: string };
+    delete kv[`upload:${USER_ID}:${uploadId}:mpid`];
+
+    const cancel = await fetcher(`/api/videos/upload/${uploadId}`, { method: 'DELETE' });
+    expect(cancel.status).toBe(200);
+    expect(r2Aborted).toHaveLength(0);
     expect(dbDeletes).toHaveLength(1);
     expect(Object.keys(kv).filter((key) => key.includes(uploadId))).toEqual([]);
   });

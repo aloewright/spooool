@@ -254,6 +254,38 @@ describe('uploadInChunks', () => {
     expect(result.videoId).toBe('video-xyz');
   });
 
+  it('does not call the video status endpoint when resuming recorder uploads', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'recording.webm', 'video/webm');
+    const key = `chunk-upload:recording.webm:${file.size}:${file.lastModified}`;
+    ssMap.set(key, JSON.stringify({ uploadId: 'rec-id', nextChunk: 1, chunkCount: 3 }));
+
+    const calls: Array<{ method: string; hasBody: boolean; chunkIndex: number | null }> = [];
+    mockFetch(async (_url, init) => {
+      const fd = init?.body as FormData;
+      calls.push({
+        method: init?.method ?? 'GET',
+        hasBody: Boolean(init?.body),
+        chunkIndex: fd ? Number(fd.get('chunkIndex')) : null,
+      });
+      return new Response(JSON.stringify(
+        calls.length === 2 ? { ok: true } : { uploadId: 'rec-id' },
+      ), { status: calls.length === 2 ? 200 : 202 });
+    });
+
+    await uploadInChunks({
+      file,
+      endpoint: '/api/videos/upload',
+      target: 'recorder',
+      fields: { sessionId: 's1', takeId: 't1' },
+      onProgress: () => {},
+      _sleep: noSleep,
+    });
+    expect(calls).toEqual([
+      { method: 'POST', hasBody: true, chunkIndex: 1 },
+      { method: 'POST', hasBody: true, chunkIndex: 2 },
+    ]);
+  });
+
   it('clears stored progress on 4xx so the next attempt starts fresh', async () => {
     const file = makeFile(25 * 1024 * 1024, 'bad.mp4', 'video/mp4');
     const key = `chunk-upload:bad.mp4:${file.size}:${file.lastModified}`;

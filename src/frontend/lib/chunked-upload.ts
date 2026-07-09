@@ -154,31 +154,33 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     if (stored) {
       uploadId = stored.uploadId;
       startChunk = stored.nextChunk;
-      try {
-        const status = await fetchUploadStatus(endpoint, stored.uploadId, headers);
-        if (!status) {
-          removeProgress(key);
-          uploadId = null;
-          startChunk = 0;
-        } else if (status.status === 'completed') {
-          removeProgress(key);
-          onProgress(1);
-          return {
-            ok: true,
-            uploadId: stored.uploadId,
-            videoId: status.id,
-            lastResponse: new Response(JSON.stringify({ id: status.id, status: 'queued' }), { status: 201 }),
-          };
-        } else if (status.chunkCount === chunkCount) {
-          startChunk = firstMissingChunk(chunkCount, status.uploadedChunks);
-          if (startChunk >= chunkCount) {
-            startChunk = chunkCount - 1;
+      if (target === 'video') {
+        try {
+          const status = await fetchUploadStatus(endpoint, stored.uploadId, headers);
+          if (!status) {
+            removeProgress(key);
+            uploadId = null;
+            startChunk = 0;
+          } else if (status.status === 'completed') {
+            removeProgress(key);
+            onProgress(1);
+            return {
+              ok: true,
+              uploadId: stored.uploadId,
+              videoId: status.id,
+              lastResponse: new Response(JSON.stringify({ id: status.id, status: 'queued' }), { status: 201 }),
+            };
+          } else if (status.chunkCount === chunkCount) {
+            startChunk = firstMissingChunk(chunkCount, status.uploadedChunks);
+            if (startChunk >= chunkCount) {
+              startChunk = chunkCount - 1;
+            }
+            saveProgress(key, stored.uploadId, startChunk, chunkCount);
           }
-          saveProgress(key, stored.uploadId, startChunk, chunkCount);
+        } catch {
+          // Keep local progress on transient status lookup failures; the next
+          // upload attempt can still resume against the existing server session.
         }
-      } catch {
-        // Keep local progress on transient status lookup failures; the next
-        // upload attempt can still resume against the existing server session.
       }
       onProgress(startChunk / chunkCount);
     }

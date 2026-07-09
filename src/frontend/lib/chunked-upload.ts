@@ -85,10 +85,13 @@ function resumeKey(file: Blob): string {
 }
 
 type StoredProgress = { uploadId: string; nextChunk: number; chunkCount: number };
+type UploadStatus =
+  | { status: 'uploading'; chunkCount: number; uploadedChunks: number[] }
+  | { status: 'completed'; id: string };
 
 function loadProgress(key: string, chunkCount: number): { uploadId: string; nextChunk: number } | null {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const stored = JSON.parse(raw) as StoredProgress;
     if (stored.chunkCount !== chunkCount || stored.nextChunk <= 0 || stored.nextChunk >= chunkCount) {
@@ -102,12 +105,32 @@ function loadProgress(key: string, chunkCount: number): { uploadId: string; next
 
 function saveProgress(key: string, uploadId: string, nextChunk: number, chunkCount: number): void {
   try {
-    sessionStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount } satisfies StoredProgress));
+    localStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount } satisfies StoredProgress));
   } catch { /* QuotaExceededError or SSR env — ignore */ }
 }
 
 function removeProgress(key: string): void {
-  try { sessionStorage.removeItem(key); } catch { /* ignore */ }
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
+}
+
+function firstMissingChunk(chunkCount: number, uploadedChunks: number[]): number {
+  const uploaded = new Set(uploadedChunks);
+  for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++) {
+    if (!uploaded.has(chunkIndex)) return chunkIndex;
+  }
+  return chunkCount;
+}
+
+function statusEndpoint(endpoint: string, uploadId: string): string {
+  const normalized = endpoint.endsWith('/') ? endpoint.slice(0, -1) : endpoint;
+  return `${normalized}/${encodeURIComponent(uploadId)}/status`;
+}
+
+async function fetchUploadStatus(endpoint: string, uploadId: string): Promise<UploadStatus | null> {
+  const res = await fetch(statusEndpoint(endpoint, uploadId), { method: 'GET' });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`resume status failed: ${res.status}`);
+  return (await res.json()) as UploadStatus;
 }
 
 export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult> {
@@ -127,6 +150,32 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     if (stored) {
       uploadId = stored.uploadId;
       startChunk = stored.nextChunk;
+      try {
+        const status = await fetchUploadStatus(endpoint, stored.uploadId);
+        if (!status) {
+          removeProgress(key);
+          uploadId = null;
+          startChunk = 0;
+        } else if (status.status === 'completed') {
+          removeProgress(key);
+          onProgress(1);
+          return {
+            ok: true,
+            uploadId: stored.uploadId,
+            videoId: status.id,
+            lastResponse: new Response(JSON.stringify({ id: status.id, status: 'queued' }), { status: 201 }),
+          };
+        } else if (status.chunkCount === chunkCount) {
+          startChunk = firstMissingChunk(chunkCount, status.uploadedChunks);
+          if (startChunk >= chunkCount) {
+            startChunk = chunkCount - 1;
+          }
+          saveProgress(key, stored.uploadId, startChunk, chunkCount);
+        }
+      } catch {
+        // Keep local progress on transient status lookup failures; the next
+        // upload attempt can still resume against the existing server session.
+      }
       onProgress(startChunk / chunkCount);
     }
   }
@@ -144,6 +193,7 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     fd.set('target', target);
     fd.set('chunkIndex', String(i));
     fd.set('chunkCount', String(chunkCount));
+    fd.set('fileSize', String(size));
     fd.set('file', chunk, filename ?? (file as File).name ?? 'chunk');
     if (uploadId) fd.set('uploadId', uploadId);
 

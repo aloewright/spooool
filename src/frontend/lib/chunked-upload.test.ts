@@ -4,10 +4,10 @@ import { uploadInChunks, CHUNK_SIZE, type UploadTarget } from './chunked-upload'
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-// Provide a no-op sessionStorage stub so tests run in happy-dom.
+// Provide a no-op localStorage stub so tests run in happy-dom.
 const ssMap = new Map<string, string>();
 beforeEach(() => ssMap.clear());
-vi.stubGlobal('sessionStorage', {
+vi.stubGlobal('localStorage', {
   getItem: (k: string) => ssMap.get(k) ?? null,
   setItem: (k: string, v: string) => ssMap.set(k, v),
   removeItem: (k: string) => ssMap.delete(k),
@@ -111,7 +111,7 @@ describe('uploadInChunks', () => {
     expect(callCount).toBe(3);
   });
 
-  it('persists uploadId to sessionStorage after chunk 0 and clears on completion', async () => {
+  it('persists uploadId to localStorage after chunk 0 and clears on completion', async () => {
     let call = 0;
     mockFetch(async () => {
       call++;
@@ -125,18 +125,25 @@ describe('uploadInChunks', () => {
       _sleep: noSleep,
     });
     expect(result.videoId).toBe('vid-abc');
-    // sessionStorage should be cleared after successful upload
+    // localStorage should be cleared after successful upload
     const stored = ssMap.get(`chunk-upload:big.mp4:${file.size}:${file.lastModified}`);
     expect(stored).toBeUndefined();
   });
 
-  it('reports pre-existing progress fraction when resuming via sessionStorage', async () => {
+  it('reports pre-existing progress fraction when resuming via localStorage', async () => {
     const file = makeFile(30 * 1024 * 1024, 'resume.mp4', 'video/mp4'); // 3 chunks
     const key = `chunk-upload:resume.mp4:${file.size}:${file.lastModified}`;
     ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 2, chunkCount: 3 }));
 
     const chunks: number[] = [];
     mockFetch(async (_url, init) => {
+      if (!init?.body) {
+        return new Response(JSON.stringify({
+          status: 'uploading',
+          chunkCount: 3,
+          uploadedChunks: [0, 1],
+        }), { status: 200 });
+      }
       const fd = init?.body as FormData;
       chunks.push(Number(fd.get('chunkIndex')));
       return new Response(JSON.stringify({ id: 'v1' }), { status: 201 });
@@ -153,6 +160,56 @@ describe('uploadInChunks', () => {
     expect(progressValues[0]).toBeCloseTo(2 / 3);
     // Final progress should be 1
     expect(progressValues[progressValues.length - 1]).toBe(1);
+  });
+
+  it('uses server-reported chunks rather than stale local nextChunk when resuming', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'server-state.mp4', 'video/mp4');
+    const key = `chunk-upload:server-state.mp4:${file.size}:${file.lastModified}`;
+    ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 2, chunkCount: 3 }));
+
+    const chunks: number[] = [];
+    mockFetch(async (_url, init) => {
+      if (!init?.body) {
+        return new Response(JSON.stringify({
+          status: 'uploading',
+          chunkCount: 3,
+          uploadedChunks: [0],
+        }), { status: 200 });
+      }
+      const fd = init.body as FormData;
+      chunks.push(Number(fd.get('chunkIndex')));
+      return new Response(JSON.stringify(
+        chunks.length === 1 ? { uploadId: 'stored-id' } : { id: 'v1' },
+      ), { status: chunks.length === 1 ? 202 : 201 });
+    });
+
+    await uploadInChunks({
+      file, endpoint: '/api/upload', target: 'video', fields: {}, onProgress: () => {},
+      _sleep: noSleep,
+    });
+    expect(chunks).toEqual([1, 2]);
+  });
+
+  it('keeps stored progress on transient resume status failures', async () => {
+    const file = makeFile(30 * 1024 * 1024, 'status-err.mp4', 'video/mp4');
+    const key = `chunk-upload:status-err.mp4:${file.size}:${file.lastModified}`;
+    ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 1, chunkCount: 3 }));
+
+    const chunks: number[] = [];
+    mockFetch(async (_url, init) => {
+      if (!init?.body) return new Response('temporary', { status: 503 });
+      const fd = init.body as FormData;
+      chunks.push(Number(fd.get('chunkIndex')));
+      return new Response(JSON.stringify(chunks.length === 2 ? { id: 'v1' } : { uploadId: 'stored-id' }), {
+        status: chunks.length === 2 ? 201 : 202,
+      });
+    });
+
+    await uploadInChunks({
+      file, endpoint: '/api/upload', target: 'video', fields: {}, onProgress: () => {},
+      _sleep: noSleep,
+    });
+    expect(chunks).toEqual([1, 2]);
   });
 
   it('extracts videoId from the final 201 response', async () => {

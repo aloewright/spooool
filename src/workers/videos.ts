@@ -81,12 +81,34 @@ const uploadMetaPersistedSchema = z.object({
   title: z.string(),
   description: z.string(),
   chunkCount: z.number().int().positive(),
+  fileName: z.string().optional(),
+  fileSize: z.number().int().nonnegative().optional(),
 });
 
 export const videoRoutes = new Hono<{
   Bindings: VideoRoutesEnv;
   Variables: VideoRoutesVariables;
 }>();
+
+function videoUploadKeys(userId: string, uploadId: string) {
+  const baseKvKey = `upload:${userId}:${uploadId}`;
+  return {
+    baseKvKey,
+    mpidKey: `${baseKvKey}:mpid`,
+    metaKey: `${baseKvKey}:meta`,
+    partsKey: `${baseKvKey}:parts`,
+    doneKey: `upload-done:${userId}:${uploadId}`,
+  };
+}
+
+function parseUploadedChunks(partsJson: string | null): number[] {
+  if (!partsJson) return [];
+  const uploadedPartsMap = JSON.parse(partsJson) as Record<string, { etag: string; size: number }>;
+  return Object.keys(uploadedPartsMap)
+    .map((partNumber) => Number(partNumber) - 1)
+    .filter((chunkIndex) => Number.isInteger(chunkIndex) && chunkIndex >= 0)
+    .sort((a, b) => a - b);
+}
 
 videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async (c) => {
   const parsed = trendingQuerySchema.safeParse(c.req.query());
@@ -496,6 +518,82 @@ async function handleRecorderUpload(
   return c.json({ ok: true, r2Key: uploadMeta.r2Key, uploadId: resolvedUploadId });
 }
 
+videoRoutes.get('/api/videos/upload/:uploadId/status', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const uploadId = c.req.param('uploadId');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(uploadId)) {
+    return c.json({ error: 'invalid uploadId' }, 400);
+  }
+
+  const { metaKey, partsKey, doneKey } = videoUploadKeys(user.id, uploadId);
+  const [uploadMetaJson, partsJson, doneRaw] = await Promise.all([
+    c.env.SESSIONS.get(metaKey),
+    c.env.SESSIONS.get(partsKey),
+    c.env.SESSIONS.get(doneKey),
+  ]);
+
+  if (doneRaw) {
+    try {
+      const done = JSON.parse(doneRaw) as { videoId?: string };
+      if (done.videoId) return c.json({ status: 'completed', id: done.videoId });
+    } catch { /* malformed sentinel — fall through to session lookup */ }
+  }
+
+  if (!uploadMetaJson) {
+    return c.json({ error: 'Upload session not found' }, 404);
+  }
+
+  const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+  return c.json({
+    status: 'uploading',
+    uploadId,
+    videoId: uploadMeta.videoId,
+    chunkCount: uploadMeta.chunkCount,
+    uploadedChunks: parseUploadedChunks(partsJson),
+    fileName: uploadMeta.fileName,
+    fileSize: uploadMeta.fileSize,
+    title: uploadMeta.title,
+    description: uploadMeta.description,
+  });
+});
+
+videoRoutes.delete('/api/videos/upload/:uploadId', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const uploadId = c.req.param('uploadId');
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(uploadId)) {
+    return c.json({ error: 'invalid uploadId' }, 400);
+  }
+
+  const { mpidKey, metaKey, partsKey, doneKey } = videoUploadKeys(user.id, uploadId);
+  const [multipartUploadId, uploadMetaJson] = await Promise.all([
+    c.env.SESSIONS.get(mpidKey),
+    c.env.SESSIONS.get(metaKey),
+  ]);
+
+  if (multipartUploadId && uploadMetaJson) {
+    const uploadMeta = uploadMetaPersistedSchema.parse(JSON.parse(uploadMetaJson));
+    await c.env.VIDEOS.resumeMultipartUpload(uploadMeta.r2Key, multipartUploadId).abort().catch(() => {});
+    await c.env.DB.prepare(
+      `DELETE FROM videos WHERE id = ? AND user_id = ? AND status = 'uploading'`,
+    )
+      .bind(uploadMeta.videoId, user.id)
+      .run();
+  }
+
+  await Promise.all([
+    c.env.SESSIONS.delete(mpidKey),
+    c.env.SESSIONS.delete(metaKey),
+    c.env.SESSIONS.delete(partsKey),
+    c.env.SESSIONS.delete(doneKey),
+  ]);
+
+  return c.json({ ok: true });
+});
+
 videoRoutes.post('/api/videos/upload', async (c) => {
   const env = c.env;
   const user = c.get('user');
@@ -642,10 +740,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
 
   const resolvedUploadId = uploadId ?? crypto.randomUUID();
 
-  const baseKvKey = `upload:${user.id}:${resolvedUploadId}`;
-  const mpidKey = `${baseKvKey}:mpid`;
-  const metaKey = `${baseKvKey}:meta`;
-  const partsKey = `${baseKvKey}:parts`;
+  const { mpidKey, metaKey, partsKey, doneKey } = videoUploadKeys(user.id, resolvedUploadId);
 
   if (chunkIndex === 0) {
     const videoId = crypto.randomUUID();
@@ -675,6 +770,8 @@ videoRoutes.post('/api/videos/upload', async (c) => {
         title: metadataParsed.data.title,
         description: metadataParsed.data.description,
         chunkCount,
+        fileName: rawFile.name,
+        fileSize: Number(formData.get('fileSize') ?? rawFile.size),
       }),
       { expirationTtl: 86400 },
     );
@@ -700,7 +797,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     // response reached the client (dropped on a flaky connection). If the
     // client retries with the same uploadId, recover via the done sentinel.
     if (uploadId) {
-      const doneRaw = await env.SESSIONS.get(`upload-done:${user.id}:${uploadId}`);
+      const doneRaw = await env.SESSIONS.get(videoUploadKeys(user.id, uploadId).doneKey);
       if (doneRaw) {
         try {
           const done = JSON.parse(doneRaw) as { videoId?: string };
@@ -719,8 +816,11 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     ? (JSON.parse(partsJson) as Record<string, { etag: string; size: number }>)
     : {};
 
-  const priorBytes = Object.values(uploadedPartsMap).reduce((sum, part) => sum + part.size, 0);
-  if (priorBytes + rawFile.size > MAX_VIDEO_BYTES) {
+  const existingPartSize = uploadedPartsMap[String(chunkIndex + 1)]?.size ?? 0;
+  const nextTotalBytes = Object.values(uploadedPartsMap).reduce((sum, part) => sum + part.size, 0)
+    - existingPartSize
+    + rawFile.size;
+  if (nextTotalBytes > MAX_VIDEO_BYTES) {
     return c.json(
       { error: `Upload exceeds ${MAX_VIDEO_BYTES} bytes`, code: 'file_too_large' },
       400,
@@ -748,7 +848,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // ALO-139: authoritative quota check at completion. Catches the case
   // where the first-chunk precheck passed but a parallel upload (or a
   // very large total via many small chunks) would push the user over.
-  const totalBytes = priorBytes + rawFile.size;
+  const totalBytes = nextTotalBytes;
   const finalUsage = await getStorageUsage(env, user.id);
   if (!hasRoomFor(finalUsage, totalBytes)) {
     await multipart.abort().catch(() => {});
@@ -803,7 +903,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   // the 201 response was dropped in transit) gets the same 201 rather than
   // a 400 "Missing upload session". 300 s is well within any retry window.
   await env.SESSIONS.put(
-    `upload-done:${user.id}:${resolvedUploadId}`,
+    doneKey,
     JSON.stringify({ videoId: uploadMeta.videoId }),
     { expirationTtl: 300 },
   );

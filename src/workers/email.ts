@@ -239,6 +239,34 @@ export function buildAccountDeletionEmail(args: {
   };
 }
 
+export function buildWaitlistInviteEmail(args: {
+  name: string | null;
+  signupUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { name, signupUrl } = args;
+  const greet = name ? `Hey ${name},` : 'Hey there,';
+  return {
+    subject: "You're invited to Spooool",
+    text:
+      `${greet}\n\n` +
+      `Your spot on the Spooool waitlist is ready — you can sign up now:\n${signupUrl}\n\n` +
+      `Spooool is a creator-first video host: adaptive streaming, channel pages, tipping, and memberships. No ads, no algorithm fighting you.\n\n` +
+      `— The Spooool team`,
+    html:
+      `<p>${escapeHtml(greet)}</p>` +
+      `<p>Your spot on the Spooool waitlist is ready.</p>` +
+      `<p><a href="${escapeHtml(signupUrl)}">Create your account</a></p>` +
+      `<p>Spooool is a creator-first video host: adaptive streaming, channel pages, tipping, and memberships. No ads, no algorithm fighting you.</p>`,
+  };
+}
+
+export async function sendWaitlistInviteEmail(
+  env: EmailEnv,
+  args: { to: string; name: string | null; signupUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildWaitlistInviteEmail(args) });
+}
+
 export async function sendAccountDeletionEmail(
   env: EmailEnv,
   args: { to: string; name: string; deletionDate: string; cancelUrl: string },

@@ -38,7 +38,7 @@ const TIERS: Tier[] = [
     blurb: 'For makers who want headroom and direct support from viewers.',
     price: '$6',
     cadence: 'per month',
-    cta: { label: 'Join the waitlist', to: '/signup' },
+    cta: { label: 'Join the waitlist', to: '/waitlist' },
     emphasis: true,
     features: [
       '500 GiB of total storage',

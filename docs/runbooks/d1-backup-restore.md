@@ -8,7 +8,7 @@
 | Scenario | RPO (max acceptable data loss) | RTO (max acceptable recovery time) |
 |---|---|---|
 | Accidental DROP / bad migration | **30 minutes** (covered by D1 Time Travel) | **15 minutes** (`wrangler d1 time-travel restore`) |
-| Database lost / project deleted | **24 hours** (covered by daily R2 export) | **2 hours** (recreate D1 + replay export + apply migrations) |
+| Database lost / project deleted | **7 days** (covered by weekly R2 export) | **2 hours** (recreate D1 + replay export + apply migrations) |
 | Region-wide CF D1 outage | Bound by D1's own SLA | Wait for upstream; nothing actionable from this side |
 
 These are commitments, not nice-to-haves. If a real incident exceeds either number, it's a postmortem.
@@ -31,7 +31,7 @@ Time Travel covers accidental writes. It does **not** cover the project / databa
 
 ### Weekly export to R2
 
-Run from a trusted developer machine (or a scheduled GitHub Action when we add one — out of scope for this runbook):
+Run automatically by the `.github/workflows/d1-backup.yml` workflow every Sunday at 03:00 UTC, or manually via `gh workflow run d1-backup.yml`. The commands below are for ad-hoc runs from a trusted developer machine:
 
 ```sh
 # 1. Export to a SQL file. Use --remote so the export targets the live DB,

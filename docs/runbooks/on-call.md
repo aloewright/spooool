@@ -110,7 +110,7 @@ Rate limiters are fail-open (a DO error lets the request through). If you see su
 
 ### Cost alert: storage quota
 
-The daily cron (02:00 UTC) fires a Sentry alert when R2 storage exceeds `COST_STORAGE_ALERT_BYTES` (default 100 GiB). Response:
+The daily cron (08:00 UTC) fires a Sentry alert when R2 storage exceeds `COST_STORAGE_ALERT_BYTES` (default 100 GiB). Response:
 
 1. Query top storage consumers:
    ```sh

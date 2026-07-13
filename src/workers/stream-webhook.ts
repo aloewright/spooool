@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { buildThumbnailCandidates } from './thumbnails';
 import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
 import { sendNewUploadEmails, type NotificationDbEnv } from './notification-email';
+import { triggerFanOut } from './channel-do';
 import { waitUntilBackground } from './wait-until';
 
 export const STREAM_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
@@ -116,6 +117,7 @@ export async function verifyWebhookSignature(
 
 export interface StreamWebhookEnv extends NotificationDbEnv {
   CF_STREAM_WEBHOOK_SECRET?: string;
+  CHANNEL_SUBSCRIBER_DO?: DurableObjectNamespace;
 }
 
 export interface StreamWebhookDeps {
@@ -200,6 +202,10 @@ export const handleStreamWebhook =
              WHERE v.stream_video_id = ?`,
           ).bind(payload.uid).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
           if (!video) return;
+          await triggerFanOut(c.env.CHANNEL_SUBSCRIBER_DO, {
+            videoId: video.id,
+            channelUserId: video.user_id,
+          });
           await sendNewUploadEmails(c.env, {
             videoId: video.id,
             channelUserId: video.user_id,
@@ -208,7 +214,7 @@ export const handleStreamWebhook =
             origin: 'https://spooool.com',
           });
         } catch (err) {
-          console.warn('[stream-webhook] new-upload email failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });
+          console.warn('[stream-webhook] notification failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });
         }
       })());
     }

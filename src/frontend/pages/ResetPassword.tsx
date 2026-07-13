@@ -1,11 +1,10 @@
 import { FormEvent, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { resetPassword } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 
 export function ResetPassword(): JSX.Element {
   const [params] = useSearchParams();
-  const navigate = useNavigate();
   const token = params.get('token') ?? '';
 
   const [password, setPassword] = useState('');
@@ -13,6 +12,7 @@ export function ResetPassword(): JSX.Element {
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
 
   if (!token) {
     return (
@@ -46,10 +46,22 @@ export function ResetPassword(): JSX.Element {
       setError(result.error ?? 'Could not reset password');
       return;
     }
-    navigate('/login', {
-      replace: true,
-      state: { from: '/' },
-    });
+    setDone(true);
+  }
+
+  if (done) {
+    return (
+      <main className="app-main app-main--narrow stack-lg fade-in">
+        <div className="stack-sm" style={{ paddingTop: 'var(--space-8)' }}>
+          <span className="ds-label">All done</span>
+          <h1 className="ds-h2">Password updated</h1>
+          <p className="ds-lede">Your new password is active. Sign in to continue.</p>
+          <p className="ds-meta">
+            <Link to="/login">Sign in</Link>
+          </p>
+        </div>
+      </main>
+    );
   }
 
   return (

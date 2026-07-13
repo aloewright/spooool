@@ -1,6 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { useSession } from '../lib/auth-client';
+import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import {
   getSafeStorage,
   hasCompletedOnboarding,
@@ -68,6 +68,7 @@ export function Onboarding(): JSX.Element {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resendStatus, setResendStatus] = useState<string | null>(null);
   const step = STEPS[stepIndex];
 
   // Pre-compute completion so the profile-load and analytics effects can
@@ -198,6 +199,8 @@ export function Onboarding(): JSX.Element {
     return <Navigate to="/" replace />;
   }
 
+  const needsVerification = session.user.emailVerified === false;
+
   return (
     <main className="app-main app-main--narrow stack-lg fade-in">
       <div className="stack-sm" style={{ paddingTop: 'var(--space-6)' }}>
@@ -205,6 +208,30 @@ export function Onboarding(): JSX.Element {
         <h1 className="ds-h2">Get set up in a minute</h1>
         <p className="ds-lede">Three quick steps and you're ready to upload.</p>
       </div>
+
+      {needsVerification ? (
+        <div className="card stack-sm" style={{ borderColor: 'var(--color-warning, #c07000)' }}>
+          <p className="ds-meta">
+            <strong>Check your email.</strong> We sent a verification link to{' '}
+            <strong>{session.user.email}</strong>. Click it to unlock uploads.
+          </p>
+          <div className="row" style={{ alignItems: 'center', gap: 'var(--space-3)' }}>
+            <button
+              type="button"
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setResendStatus(null);
+                void resendVerificationEmail(session.user.email).then((r) =>
+                  setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed to send'),
+                );
+              }}
+            >
+              Resend email
+            </button>
+            {resendStatus ? <span className="ds-meta">{resendStatus}</span> : null}
+          </div>
+        </div>
+      ) : null}
 
       {step === 'username' ? (
         <form onSubmit={(e) => void submitUsername(e)} className="card stack">

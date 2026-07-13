@@ -1,18 +1,30 @@
 import { FormEvent, useState } from 'react';
-import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { signIn, useSession } from '../lib/auth-client';
 import { TurnstileWidget } from '../components/TurnstileWidget';
 import { SocialAuthButtons } from '../components/SocialAuthButtons';
 
+function oauthErrorMessage(code: string): string {
+  switch (code) {
+    case 'account_not_linked': return 'This email is registered with a different sign-in method. Use that method or sign in with email and password.';
+    case 'email_not_verified': return 'Your email must be verified before you can sign in with this provider.';
+    case 'social_account_already_linked': return 'This social account is already linked to a different Spooool account.';
+    case 'user_not_found': return 'No account found for this sign-in method. Try signing up first.';
+    default: return `Sign-in error: ${code.replace(/_/g, ' ')}`;
+  }
+}
+
 export function Login(): JSX.Element {
   const location = useLocation();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const { data: session, isPending } = useSession();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const urlErrorCode = params.get('error');
+  const [error, setError] = useState<string | null>(urlErrorCode ? oauthErrorMessage(urlErrorCode) : null);
 
   const next = (location.state as { from?: string } | null)?.from ?? '/';
 

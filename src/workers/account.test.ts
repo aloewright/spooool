@@ -276,6 +276,119 @@ function userApp(store: FakeStore, asUser: { id: string } | null) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/account/earnings — YTD aggregation from D1
+// ---------------------------------------------------------------------------
+
+interface EarningsOpts {
+  polarOrgId?: string | null;
+  polarAccountStatus?: string;
+  grossCents?: number;
+  netCents?: number;
+}
+
+function earningsApp(opts: EarningsOpts = {}, asUserId: string | null = 'u1') {
+  const {
+    polarOrgId = null,
+    polarAccountStatus = 'not_connected',
+    grossCents = 0,
+    netCents = 0,
+  } = opts;
+
+  const db = {
+    prepare(sql: string) {
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...v: unknown[]) { bound = v; return stmt; },
+        async first() {
+          void bound;
+          if (sql.includes('polar_organization_id') && sql.includes('FROM user')) {
+            return { polar_organization_id: polarOrgId, polar_account_status: polarAccountStatus };
+          }
+          if (sql.includes('FROM creator_earnings')) return { gross: grossCents };
+          if (sql.includes('FROM creator_payouts')) return { net: netCents };
+          return null;
+        },
+        async all() { return { results: [] }; },
+        async run() { return { meta: { changes: 1 } }; },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+  } as unknown as D1Database;
+
+  const app = new Hono<{
+    Bindings: { DB: D1Database; CACHE: KVNamespace };
+    Variables: { user: { id: string; email: string; name: string } | null };
+  }>();
+  app.use('*', async (c, next) => {
+    c.set('user', asUserId ? { id: asUserId, email: 'a@b.com', name: 'A' } : null);
+    await next();
+  });
+  app.route('/', accountRoutes);
+
+  const env = {
+    DB: db,
+    CACHE: { get: async () => null, put: async () => {}, delete: async () => {} } as unknown as KVNamespace,
+  };
+
+  return {
+    async get(path: string) {
+      return app.fetch(new Request(`http://t${path}`), env as never);
+    },
+  };
+}
+
+describe('GET /api/account/earnings', () => {
+  it('returns 401 when not signed in', async () => {
+    const app = earningsApp({}, null);
+    const res = await app.get('/api/account/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns zero earnings when creator has no transactions', async () => {
+    const app = earningsApp({ polarAccountStatus: 'active', grossCents: 0, netCents: 0 });
+    const res = await app.get('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const data = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(data.grossEarningsUsd).toBe(0);
+    expect(data.netPayoutsUsd).toBe(0);
+  });
+
+  it('converts cents to USD correctly', async () => {
+    const app = earningsApp({ polarAccountStatus: 'active', grossCents: 5050, netCents: 4545 });
+    const res = await app.get('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const data = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(data.grossEarningsUsd).toBeCloseTo(50.50, 2);
+    expect(data.netPayoutsUsd).toBeCloseTo(45.45, 2);
+  });
+
+  it('includes polar status and current year', async () => {
+    const app = earningsApp({ polarAccountStatus: 'active', polarOrgId: 'org_123' });
+    const res = await app.get('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const data = await res.json() as {
+      year: number;
+      currency: string;
+      polar: { organizationId: string | null; accountStatus: string; needsOnboarding: boolean };
+      taxDocStatus: string;
+    };
+    expect(data.year).toBe(new Date().getUTCFullYear());
+    expect(data.currency).toBe('USD');
+    expect(data.polar.organizationId).toBe('org_123');
+    expect(data.polar.accountStatus).toBe('active');
+    expect(data.polar.needsOnboarding).toBe(false);
+    expect(data.taxDocStatus).toBe('polar-pending');
+  });
+
+  it('returns needsOnboarding: true when account is not_connected', async () => {
+    const app = earningsApp({ polarAccountStatus: 'not_connected' });
+    const res = await app.get('/api/account/earnings');
+    const data = await res.json() as { polar: { needsOnboarding: boolean } };
+    expect(data.polar.needsOnboarding).toBe(true);
+  });
+});
+
 describe('account delete + cancel window', () => {
   it('schedules deletion 30 days out', async () => {
     const store = makeStore();

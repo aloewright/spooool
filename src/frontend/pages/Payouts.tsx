@@ -18,7 +18,8 @@ interface EarningsTransaction {
   platform_fee_cents: number;
   currency: string;
   description: string | null;
-  created_at: string;
+  // D1 returns ms-epoch integers (stored as TEXT in SQLite) as strings like "1700000000000"
+  created_at: string | number;
 }
 
 interface LocalPayout {
@@ -27,8 +28,9 @@ interface LocalPayout {
   currency: string;
   status: 'pending' | 'in_transit' | 'paid' | 'failed';
   polar_payout_id: string | null;
-  paid_at: string | null;
-  created_at: string;
+  paid_at: string | number | null;
+  // D1 returns ms-epoch integers (stored as TEXT in SQLite) as strings like "1700000000000"
+  created_at: string | number;
 }
 
 interface PolarPayoutItem {
@@ -47,8 +49,11 @@ function fmtMoney(cents: number, currency = 'usd'): string {
   }).format(cents / 100);
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
+// created_at may arrive as a numeric ms-epoch string ("1700000000000") or ISO string.
+function fmtDate(val: string | number): string {
+  const n = typeof val === 'number' ? val : Number(val);
+  const d = Number.isFinite(n) ? new Date(n) : new Date(val as string);
+  return d.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

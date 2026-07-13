@@ -4,6 +4,8 @@ import { buildThumbnailCandidates } from './thumbnails';
 import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
 import { sendNewUploadEmails, type NotificationDbEnv } from './notification-email';
 import { waitUntilBackground } from './wait-until';
+import { purgeEdgeCache } from './edge-cache';
+import { videoMetaCacheKey } from './video-meta-cache';
 
 export const STREAM_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 
@@ -116,6 +118,7 @@ export async function verifyWebhookSignature(
 
 export interface StreamWebhookEnv extends NotificationDbEnv {
   CF_STREAM_WEBHOOK_SECRET?: string;
+  CACHE?: KVNamespace;
 }
 
 export interface StreamWebhookDeps {
@@ -190,8 +193,9 @@ export const handleStreamWebhook =
       return c.json({ ok: true, matched: 0, status }, 202);
     }
 
-    // Notify subscribers by email once the video is actually watchable.
+    // Notify subscribers by email and invalidate caches once the video is watchable.
     if (status === 'ready') {
+      const origin = new URL(c.req.url).origin;
       waitUntilBackground(c, (async () => {
         try {
           const video = await c.env.DB.prepare(
@@ -200,12 +204,16 @@ export const handleStreamWebhook =
              WHERE v.stream_video_id = ?`,
           ).bind(payload.uid).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
           if (!video) return;
+          // Invalidate the video-specific edge cache and KV meta cache so the
+          // Watch page stops polling against stale 'encoding' responses promptly.
+          purgeEdgeCache(c, `${origin}/api/videos/${video.id}`);
+          await c.env.CACHE?.delete(videoMetaCacheKey(video.id));
           await sendNewUploadEmails(c.env, {
             videoId: video.id,
             channelUserId: video.user_id,
             channelName: video.channel_name ?? '',
             videoTitle: video.title,
-            origin: 'https://spooool.com',
+            origin,
           });
         } catch (err) {
           console.warn('[stream-webhook] new-upload email failed', { uid: payload.uid, err: err instanceof Error ? err.message : String(err) });

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { purgeTrendingEdgeCache } from './edge-cache';
+import { purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache';
+import { videoMetaCacheKey } from './video-meta-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
 import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
@@ -161,8 +162,9 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   } | null;
   if (!body?.masterKey) return c.json({ error: 'masterKey required' }, 400);
 
+  const origin = new URL(c.req.url).origin;
   const playbackHlsUrl = `/api/videos/${videoId}/hls/master.m3u8`;
-  const thumbnailUrl = body.thumbnailKey ? `/api/${body.thumbnailKey}` : null;
+  const thumbnailUrl = body.thumbnailKey ? `${origin}/api/${body.thumbnailKey}` : null;
   const thumbnailCandidates = thumbnailUrl ? JSON.stringify([thumbnailUrl]) : null;
 
   await c.env.DB.prepare(
@@ -177,10 +179,13 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
 
-  // Invalidate caches: the video is now ready with a thumbnail, so both the
-  // trending list and any cached video-metadata KV entries are stale.
+  // Invalidate caches so the Watch page reflects ready state promptly.
+  // The trending list, the video-specific KV meta entry, and the edge-cached
+  // video detail response all need to be cleared now that status is 'ready'.
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  waitUntilBackground(c, c.env.CACHE.delete(videoMetaCacheKey(videoId)));
   purgeTrendingEdgeCache(c);
+  purgeEdgeCache(c, `${origin}/api/videos/${videoId}`);
 
   // Notify subscribers by email now that the video is actually watchable.
   waitUntilBackground(c, (async () => {

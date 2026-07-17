@@ -52,7 +52,13 @@ export type EditorAiUiState =
     }
   | { stage: "loading"; run: CapturedRun }
   | { stage: "review"; run: CapturedRun; revision: EditorAiRevision }
-  | { stage: "error"; run: CapturedRun; message: string };
+  | { stage: "saving"; run: CapturedRun }
+  | {
+      stage: "error";
+      run: CapturedRun;
+      message: string;
+      retryAction: "command" | "save";
+    };
 
 export type BlockNoteAiCommandsProps = {
   editor: BlockNoteEditor;
@@ -230,7 +236,12 @@ export function BlockNoteAiCommands({
         }
 
         editor.isEditable = true;
-        transition({ stage: "error", run, message: messageFromError(error) });
+        transition({
+          stage: "error",
+          run,
+          message: messageFromError(error),
+          retryAction: "command",
+        });
       } finally {
         if (abortRef.current === controller) abortRef.current = null;
       }
@@ -311,6 +322,33 @@ export function BlockNoteAiCommands({
     const current = stateRef.current;
     if (current.stage !== "review" && current.stage !== "error") return;
 
+    if (current.stage === "error" && current.retryAction === "save") {
+      if (applyStartedRef.current) return;
+      applyStartedRef.current = true;
+      editor.isEditable = false;
+      transition({ stage: "saving", run: current.run });
+
+      void (async () => {
+        try {
+          await saveNow();
+          if (!mountedRef.current) return;
+          releaseEditor(true);
+          transition({ stage: "idle" });
+        } catch (error) {
+          if (!mountedRef.current) return;
+          editor.isEditable = true;
+          applyStartedRef.current = false;
+          transition({
+            stage: "error",
+            run: current.run,
+            message: `The replacement is still not saved: ${messageFromError(error)}`,
+            retryAction: "save",
+          });
+        }
+      })();
+      return;
+    }
+
     const currentContext = editor.blocksToMarkdownLossy(editor.document);
     if (currentContext !== current.run.contextMd) {
       editor.isEditable = true;
@@ -319,6 +357,7 @@ export function BlockNoteAiCommands({
         run: current.run,
         message:
           "The document changed after this command started. Close this dialog and try again.",
+        retryAction: "command",
       });
       return;
     }
@@ -328,13 +367,14 @@ export function BlockNoteAiCommands({
         stage: "error",
         run: current.run,
         message: "The selected text is no longer available. Close this dialog and select it again.",
+        retryAction: "command",
       });
       return;
     }
 
     editor.isEditable = false;
     void runRequest(current.run);
-  }, [editor, runRequest, transition]);
+  }, [editor, releaseEditor, runRequest, saveNow, transition]);
 
   const applyRevision = useCallback(async () => {
     const current = stateRef.current;
@@ -387,6 +427,7 @@ export function BlockNoteAiCommands({
         message: mutated
           ? `The replacement was applied but could not be saved: ${messageFromError(error)}`
           : messageFromError(error),
+        retryAction: mutated ? "save" : "command",
       });
     }
   }, [editor, releaseEditor, saveNow, transition]);

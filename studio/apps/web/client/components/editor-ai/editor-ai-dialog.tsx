@@ -60,10 +60,14 @@ export function EditorAiDialog({
           ? "Working"
           : state.stage === "review"
             ? "Ready to review"
-            : "AI command failed";
+            : state.stage === "saving"
+              ? "Saving replacement"
+              : state.retryAction === "save"
+                ? "Replacement not saved"
+                : "AI command failed";
 
   function handleKeyDown(event: ReactKeyboardEvent<HTMLDialogElement>) {
-    if (event.key === "Escape" && !applying) {
+    if (event.key === "Escape" && !applying && state.stage !== "saving") {
       event.preventDefault();
       event.stopPropagation();
       onReject();
@@ -108,14 +112,14 @@ export function EditorAiDialog({
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
       <dialog
         ref={dialogRef}
-        aria-busy={state.stage === "loading" || applying}
+        aria-busy={state.stage === "loading" || state.stage === "saving" || applying}
         aria-describedby={descriptionId}
         aria-labelledby={titleId}
         aria-modal="true"
         className="relative max-h-[min(48rem,calc(100vh-2rem))] w-full max-w-4xl overflow-y-auto rounded-xl border border-border bg-background p-5 text-foreground shadow-2xl"
         onCancel={(event) => {
           event.preventDefault();
-          if (!applying) onReject();
+          if (!applying && state.stage !== "saving") onReject();
         }}
         onKeyDown={handleKeyDown}
         open
@@ -268,15 +272,30 @@ export function EditorAiDialog({
           </div>
         )}
 
+        {state.stage === "saving" && (
+          <div className="mt-4 space-y-4" id={descriptionId}>
+            <Alert aria-live="polite">
+              <AlertTitle>Saving replacement</AlertTitle>
+              <AlertDescription>
+                The accepted replacement is being saved without running the AI command again.
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
+
         {state.stage === "error" && (
           <div className="mt-4 space-y-4" id={descriptionId}>
             <Alert variant="destructive">
-              <AlertTitle>AI command could not finish</AlertTitle>
+              <AlertTitle>
+                {state.retryAction === "save"
+                  ? "Replacement is not saved yet"
+                  : "AI command could not finish"}
+              </AlertTitle>
               <AlertDescription>{state.message}</AlertDescription>
             </Alert>
             <div className="flex justify-end gap-2">
               <Button onClick={onRetry} type="button" variant="outline">
-                Retry
+                {state.retryAction === "save" ? "Retry save" : "Retry"}
               </Button>
               <Button onClick={onReject} type="button">
                 Close

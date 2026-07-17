@@ -48,10 +48,7 @@ for (const editorSetup of editorSetups) {
     });
     await page.route(new RegExp(`${escapeRegex(fixture.patchPath)}$`), async (route) => {
       const body = route.request().postDataJSON() as { draft_md?: string } | null;
-      if (
-        replacementSaveFailuresRemaining > 0 &&
-        body?.draft_md?.includes(replacementDraft)
-      ) {
+      if (replacementSaveFailuresRemaining > 0 && body?.draft_md?.includes(replacementDraft)) {
         replacementSaveFailuresRemaining -= 1;
         await route.fulfill({
           status: 500,

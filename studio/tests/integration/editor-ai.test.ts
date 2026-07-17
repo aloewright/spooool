@@ -1,5 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { aiUsageCostCents, todayIso } from "../../apps/web/src/lib/budget";
 
 type ResourceKind = "chapter" | "blog-post" | "script-scene";
 
@@ -202,6 +203,48 @@ async function requestEditorAiRaw(cookie: string, body: BodyInit, headers: Heade
   });
 }
 
+function draftPath(fixture: Fixture, resourceKind: ResourceKind): string {
+  switch (resourceKind) {
+    case "chapter":
+      return `/api/v1/chapters/${fixture.resourceIds.chapter}`;
+    case "blog-post":
+      return `/api/v1/blogs/${fixture.parentIds["blog-post"]}/posts/${fixture.resourceIds["blog-post"]}`;
+    case "script-scene":
+      return `/api/v1/scripts/${fixture.parentIds["script-scene"]}/scenes/${fixture.resourceIds["script-scene"]}`;
+  }
+}
+
+function draftTable(resourceKind: ResourceKind): "chapters" | "blog_posts" | "script_scenes" {
+  switch (resourceKind) {
+    case "chapter":
+      return "chapters";
+    case "blog-post":
+      return "blog_posts";
+    case "script-scene":
+      return "script_scenes";
+  }
+}
+
+async function requestDraftPatch(
+  fixture: Fixture,
+  resourceKind: ResourceKind,
+  body: Record<string, unknown>,
+) {
+  return SELF.fetch(`http://x${draftPath(fixture, resourceKind)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+    body: JSON.stringify(body),
+  });
+}
+
+async function draftState(resourceKind: ResourceKind, resourceId: string) {
+  return env.DB.prepare(
+    `SELECT draft_md, draft_version FROM ${draftTable(resourceKind)} WHERE id = ?`,
+  )
+    .bind(resourceId)
+    .first<{ draft_md: string; draft_version: number }>();
+}
+
 function streamedBody(value: string): ReadableStream<Uint8Array> {
   const bytes = new TextEncoder().encode(value);
   let offset = 0;
@@ -361,6 +404,65 @@ describe("editor AI", () => {
     const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
     expect(response.status).toBe(500);
     expect(await revisionFor(resourceId)).toBeNull();
+    expect(
+      await env.KV.get(`budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`),
+    ).toBeNull();
+  });
+
+  it("records successful token usage and rejects the next call at the free-plan cap", async () => {
+    const fixture = await createFixture("free");
+    const budgetKey = `budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`;
+    await env.KV.put(budgetKey, "999");
+
+    const first = await requestEditorAi(
+      fixture.cookie,
+      payload("chapter", fixture.resourceIds.chapter),
+    );
+    expect(first.status).toBe(200);
+    expect(await env.KV.get(budgetKey)).toBe("1000");
+
+    const second = await requestEditorAi(
+      fixture.cookie,
+      payload("chapter", fixture.resourceIds.chapter),
+    );
+    expect(second.status).toBe(402);
+    expect(gatewayCalls).toBe(1);
+  });
+
+  it("records successful retained chapter revision usage", async () => {
+    const fixture = await createFixture("free");
+    const budgetKey = `budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`;
+    await env.KV.put(budgetKey, "999");
+
+    const first = await SELF.fetch(
+      `http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+        body: JSON.stringify({
+          action: "fix-grammar",
+          text: "This are selected prose.",
+          context_md: "This are selected prose.",
+        }),
+      },
+    );
+    expect(first.status).toBe(200);
+    expect(await env.KV.get(budgetKey)).toBe("1000");
+
+    const second = await SELF.fetch(
+      `http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+        body: JSON.stringify({
+          action: "fix-grammar",
+          text: "This are selected prose.",
+          context_md: "This are selected prose.",
+        }),
+      },
+    );
+    expect(second.status).toBe(402);
+    expect(gatewayCalls).toBe(1);
   });
 
   it("returns 402 when the free-plan daily budget is exhausted", async () => {
@@ -391,6 +493,102 @@ describe("editor AI", () => {
     expect(response.status).toBe(402);
     expect(await revisionFor(resourceId)).toBeNull();
   });
+
+  it("records editor-ai usage after a successful request and blocks the next call at cap", async () => {
+    const fixture = await createFixture("free");
+    const resourceId = fixture.resourceIds.chapter;
+    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
+    const usage = aiUsageCostCents({
+      route: "dynamic/text_gen",
+      tokens_in: 11,
+      tokens_out: 3,
+    });
+    await env.KV.put(budgetKey, String(1000 - usage));
+
+    const first = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
+    expect(first.status).toBe(200);
+    expect(await env.KV.get(budgetKey)).toBe("1000");
+
+    const second = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
+    expect(second.status).toBe(402);
+  });
+
+  it("records retained chapter inline revision usage after a successful request", async () => {
+    const fixture = await createFixture("free");
+    const resourceId = fixture.resourceIds.chapter;
+    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
+    const usage = aiUsageCostCents({
+      route: "dynamic/text_gen",
+      tokens_in: 11,
+      tokens_out: 3,
+    });
+    await env.KV.put(budgetKey, String(1000 - usage));
+
+    const first = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+      body: JSON.stringify({
+        action: "fix-grammar",
+        text: "This are selected prose.",
+        context_md: "This are selected prose.",
+      }),
+    });
+
+    expect(first.status).toBe(200);
+    expect(await env.KV.get(budgetKey)).toBe("1000");
+
+    const second = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+      body: JSON.stringify({
+        action: "fix-grammar",
+        text: "This are selected prose.",
+        context_md: "This are selected prose.",
+      }),
+    });
+    expect(second.status).toBe(402);
+  });
+
+  it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
+    "rejects draft saves without a draft_version for %s",
+    async (resourceKind) => {
+      const fixture = await createFixture();
+      const response = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Unversioned draft save",
+      });
+
+      expect(response.status).toBe(400);
+    },
+  );
+
+  it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
+    "rejects stale out-of-order draft saves for %s",
+    async (resourceKind) => {
+      const fixture = await createFixture();
+      const resourceId = fixture.resourceIds[resourceKind];
+
+      const newest = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Newest draft wins.",
+        draft_version: 2,
+      });
+      expect(newest.status).toBe(200);
+
+      const stale = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Older draft should be rejected.",
+        draft_version: 1,
+      });
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({
+        error: "stale draft",
+        draft_version: 2,
+      });
+
+      await expect(draftState(resourceKind, resourceId)).resolves.toEqual({
+        draft_md: "Newest draft wins.",
+        draft_version: 2,
+      });
+    },
+  );
 
   it("rejects a declared request body larger than the route cap", async () => {
     const fixture = await createFixture();

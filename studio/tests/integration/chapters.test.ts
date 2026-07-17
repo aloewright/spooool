@@ -53,6 +53,13 @@ describe("chapters", () => {
     const sections = (await sectionRes.json()) as any;
     expect(sections.items.length).toBeGreaterThan(0);
 
+    const unversionedDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Missing its write order." }),
+    });
+    expect(unversionedDraft.status).toBe(400);
+
     const draftSection = await SELF.fetch(
       `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[0].id}/draft`,
       { method: "POST", headers },
@@ -69,6 +76,7 @@ describe("chapters", () => {
       body: JSON.stringify({
         draft_json: [{ type: "paragraph", content: "A saved chapter draft." }],
         draft_md: "A saved chapter draft.",
+        draft_version: 1,
         status: "drafting",
       }),
     });
@@ -78,7 +86,26 @@ describe("chapters", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const chapter = (await get.json()) as any;
     expect(chapter.draft_md).toContain("saved chapter");
+    expect(chapter.draft_version).toBe(1);
     expect(chapter.status).toBe("drafting");
+
+    const newerDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "The newest chapter draft.", draft_version: 3 }),
+    });
+    expect(newerDraft.status).toBe(200);
+    const staleDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "A delayed older draft.", draft_version: 2 }),
+    });
+    expect(staleDraft.status).toBe(409);
+    const afterStale = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterStaleBody = (await afterStale.json()) as any;
+    expect(afterStaleBody.draft_md).toBe("The newest chapter draft.");
+    expect(afterStaleBody.draft_version).toBe(3);
 
     const additiveDraft = await SELF.fetch(
       `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,

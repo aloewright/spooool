@@ -7,6 +7,7 @@ import { Link } from "@tanstack/react-router";
 import { Check, Scissors, Sparkles, Wand2, X } from "lucide-react";
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ApiError,
   type Chapter,
   type InlineEditAction,
   type InlineEditTone,
@@ -148,6 +149,7 @@ function ChapterEditorInner({
   } | null>(null);
   const [redraftInstructions, setRedraftInstructions] = useState<Record<string, string>>({});
   const pendingSave = useRef<number | undefined>(undefined);
+  const draftVersion = useRef(chapter.draft_version);
   // Tracks the in-flight autosave so a newer save can abort an older one
   // before it lands — without this an earlier (slow) request could resolve
   // last and clobber the editor's latest content on the server.
@@ -167,19 +169,23 @@ function ChapterEditorInner({
       const draftJson = editor.document;
       const draftMd = await editor.blocksToMarkdownLossy(editor.document);
       const words = wordCount(draftMd);
-      await api.updateChapter(
+      const nextVersion = Math.max(draftVersion.current + 1, Date.now());
+      draftVersion.current = nextVersion;
+      const response = await api.updateChapter(
         chapter.id,
         {
           draft_json: draftJson,
           draft_md: draftMd,
+          draft_version: nextVersion,
           status: words > 0 ? "drafting" : "pending",
         },
         { signal: controller.signal },
       );
-      return words;
+      return { draftVersion: response.draft_version, words };
     },
     onMutate: () => setSaveState("saving"),
-    onSuccess: async (words) => {
+    onSuccess: async ({ draftVersion: savedDraftVersion, words }) => {
+      draftVersion.current = savedDraftVersion;
       setLastSavedWords(words);
       setSaveState("saved");
       await queryClient.invalidateQueries({ queryKey: queryKeys.chapter(chapter.id) });
@@ -188,6 +194,13 @@ function ChapterEditorInner({
       // A save we deliberately aborted (superseded by a newer one) isn't a
       // real failure — don't flip the UI to "error" for it.
       if (error instanceof DOMException && error.name === "AbortError") return;
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        typeof (error.body as { draft_version?: unknown })?.draft_version === "number"
+      ) {
+        draftVersion.current = (error.body as { draft_version: number }).draft_version;
+      }
       setSaveState("error");
     },
   });

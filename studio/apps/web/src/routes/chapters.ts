@@ -1,9 +1,10 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 import { chapters, projects, revisions, sections, voices } from "../db/schema";
 import type { Env } from "../env";
+import { aiUsageCostCents, recordUsage } from "../lib/budget";
 import { type AuthVariables, requireUser } from "../middleware/auth";
 import { enforceBudget } from "../middleware/budget";
 import { draftSection, reviseInlineText } from "../skills/writer";
@@ -13,6 +14,7 @@ const patchChapterSchema = z.object({
   summary: z.string().max(2_000).optional(),
   draft_json: z.unknown().optional(),
   draft_md: z.string().max(2_000_000).optional(),
+  draft_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   status: z.enum(["pending", "drafting", "drafted", "approved"]).optional(),
 });
 
@@ -180,6 +182,7 @@ chaptersRoute.post("/:id/revise", enforceBudget("chapter-inline-revise"), async 
     after_md: result.markdown,
     llm_response: result.llm_response,
   });
+  await recordUsage(c.env.KV, user.id, aiUsageCostCents(result.llm_response));
 
   return c.json({
     revision: {
@@ -371,19 +374,39 @@ chaptersRoute.patch("/:id", async (c) => {
   const body = patchChapterSchema.parse(await c.req.json());
   const db = drizzle(c.env.DB);
   const [row] = await db
-    .select({ chapterId: chapters.id })
+    .select({ chapterId: chapters.id, draftVersion: chapters.draft_version })
     .from(chapters)
     .innerJoin(projects, eq(chapters.project_id, projects.id))
     .where(and(eq(chapters.id, id), eq(projects.user_id, user.id), isNull(projects.deleted_at)))
     .limit(1);
   if (!row) return c.json({ error: "not found" }, 404);
 
-  await db
+  const hasDraftUpdate = body.draft_json !== undefined || body.draft_md !== undefined;
+  if (hasDraftUpdate && body.draft_version === undefined) {
+    return c.json({ error: "draft_version is required for draft updates" }, 400);
+  }
+
+  const { draft_version: draftVersion, ...patch } = body;
+  if (!hasDraftUpdate) {
+    await db
+      .update(chapters)
+      .set({ ...patch, updated_at: new Date() })
+      .where(eq(chapters.id, id));
+    return c.json({ ok: true, draft_version: row.draftVersion });
+  }
+
+  const [updated] = await db
     .update(chapters)
-    .set({
-      ...body,
-      updated_at: new Date(),
-    })
-    .where(eq(chapters.id, id));
-  return c.json({ ok: true });
+    .set({ ...patch, draft_version: draftVersion, updated_at: new Date() })
+    .where(and(eq(chapters.id, id), lt(chapters.draft_version, draftVersion as number)))
+    .returning({ draft_version: chapters.draft_version });
+  if (!updated) {
+    const [current] = await db
+      .select({ draft_version: chapters.draft_version })
+      .from(chapters)
+      .where(eq(chapters.id, id))
+      .limit(1);
+    return c.json({ error: "stale draft", draft_version: current?.draft_version ?? 0 }, 409);
+  }
+  return c.json({ ok: true, draft_version: updated.draft_version });
 });

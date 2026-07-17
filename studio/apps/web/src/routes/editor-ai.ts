@@ -12,6 +12,7 @@ import {
   voices,
 } from "../db/schema";
 import type { Env } from "../env";
+import { aiUsageCostCents, recordUsage } from "../lib/budget";
 import { type AuthVariables, requireUser } from "../middleware/auth";
 import { enforceBudget } from "../middleware/budget";
 import {
@@ -199,6 +200,7 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
     after_md: revision.after_md,
     llm_response: revision.llm_response,
   });
+  await recordUsage(c.env.KV, c.get("user").id, aiUsageCostCents(result.llm_response));
 
   return c.json({ revision });
 });

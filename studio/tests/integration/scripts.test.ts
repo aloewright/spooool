@@ -102,6 +102,12 @@ describe("scripts", () => {
 
     const sceneId = scenesBody.items[0].id;
     const draftJson = [{ type: "paragraph", content: "INT. TOWER — NIGHT" }];
+    const unversionedDraft = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Missing its write order." }),
+    });
+    expect(unversionedDraft.status).toBe(400);
     const patchScene = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
       method: "PATCH",
       headers,
@@ -109,6 +115,7 @@ describe("scripts", () => {
         title: "Storm Watch",
         draft_json: draftJson,
         draft_md: "INT. TOWER — NIGHT",
+        draft_version: 1,
         status: "drafted",
       }),
     });
@@ -123,6 +130,7 @@ describe("scripts", () => {
     expect(sceneBody.title).toBe("Storm Watch");
     expect(sceneBody.draft_json).toEqual(draftJson);
     expect(sceneBody.draft_md).toBe("INT. TOWER — NIGHT");
+    expect(sceneBody.draft_version).toBe(1);
     expect(sceneBody.status).toBe("drafted");
 
     const missingScene = await SELF.fetch(
@@ -146,7 +154,7 @@ describe("scripts", () => {
     await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line." }),
+      body: JSON.stringify({ draft_md: "Opening line.", draft_version: 1 }),
     });
     const promoted = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       headers,
@@ -163,13 +171,27 @@ describe("scripts", () => {
     await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line, revised." }),
+      body: JSON.stringify({ draft_md: "Opening line, revised.", draft_version: 2 }),
     });
     const stillDrafted = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       headers,
     });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     expect(((await stillDrafted.json()) as any).status).toBe("drafted");
+
+    const staleDraft = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Delayed old line.", draft_version: 1 }),
+    });
+    expect(staleDraft.status).toBe(409);
+    const afterStale = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
+      headers,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterStaleBody = (await afterStale.json()) as any;
+    expect(afterStaleBody.draft_md).toBe("Opening line, revised.");
+    expect(afterStaleBody.draft_version).toBe(2);
 
     const del = await SELF.fetch(`http://x/api/v1/scripts/${id}`, { method: "DELETE", headers });
     expect(del.status).toBe(204);

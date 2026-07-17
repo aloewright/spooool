@@ -93,6 +93,12 @@ describe("blogs", () => {
 
     const postId = postsBody.items[0].id;
     const draftJson = [{ type: "paragraph", content: "Step one." }];
+    const unversionedDraft = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Missing its write order." }),
+    });
+    expect(unversionedDraft.status).toBe(400);
     const patchPost = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
       method: "PATCH",
       headers,
@@ -100,6 +106,7 @@ describe("blogs", () => {
         title: "Ship it",
         draft_json: draftJson,
         draft_md: "Step one.",
+        draft_version: 1,
         status: "drafted",
       }),
     });
@@ -112,6 +119,7 @@ describe("blogs", () => {
     expect(postBody.title).toBe("Ship it");
     expect(postBody.draft_json).toEqual(draftJson);
     expect(postBody.draft_md).toBe("Step one.");
+    expect(postBody.draft_version).toBe(1);
     expect(postBody.status).toBe("drafted");
 
     const missingPost = await SELF.fetch(
@@ -135,7 +143,7 @@ describe("blogs", () => {
     await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line." }),
+      body: JSON.stringify({ draft_md: "Opening line.", draft_version: 1 }),
     });
     const promoted = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       headers,
@@ -152,13 +160,27 @@ describe("blogs", () => {
     await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line, revised." }),
+      body: JSON.stringify({ draft_md: "Opening line, revised.", draft_version: 2 }),
     });
     const stillDrafted = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       headers,
     });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     expect(((await stillDrafted.json()) as any).status).toBe("drafted");
+
+    const staleDraft = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Delayed old line.", draft_version: 1 }),
+    });
+    expect(staleDraft.status).toBe(409);
+    const afterStale = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
+      headers,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterStaleBody = (await afterStale.json()) as any;
+    expect(afterStaleBody.draft_md).toBe("Opening line, revised.");
+    expect(afterStaleBody.draft_version).toBe(2);
 
     // Publishing requires an em_dash site + pub.fly.pm authentication first.
     const publishNoSite = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}/publish`, {

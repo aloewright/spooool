@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -39,6 +39,7 @@ const patchSceneSchema = z.object({
     .max(5_000)
     .optional(),
   draft_md: z.string().max(200_000).optional(),
+  draft_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   status: z.enum(["planned", "drafting", "drafted"]).optional(),
 });
 
@@ -257,16 +258,26 @@ scriptsRoute.patch("/:id/scenes/:sceneId", async (c) => {
     .limit(1);
   if (!s) return c.json({ error: "not found" }, 404);
   const [scene] = await db
-    .select({ id: script_scenes.id, status: script_scenes.status })
+    .select({
+      id: script_scenes.id,
+      status: script_scenes.status,
+      draftVersion: script_scenes.draft_version,
+    })
     .from(script_scenes)
     .where(and(eq(script_scenes.id, sceneId), eq(script_scenes.script_id, id)))
     .limit(1);
   if (!scene) return c.json({ error: "scene not found" }, 404);
 
+  const hasDraftUpdate = body.draft_json !== undefined || body.draft_md !== undefined;
+  if (hasDraftUpdate && body.draft_version === undefined) {
+    return c.json({ error: "draft_version is required for draft updates" }, 400);
+  }
+
   // First draft content promotes a planned scene to drafting. Done here (not
   // in the client autosave) so a delayed save can never downgrade a status
   // the user set explicitly in the meantime.
-  const values: typeof body & { updated_at: Date } = { ...body, updated_at: new Date() };
+  const { draft_version: draftVersion, ...patch } = body;
+  const values = { ...patch, updated_at: new Date() };
   if (
     values.status === undefined &&
     scene.status === "planned" &&
@@ -276,8 +287,27 @@ scriptsRoute.patch("/:id/scenes/:sceneId", async (c) => {
     values.status = "drafting";
   }
 
-  await db.update(script_scenes).set(values).where(eq(script_scenes.id, sceneId));
-  return c.json({ ok: true });
+  if (!hasDraftUpdate) {
+    await db.update(script_scenes).set(values).where(eq(script_scenes.id, sceneId));
+    return c.json({ ok: true, draft_version: scene.draftVersion });
+  }
+
+  const [updated] = await db
+    .update(script_scenes)
+    .set({ ...values, draft_version: draftVersion })
+    .where(
+      and(eq(script_scenes.id, sceneId), lt(script_scenes.draft_version, draftVersion as number)),
+    )
+    .returning({ draft_version: script_scenes.draft_version });
+  if (!updated) {
+    const [current] = await db
+      .select({ draft_version: script_scenes.draft_version })
+      .from(script_scenes)
+      .where(eq(script_scenes.id, sceneId))
+      .limit(1);
+    return c.json({ error: "stale draft", draft_version: current?.draft_version ?? 0 }, 409);
+  }
+  return c.json({ ok: true, draft_version: updated.draft_version });
 });
 
 scriptsRoute.delete("/:id", async (c) => {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -49,6 +49,7 @@ const patchPostSchema = z.object({
     .max(5_000)
     .optional(),
   draft_md: z.string().max(200_000).optional(),
+  draft_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   status: z.enum(["planned", "drafting", "drafted"]).optional(),
 });
 
@@ -290,16 +291,26 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
     .limit(1);
   if (!b) return c.json({ error: "not found" }, 404);
   const [post] = await db
-    .select({ id: blog_posts.id, status: blog_posts.status })
+    .select({
+      id: blog_posts.id,
+      status: blog_posts.status,
+      draftVersion: blog_posts.draft_version,
+    })
     .from(blog_posts)
     .where(and(eq(blog_posts.id, postId), eq(blog_posts.blog_id, id)))
     .limit(1);
   if (!post) return c.json({ error: "post not found" }, 404);
 
+  const hasDraftUpdate = body.draft_json !== undefined || body.draft_md !== undefined;
+  if (hasDraftUpdate && body.draft_version === undefined) {
+    return c.json({ error: "draft_version is required for draft updates" }, 400);
+  }
+
   // First draft content promotes a planned post to drafting. Done here (not
   // in the client autosave) so a delayed save can never downgrade a status
   // the user set explicitly in the meantime.
-  const values: typeof body & { updated_at: Date } = { ...body, updated_at: new Date() };
+  const { draft_version: draftVersion, ...patch } = body;
+  const values = { ...patch, updated_at: new Date() };
   if (
     values.status === undefined &&
     post.status === "planned" &&
@@ -309,8 +320,25 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
     values.status = "drafting";
   }
 
-  await db.update(blog_posts).set(values).where(eq(blog_posts.id, postId));
-  return c.json({ ok: true });
+  if (!hasDraftUpdate) {
+    await db.update(blog_posts).set(values).where(eq(blog_posts.id, postId));
+    return c.json({ ok: true, draft_version: post.draftVersion });
+  }
+
+  const [updated] = await db
+    .update(blog_posts)
+    .set({ ...values, draft_version: draftVersion })
+    .where(and(eq(blog_posts.id, postId), lt(blog_posts.draft_version, draftVersion as number)))
+    .returning({ draft_version: blog_posts.draft_version });
+  if (!updated) {
+    const [current] = await db
+      .select({ draft_version: blog_posts.draft_version })
+      .from(blog_posts)
+      .where(eq(blog_posts.id, postId))
+      .limit(1);
+    return c.json({ error: "stale draft", draft_version: current?.draft_version ?? 0 }, 409);
+  }
+  return c.json({ ok: true, draft_version: updated.draft_version });
 });
 
 // Publishes a drafted post straight to the blog's connected em_dash site via

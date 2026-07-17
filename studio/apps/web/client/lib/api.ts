@@ -8,6 +8,17 @@ export const queryClient = new QueryClient({
 
 let redirectingToSignIn = false;
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: unknown,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(withBase(path), {
     credentials: "include",
@@ -27,9 +38,11 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(
-      `${res.status}: ${(body as { error?: { message?: string } }).error?.message ?? res.statusText}`,
-    );
+    const message =
+      typeof (body as { error?: unknown }).error === "string"
+        ? (body as { error: string }).error
+        : ((body as { error?: { message?: string } }).error?.message ?? res.statusText);
+    throw new ApiError(res.status, body, `${res.status}: ${message}`);
   }
   return res.json() as Promise<T>;
 }
@@ -104,6 +117,7 @@ export type BlogPost = {
   summary: string;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
   status: "planned" | "drafting" | "drafted" | "published";
   emdash_post_id?: string | null;
   published_at?: number | null;
@@ -135,6 +149,7 @@ export type ScriptScene = {
   summary: string;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
   status: "planned" | "drafting" | "drafted";
   created_at: number;
   updated_at: number;
@@ -201,6 +216,7 @@ export type Chapter = {
   target_words: number;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
   created_at: number;
   updated_at: number;
 };
@@ -549,11 +565,12 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
       status?: BlogPost["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/blogs/${id}/posts/${postId}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/blogs/${id}/posts/${postId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,
@@ -597,11 +614,12 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
       status?: ScriptScene["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/scripts/${id}/scenes/${sceneId}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/scripts/${id}/scenes/${sceneId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,
@@ -731,11 +749,12 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
       status?: Chapter["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/chapters/${id}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/chapters/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,

@@ -9,7 +9,7 @@ import { Rss } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
 import { BlogShell } from "../components/studio/BlogShell";
-import { type BlogDetail, type BlogPost, api, queryKeys } from "../lib/api";
+import { ApiError, type BlogDetail, type BlogPost, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
 import { useDarkMode } from "../lib/use-theme-mode";
 
@@ -62,6 +62,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
   const format = getBlogFormat(blog.format);
   const darkMode = useDarkMode();
   const pendingSave = useRef<number | undefined>(undefined);
+  const draftVersion = useRef(post.draft_version);
   const inFlight = useRef<AbortController | null>(null);
   const gen = useRef(0);
   const hydratedMarkdown = useRef(false);
@@ -97,21 +98,31 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
       const g = ++gen.current;
       const draftJson = editor.document;
       const draftMd = editor.blocksToMarkdownLossy(editor.document);
+      const nextVersion = Math.max(draftVersion.current + 1, Date.now());
+      draftVersion.current = nextVersion;
       try {
-        await api.updateBlogPost(
+        const response = await api.updateBlogPost(
           blog.id,
           post.id,
-          { draft_json: draftJson, draft_md: draftMd },
+          { draft_json: draftJson, draft_md: draftMd, draft_version: nextVersion },
           { signal: ctrl.signal },
         );
+        return { draftMd, draftVersion: response.draft_version, superseded: g !== gen.current };
       } catch (err) {
         if (ctrl.signal.aborted) return { draftMd, superseded: true };
+        if (
+          err instanceof ApiError &&
+          err.status === 409 &&
+          typeof (err.body as { draft_version?: unknown })?.draft_version === "number"
+        ) {
+          draftVersion.current = (err.body as { draft_version: number }).draft_version;
+        }
         throw err;
       }
-      return { draftMd, superseded: g !== gen.current };
     },
-    onSuccess: ({ draftMd, superseded }) => {
+    onSuccess: ({ draftMd, draftVersion: savedDraftVersion, superseded }) => {
       if (superseded) return;
+      draftVersion.current = savedDraftVersion;
       setIsDirty(false);
       setHasDraftContent(draftMd.trim().length > 0);
       // The server promotes a planned post to drafting when its first draft

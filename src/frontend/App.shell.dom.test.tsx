@@ -119,4 +119,13 @@ describe('App shell', () => {
     expect(headings).not.toContain('Trending this week');
     expect(headings).toContain('Page not found');
   });
+
+  it('renders the Studio route without replacing the current location', async () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => undefined);
+
+    await mountAt('/studio');
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(container!.querySelector('h1')?.textContent).toBe('Sign in');
+  });
 });

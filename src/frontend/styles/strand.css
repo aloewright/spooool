@@ -491,117 +491,136 @@ code, kbd, pre, samp {
   }
 }
 
-/* Continuous wavy stroke for the SpoolWave SVG inside the wordmark.
-   stroke-dasharray + animated dashoffset = travelling trim window. */
-.spooool-wave {
-  stroke-dasharray: 32 68;
-  animation: spooool-wave-scroll 2.4s linear infinite;
-}
-
-@keyframes spooool-wave-scroll {
-  to {
-    stroke-dashoffset: 100;
-  }
-}
-
-/* Variable-pace variant used on the splash screen — the visible loop
-   window scrolls fast → slow → fast in a single 6s cycle so the loops
-   feel like they're being unspooled by hand. */
-.spooool-wave--paced {
-  stroke-dasharray: 32 68;
-  animation: spooool-wave-paced 6s ease-in-out infinite;
-}
-
-@keyframes spooool-wave-paced {
-  0% { stroke-dashoffset: 0; }
-  20% { stroke-dashoffset: 36; }
-  40% { stroke-dashoffset: 50; }
-  60% { stroke-dashoffset: 58; }
-  80% { stroke-dashoffset: 86; }
-  100% { stroke-dashoffset: 100; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spooool-wave,
-  .spooool-wave--paced {
-    animation: none;
-  }
-}
-
-/* Splash overlay shown on first navigation to "/" per session. Full
-   viewport, fades in/out, lets the wordmark animation take centre
-   stage before handing off to the Home route. */
+/* First-visit brand overlay. The safe-area values are made symmetric so the
+   word remains optically centred on devices with an asymmetric cutout. */
 .splash {
+  --splash-safe-block: max(env(safe-area-inset-top), env(safe-area-inset-bottom));
+  --splash-safe-inline: max(env(safe-area-inset-left), env(safe-area-inset-right));
+
+  appearance: none;
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 10000;
   display: flex;
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
   align-items: center;
   justify-content: center;
+  margin: 0;
+  padding: var(--splash-safe-block) var(--splash-safe-inline);
+  border: 0;
+  border-radius: 0;
   background: var(--background);
-  cursor: pointer;
-  animation: splash-in 400ms ease forwards;
-}
-
-.splash--leaving {
-  animation: splash-out 600ms ease forwards;
-  pointer-events: none;
-}
-
-.splash__mark {
-  font-family: 'Caveat', var(--font-display);
-  font-style: normal;
-  font-weight: 600;
-  font-size: clamp(64px, 14vw, 168px);
-  line-height: 1;
   color: var(--foreground);
-  display: inline-flex;
-  align-items: baseline;
-  gap: 0;
+  cursor: pointer;
+  font-family: Nunito, var(--font-display);
+  font-size: clamp(56px, 10vw, 128px);
+  font-style: normal;
+  font-weight: 760;
+  font-variation-settings: "wght" 760;
+  letter-spacing: -0.045em;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.splash:focus-visible {
+  outline: none;
+}
+
+.splash__word {
+  display: inline-block;
+  border-radius: var(--radius-md);
+}
+
+.splash:focus-visible .splash__word {
+  outline: 2px solid var(--foreground);
+  outline-offset: 10px;
+}
+
+.splash[data-phase='leaving'] {
+  pointer-events: none;
+  animation: splash-overlay-leave var(--splash-leave-duration) var(--ease-smooth) both;
+}
+
+.splash__letter {
+  display: inline-block;
   user-select: none;
-  animation: splash-mark-in 800ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation:
+    splash-word-enter var(--splash-enter-duration) var(--ease-smooth) both,
+    splash-word-resolve var(--splash-pulse-duration) var(--ease-smooth)
+      calc(var(--splash-enter-duration) + 3 * var(--splash-pulse-stagger)) forwards;
 }
 
-.splash__hint {
-  position: absolute;
-  bottom: var(--space-8);
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--muted-foreground);
-  font-size: var(--text-sm);
-  letter-spacing: var(--tracking-label);
-  text-transform: uppercase;
-  opacity: 0;
-  animation: splash-hint-in 600ms ease 1.6s forwards;
+.splash__letter--o {
+  animation:
+    splash-word-enter var(--splash-enter-duration) var(--ease-smooth) both,
+    splash-word-resolve var(--splash-pulse-duration) var(--ease-smooth)
+      calc(var(--splash-enter-duration) + 3 * var(--splash-pulse-stagger)) forwards,
+    splash-o-roll var(--splash-pulse-duration) var(--ease-smooth)
+      calc(var(--splash-enter-duration) + var(--splash-o-index) * var(--splash-pulse-stagger));
 }
 
-@keyframes splash-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes splash-word-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 0.62;
+    transform: translateY(0);
+  }
 }
 
-@keyframes splash-out {
-  from { opacity: 1; }
-  to { opacity: 0; }
+@keyframes splash-word-resolve {
+  from {
+    opacity: 0.62;
+  }
+
+  to {
+    opacity: 1;
+  }
 }
 
-@keyframes splash-mark-in {
-  from { opacity: 0; transform: scale(0.92); }
-  to { opacity: 1; transform: scale(1); }
+@keyframes splash-o-roll {
+  0%,
+  100% {
+    transform: scaleX(1) scaleY(1);
+  }
+
+  50% {
+    transform: scaleX(0.97) scaleY(1.035);
+  }
 }
 
-@keyframes splash-hint-in {
-  from { opacity: 0; transform: translate(-50%, 6px); }
-  to { opacity: 0.7; transform: translate(-50%, 0); }
+@keyframes splash-overlay-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+.splash[data-reduced-motion='true'] .splash__letter {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.splash[data-reduced-motion='true'][data-phase='leaving'] {
+  animation-duration: var(--splash-reduced-leave-duration);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .splash,
-  .splash--leaving,
-  .splash__mark,
-  .splash__hint {
+  .splash__letter,
+  .splash__letter--o {
     animation: none;
     opacity: 1;
+    transform: none;
+  }
+
+  .splash[data-phase='leaving'] {
+    animation-duration: var(--splash-reduced-leave-duration);
   }
 }
 

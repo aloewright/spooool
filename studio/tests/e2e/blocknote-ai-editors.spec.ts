@@ -20,10 +20,19 @@ for (const editorSetup of editorSetups) {
     await signUp(page, editorSetup.label);
     const fixture = await editorSetup.setup(page);
     const aiRequests: Array<Record<string, unknown>> = [];
+    let replacementSaveFailuresRemaining = 1;
 
     await page.route("**/api/v1/editor/ai", async (route) => {
       const request = route.request().postDataJSON() as Record<string, unknown>;
       aiRequests.push(request);
+      if (request.command === "proofread" && aiRequests.length === 1) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary AI failure" }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -37,6 +46,22 @@ for (const editorSetup of editorSetups) {
         }),
       });
     });
+    await page.route(new RegExp(`${escapeRegex(fixture.patchPath)}$`), async (route) => {
+      const body = route.request().postDataJSON() as { draft_md?: string } | null;
+      if (
+        replacementSaveFailuresRemaining > 0 &&
+        body?.draft_md?.includes(replacementDraft)
+      ) {
+        replacementSaveFailuresRemaining -= 1;
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "temporary save failure" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
 
     await page.goto(fixture.editorPath);
     const editor = page.locator('[contenteditable="true"]');
@@ -48,6 +73,10 @@ for (const editorSetup of editorSetups) {
     }
 
     await page.getByText("Proofread", { exact: true }).click();
+    const proofreadFailure = page.getByRole("dialog", { name: "AI command failed" });
+    await expect(proofreadFailure).toContainText("temporary AI failure");
+    await proofreadFailure.getByRole("button", { name: "Retry", exact: true }).click();
+
     const documentReview = page.getByRole("dialog", { name: "Ready to review" });
     await expect(documentReview).toBeVisible();
     expect(aiRequests.at(-1)).toMatchObject({
@@ -101,7 +130,7 @@ for (const editorSetup of editorSetups) {
     });
     expect(String(selectionRequest?.target_md).trim()).toBe(selectedDraft);
 
-    const acceptedPatch = page.waitForRequest((request) => {
+    const failedPatch = page.waitForRequest((request) => {
       if (request.method() !== "PATCH" || new URL(request.url()).pathname !== fixture.patchPath) {
         return false;
       }
@@ -110,15 +139,30 @@ for (const editorSetup of editorSetups) {
     });
     await selectionReview.getByRole("button", { name: "Apply", exact: true }).click();
 
-    const patchRequest = await acceptedPatch;
-    const patchBody = patchRequest.postDataJSON() as { draft_md: string };
+    const patchRequest = await failedPatch;
+    const patchBody = patchRequest.postDataJSON() as { draft_md: string; draft_version: number };
     expect(patchBody.draft_md).toContain("Opening line.");
     expect(patchBody.draft_md).toContain(replacementDraft);
     expect(patchBody.draft_md).toContain("Closing line.");
     expect(patchBody.draft_md).not.toContain(selectedDraft);
-    expect((await patchRequest.response())?.ok()).toBe(true);
+    expect(patchBody.draft_version).toBeGreaterThan(0);
+    expect((await patchRequest.response())?.status()).toBe(500);
     await expect(editor).toContainText(`Opening line. ${replacementDraft} Closing line.`);
     await expect(editor).not.toContainText(selectedDraft);
+
+    const saveFailure = page.getByRole("dialog", { name: "Replacement not saved" });
+    await expect(saveFailure).toContainText("could not be saved");
+
+    const savedPatch = page.waitForRequest((request) => {
+      if (request.method() !== "PATCH" || new URL(request.url()).pathname !== fixture.patchPath) {
+        return false;
+      }
+      const body = request.postDataJSON() as { draft_md?: string } | null;
+      return body?.draft_md?.includes(replacementDraft) ?? false;
+    });
+    await saveFailure.getByRole("button", { name: "Retry save", exact: true }).click();
+    expect((await (await savedPatch).response())?.ok()).toBe(true);
+    await expect(saveFailure).toBeHidden();
     await expect(page.getByText("Saved", { exact: true })).toBeVisible();
   });
 }
@@ -165,7 +209,9 @@ async function createBlogPost(page: Page): Promise<EditorFixture> {
   expect(postId).toBeTruthy();
 
   const patchPath = `/api/v1/blogs/${blogId}/posts/${postId}`;
-  const seeded = await page.request.patch(patchPath, { data: { draft_md: initialDraft } });
+  const seeded = await page.request.patch(patchPath, {
+    data: { draft_md: initialDraft, draft_version: 1 },
+  });
   expect(seeded.ok()).toBe(true);
 
   return {
@@ -199,7 +245,9 @@ async function createScriptScene(page: Page): Promise<EditorFixture> {
   expect(sceneId).toBeTruthy();
 
   const patchPath = `/api/v1/scripts/${scriptId}/scenes/${sceneId}`;
-  const seeded = await page.request.patch(patchPath, { data: { draft_md: initialDraft } });
+  const seeded = await page.request.patch(patchPath, {
+    data: { draft_md: initialDraft, draft_version: 1 },
+  });
   expect(seeded.ok()).toBe(true);
 
   return {
@@ -295,4 +343,8 @@ async function expectReadableDarkDialog(dialog: Locator) {
       }),
     )
     .toBeGreaterThanOrEqual(4.5);
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

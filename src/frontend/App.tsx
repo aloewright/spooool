@@ -1,5 +1,13 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
 import { CookieBanner } from './components/CookieBanner';
@@ -7,6 +15,7 @@ import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
+import { BrandSplash, useBrandSplash } from './components/BrandSplash';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the @cloudflare/stream-react
@@ -33,8 +42,12 @@ const AccountSettings = lazy(() =>
 );
 const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
-const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
-const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
+const DmcaCounter = lazy(() =>
+  import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })),
+);
+const DmcaNotice = lazy(() =>
+  import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })),
+);
 const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
 const ForgotPassword = lazy(() =>
@@ -93,54 +106,6 @@ type HistoryItem = {
   channel_username: string | null;
 };
 
-function SpoolWave({
-  fontPx,
-  paced = false,
-}: {
-  fontPx: number;
-  paced?: boolean;
-}): JSX.Element {
-  // Cursive-script "loop-dee-loop" path translated 1:1 from the lottie
-  // spiral bezier data. Each loop is 4 cubic segments; we repeat the
-  // pattern 6× across a 0..48 viewBox so dashoffset can scroll the
-  // visible window continuously. viewBox aspect (4:1) matches the
-  // rendered box so preserveAspectRatio="none" doesn't distort. Loops
-  // sit AT the text baseline going UP (y=12 = baseline, y=0 = x-height).
-  const width = Math.round(fontPx * 2);
-  const height = Math.round(fontPx * 0.5);
-  const loops = [0, 8, 16, 24, 32, 40]
-    .map((x) => {
-      return [
-        `C ${x + 4.452} 12, ${x + 6.736} 8.284, ${x + 7.025} 4.988`,
-        `C ${x + 7.255} 2.361, ${x + 6.218} 0, ${x + 4} 0`,
-        `C ${x + 1.782} 0, ${x + 0.745} 2.361, ${x + 0.975} 4.988`,
-        `C ${x + 1.264} 8.284, ${x + 3.548} 12, ${x + 8} 12`,
-      ].join(' ');
-    })
-    .join(' ');
-  return (
-    <svg
-      viewBox="0 0 48 12"
-      width={width}
-      height={height}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-      style={{ display: 'inline-block', verticalAlign: 'baseline', overflow: 'visible' }}
-    >
-      <path
-        d={`M 0 12 ${loops}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={fontPx * 0.04}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        pathLength={100}
-        className={paced ? 'spooool-wave--paced' : 'spooool-wave'}
-      />
-    </svg>
-  );
-}
-
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   // Plain text title set in Nunito (via .ds-wordmark) — no per-letter motion.
   return (
@@ -151,51 +116,6 @@ function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
     >
       spooool
     </Link>
-  );
-}
-
-const SPLASH_DURATION_MS = 3200;
-const SPLASH_FADE_MS = 600;
-
-function Splash({ onDone }: { onDone: () => void }): JSX.Element {
-  const [leaving, setLeaving] = useState(false);
-
-  useEffect(() => {
-    const dismiss = window.setTimeout(() => setLeaving(true), SPLASH_DURATION_MS);
-    return () => window.clearTimeout(dismiss);
-  }, []);
-
-  useEffect(() => {
-    if (!leaving) return;
-    const finish = window.setTimeout(onDone, SPLASH_FADE_MS);
-    return () => window.clearTimeout(finish);
-  }, [leaving, onDone]);
-
-  // Click-to-skip — start the leave animation immediately.
-  const skip = () => setLeaving(true);
-
-  // Splash mark gets its own font sizing (clamp() on the wrapper) so the
-  // SVG width tracks the rendered font size. We size the wave at a
-  // representative middle value; CSS clamps the mark itself.
-  const splashFontPx = 120;
-  return (
-    <div
-      className={leaving ? 'splash splash--leaving' : 'splash'}
-      onClick={skip}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') skip();
-      }}
-      aria-label="spooool — tap to enter"
-    >
-      <span className="splash__mark">
-        <span aria-hidden="true">sp</span>
-        <SpoolWave fontPx={splashFontPx} paced />
-        <span aria-hidden="true" style={{ marginLeft: '-0.05em' }}>l</span>
-      </span>
-      <span className="splash__hint">tap to enter</span>
-    </div>
   );
 }
 
@@ -211,10 +131,14 @@ function HeaderNav(): JSX.Element {
     return (
       <nav className="app-header__nav">
         <Link to="/login">
-          <button type="button" className="btn btn--ghost btn--sm">Sign in</button>
+          <button type="button" className="btn btn--ghost btn--sm">
+            Sign in
+          </button>
         </Link>
         <Link to="/signup">
-          <button type="button" className="btn btn--secondary btn--sm">Sign up</button>
+          <button type="button" className="btn btn--secondary btn--sm">
+            Sign up
+          </button>
         </Link>
       </nav>
     );
@@ -237,26 +161,48 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <NotificationBell />
       <Link to="/payouts">
-        <button type="button" className="btn btn--ghost btn--sm">Payouts</button>
+        <button type="button" className="btn btn--ghost btn--sm">
+          Payouts
+        </button>
       </Link>
       <Link to="/feeds">
-        <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
+        <button type="button" className="btn btn--ghost btn--sm">
+          Feeds
+        </button>
       </Link>
       <Link to="/discover">
-        <button type="button" className="btn btn--ghost btn--sm">Discover</button>
+        <button type="button" className="btn btn--ghost btn--sm">
+          Discover
+        </button>
       </Link>
       {/* Studio is served by the content-hub worker in production. Keep the
           hard navigation so the zone route can intercept; the in-shell route
           below is only a non-refreshing fallback when the SPA receives it. */}
-      <a href="/studio" className="btn btn--ghost btn--sm">Studio</a>
-      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
-
+      <a href="/studio" className="btn btn--ghost btn--sm">
+        Studio
+      </a>
+      <Link
+        to="/upload"
+        aria-label="Upload"
+        title={`Upload — ${session.user?.email ?? ''}`}
+        style={iconBtn}
+      >
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
+      <Link
+        to="/profile"
+        aria-label="Profile"
+        title={`Profile — ${session.user?.email ?? ''}`}
+        style={iconBtn}
+      >
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link to="/settings/account" aria-label="Account settings" title="Account settings" style={iconBtn}>
+      <Link
+        to="/settings/account"
+        aria-label="Account settings"
+        title="Account settings"
+        style={iconBtn}
+      >
         <Settings aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
@@ -401,9 +347,24 @@ const SUGGESTIONS: {
   to: string;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
 }[] = [
-  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
-  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
-  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
+  {
+    title: 'Upload a clip',
+    helper: 'Drop in an MP4, WebM, MOV, or MKV.',
+    to: '/upload',
+    Icon: UploadIcon,
+  },
+  {
+    title: 'Open a channel',
+    helper: 'Visit a creator and skim their library.',
+    to: '/channel/explore',
+    Icon: ChannelIcon,
+  },
+  {
+    title: 'Watch something',
+    helper: 'Jump into a video by id.',
+    to: '/watch/demo',
+    Icon: PlayIcon,
+  },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
@@ -562,9 +523,20 @@ function Home(): JSX.Element {
             Creator-first video hosting — adaptive streaming, channel pages, memberships, and
             tipping. No ads. No algorithm fighting you.
           </p>
-          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
-            <Link to="/signup" className="btn">Sign up free</Link>
-            <Link to="/pricing" className="btn btn--secondary">See pricing</Link>
+          <div
+            style={{
+              display: 'flex',
+              gap: 'var(--space-3)',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <Link to="/signup" className="btn">
+              Sign up free
+            </Link>
+            <Link to="/pricing" className="btn btn--secondary">
+              See pricing
+            </Link>
           </div>
 
           <div
@@ -596,8 +568,12 @@ function Home(): JSX.Element {
             ].map(({ emoji, title, body }) => (
               <article key={title} className="card stack-sm">
                 <span style={{ fontSize: 'var(--text-2xl)' }}>{emoji}</span>
-                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 'var(--text-base)' }}>{title}</h3>
-                <p className="ds-meta" style={{ margin: 0 }}>{body}</p>
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 'var(--text-base)' }}>
+                  {title}
+                </h3>
+                <p className="ds-meta" style={{ margin: 0 }}>
+                  {body}
+                </p>
               </article>
             ))}
           </div>
@@ -620,8 +596,17 @@ function Home(): JSX.Element {
 
       {session?.user && history !== null && history.length > 0 ? (
         <section className="stack-sm" aria-label="Continue watching">
-          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
-            <h2 className="ds-h3" style={{ margin: 0 }}>Continue watching</h2>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: 'var(--space-2)',
+            }}
+          >
+            <h2 className="ds-h3" style={{ margin: 0 }}>
+              Continue watching
+            </h2>
             <button
               type="button"
               className="ds-btn ds-btn--ghost ds-btn--sm"
@@ -646,7 +631,9 @@ function Home(): JSX.Element {
       ) : null}
 
       <section className="stack-sm" aria-label="Trending">
-        <h2 className="ds-h3" style={{ margin: 0 }}>Trending this week</h2>
+        <h2 className="ds-h3" style={{ margin: 0 }}>
+          Trending this week
+        </h2>
         {trendingError ? (
           <p className="status-error">{trendingError}</p>
         ) : trending === null ? (
@@ -678,7 +665,9 @@ function Home(): JSX.Element {
           marginTop: 'var(--space-6)',
         }}
       >
-        <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>Start here</h2>
+        <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>
+          Start here
+        </h2>
         <div className="suggestion-grid">
           {SUGGESTIONS.map((item, i) => (
             <Link
@@ -764,27 +753,16 @@ function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
   return children;
 }
 
-function useSplash(): { show: boolean; dismiss: () => void } {
-  // First-visit splash. sessionStorage scopes it per browser tab session
-  // so users don't see it on every internal navigation.
-  const [show, setShow] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    if (window.location.pathname !== '/') return false;
-    return window.sessionStorage.getItem('splash:seen') !== '1';
-  });
-  const dismiss = () => {
-    window.sessionStorage.setItem('splash:seen', '1');
-    setShow(false);
-  };
-  return { show, dismiss };
-}
-
 // `App` is the default export mounted by main.tsx — the full spooool shell
 // (header, routed pages, footer). The `/studio` route renders a fallback when
 // the SPA receives that URL instead of the production content-hub worker.
 export default function App(): JSX.Element {
   const location = useLocation();
-  const splash = useSplash();
+  const splash = useBrandSplash(location.pathname);
+  const coveredShellAttributes: { inert: ''; 'aria-hidden': true } = {
+    inert: '',
+    'aria-hidden': true,
+  };
 
   // Embed pages render as a bare player with no app shell so they can be
   // iframed into third-party sites without nav chrome. They still go through
@@ -802,152 +780,150 @@ export default function App(): JSX.Element {
     );
   }
 
-  if (splash.show) {
-    return <Splash onDone={splash.dismiss} />;
-  }
   return (
     <MantineProvider>
-    <div className="app-shell">
-      <AppHeader />
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/watch/:id" element={<Watch />} />
-          <Route
-            path="/upload"
-            element={
-              <RequireAuth>
-                <Upload />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/record"
-            element={
-              <RequireAuth>
-                <Record />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/create"
-            element={
-              <RequireAuth>
-                <Create />
-              </RequireAuth>
-            }
-          />
-          <Route path="/studio" element={<Studio />} />
-          <Route
-            path="/profile"
-            element={
-              <RequireAuth>
-                <Profile />
-              </RequireAuth>
-            }
-          />
-          <Route path="/channel/:username" element={<Channel />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/tag/:slug" element={<Tag />} />
-          <Route
-            path="/admin/moderation"
-            element={
-              <RequireAuth>
-                <AdminModeration />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/admin/roles"
-            element={
-              <RequireAuth>
-                <AdminRoles />
-              </RequireAuth>
-            }
-          />
-          <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
-          <Route
-            path="/settings/account"
-            element={
-              <RequireAuth>
-                <AccountSettings />
-              </RequireAuth>
-            }
-          />
-          <Route path="/legal/dmca" element={<DmcaForm />} />
-          <Route
-            path="/legal/dmca/counter"
-            element={
-              <RequireAuth>
-                <DmcaCounter />
-              </RequireAuth>
-            }
-          />
-          <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
-          <Route path="/legal/tos" element={<Tos />} />
-          <Route path="/legal/privacy" element={<Privacy />} />
-          <Route path="/pricing" element={<Pricing />} />
-          <Route
-            path="/subscriptions"
-            element={
-              <RequireAuth>
-                <Subscriptions />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/feeds"
-            element={
-              <RequireAuth>
-                <Feeds />
-              </RequireAuth>
-            }
-          />
-          <Route path="/feeds/:id" element={<FeedView />} />
-          <Route
-            path="/discover"
-            element={
-              <RequireAuth>
-                <Discover />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/onboarding"
-            element={
-              <RequireAuth>
-                <Onboarding />
-              </RequireAuth>
-            }
-          />
-          <Route
-            path="/payouts"
-            element={
-              <RequireAuth>
-                <Payouts />
-              </RequireAuth>
-            }
-          />
-          <Route path="/status" element={<Status />} />
-          <Route
-            path="/admin/status"
-            element={
-              <RequireAuth>
-                <AdminStatus />
-              </RequireAuth>
-            }
-          />
-          <Route path="/waitlist" element={<Waitlist />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
-      <SiteFooter />
-      <CookieBanner />
-    </div>
+      <div className="app-shell" {...(splash.show ? coveredShellAttributes : {})}>
+        <AppHeader />
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/watch/:id" element={<Watch />} />
+            <Route
+              path="/upload"
+              element={
+                <RequireAuth>
+                  <Upload />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/record"
+              element={
+                <RequireAuth>
+                  <Record />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/create"
+              element={
+                <RequireAuth>
+                  <Create />
+                </RequireAuth>
+              }
+            />
+            <Route path="/studio" element={<Studio />} />
+            <Route
+              path="/profile"
+              element={
+                <RequireAuth>
+                  <Profile />
+                </RequireAuth>
+              }
+            />
+            <Route path="/channel/:username" element={<Channel />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/tag/:slug" element={<Tag />} />
+            <Route
+              path="/admin/moderation"
+              element={
+                <RequireAuth>
+                  <AdminModeration />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/admin/roles"
+              element={
+                <RequireAuth>
+                  <AdminRoles />
+                </RequireAuth>
+              }
+            />
+            <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
+            <Route
+              path="/settings/account"
+              element={
+                <RequireAuth>
+                  <AccountSettings />
+                </RequireAuth>
+              }
+            />
+            <Route path="/legal/dmca" element={<DmcaForm />} />
+            <Route
+              path="/legal/dmca/counter"
+              element={
+                <RequireAuth>
+                  <DmcaCounter />
+                </RequireAuth>
+              }
+            />
+            <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
+            <Route path="/legal/tos" element={<Tos />} />
+            <Route path="/legal/privacy" element={<Privacy />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route
+              path="/subscriptions"
+              element={
+                <RequireAuth>
+                  <Subscriptions />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/feeds"
+              element={
+                <RequireAuth>
+                  <Feeds />
+                </RequireAuth>
+              }
+            />
+            <Route path="/feeds/:id" element={<FeedView />} />
+            <Route
+              path="/discover"
+              element={
+                <RequireAuth>
+                  <Discover />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/onboarding"
+              element={
+                <RequireAuth>
+                  <Onboarding />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/payouts"
+              element={
+                <RequireAuth>
+                  <Payouts />
+                </RequireAuth>
+              }
+            />
+            <Route path="/status" element={<Status />} />
+            <Route
+              path="/admin/status"
+              element={
+                <RequireAuth>
+                  <AdminStatus />
+                </RequireAuth>
+              }
+            />
+            <Route path="/waitlist" element={<Waitlist />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+        <SiteFooter />
+        <CookieBanner />
+      </div>
+      {splash.show && <BrandSplash onDone={splash.dismiss} />}
     </MantineProvider>
   );
 }

@@ -76,45 +76,64 @@
     margin: 0;
     overflow: hidden;
   }
+}
 
-  .bn-container {
-    --bn-colors-editor-text: var(--card-foreground);
-    --bn-colors-editor-background: var(--card);
-    --bn-colors-menu-text: var(--popover-foreground);
-    --bn-colors-menu-background: var(--popover);
-    --bn-colors-tooltip-text: var(--popover-foreground);
-    --bn-colors-tooltip-background: var(--popover);
-    --bn-colors-hovered-text: var(--accent-foreground);
-    --bn-colors-hovered-background: var(--accent);
-    --bn-colors-selected-text: var(--primary-foreground);
-    --bn-colors-selected-background: var(--primary);
-    --bn-colors-disabled-text: var(--muted-foreground);
-    --bn-colors-disabled-background: var(--muted);
-    --bn-colors-shadow: var(--border);
-    --bn-colors-border: var(--border);
-    --bn-colors-side-menu: var(--muted-foreground);
-    color: var(--card-foreground);
-    background: var(--card);
-  }
+/* BlockNote ships unlayered styles, so these theme overrides must also be
+   unlayered. The html prefix keeps the app tokens authoritative even when a
+   route's BlockNote stylesheet is loaded after this global stylesheet. */
+html .bn-root[data-color-scheme] {
+  --bn-colors-editor-text: var(--card-foreground);
+  --bn-colors-editor-background: var(--card);
+  --bn-colors-menu-text: var(--popover-foreground);
+  --bn-colors-menu-background: var(--popover);
+  --bn-colors-tooltip-text: var(--popover-foreground);
+  --bn-colors-tooltip-background: var(--popover);
+  --bn-colors-hovered-text: var(--accent-foreground);
+  --bn-colors-hovered-background: var(--accent);
+  --bn-colors-selected-text: var(--primary-foreground);
+  --bn-colors-selected-background: var(--primary);
+  --bn-colors-disabled-text: var(--muted-foreground);
+  --bn-colors-disabled-background: var(--muted);
+  --bn-colors-shadow: var(--border);
+  --bn-colors-border: var(--border);
+  --bn-colors-side-menu: var(--muted-foreground);
+  color: var(--card-foreground);
+}
 
-  .bn-container .bn-editor,
-  .bn-container .bn-default-styles {
-    color: var(--card-foreground);
-    background: var(--card);
-  }
+html .bn-root .bn-editor,
+html .bn-root .bn-default-styles {
+  color: var(--card-foreground);
+}
 
-  .bn-container .bn-block-content,
-  .bn-container [contenteditable="true"] {
-    color: var(--card-foreground);
-  }
+html .bn-root .bn-block-content,
+html .bn-root [contenteditable="true"] {
+  color: var(--card-foreground);
+}
 
-  .bn-container .mantine-Menu-dropdown,
-  .bn-container .mantine-Popover-dropdown,
-  .bn-container .mantine-Tooltip-tooltip {
-    color: var(--popover-foreground);
-    background: var(--popover);
-    border-color: var(--border);
-  }
+html .bn-root .mantine-Menu-dropdown,
+html .bn-root .mantine-Popover-dropdown,
+html .bn-root .mantine-Tooltip-tooltip {
+  color: var(--popover-foreground);
+  background: var(--popover);
+  border-color: var(--border);
+}
+
+/* The live blog/script card owns the editor canvas. BlockNote's intrinsic
+   empty state is only one text line tall; stretching the real contenteditable
+   keeps the whole 60vh canvas clickable instead of leaving a decorative void. */
+.blocknote-editor-shell {
+  --blocknote-editor-min-height: calc(60vh - 2.5rem);
+}
+
+.blocknote-editor-shell .bn-container,
+.blocknote-editor-shell .bn-editor {
+  min-height: var(--blocknote-editor-min-height);
+}
+
+.blocknote-editor-shell .bn-container,
+.blocknote-editor-shell .bn-editor,
+.blocknote-editor-shell .bn-default-styles {
+  background-color: transparent;
 }
 
 /* Blog surfaces read friendlier in Nunito: within .blog-surface the serif

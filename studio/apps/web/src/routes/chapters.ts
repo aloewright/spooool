@@ -5,6 +5,7 @@ import { z } from "zod";
 import { chapters, projects, revisions, sections, voices } from "../db/schema";
 import type { Env } from "../env";
 import { type AuthVariables, requireUser } from "../middleware/auth";
+import { enforceBudget } from "../middleware/budget";
 import { draftSection, reviseInlineText } from "../skills/writer";
 
 const patchChapterSchema = z.object({
@@ -147,7 +148,7 @@ chaptersRoute.post("/:id/sections/reorder", async (c) => {
   return c.json({ ok: true });
 });
 
-chaptersRoute.post("/:id/revise", async (c) => {
+chaptersRoute.post("/:id/revise", enforceBudget("chapter-inline-revise"), async (c) => {
   const user = c.get("user");
   const id = c.req.param("id");
   const body = reviseInlineSchema.parse(await c.req.json());

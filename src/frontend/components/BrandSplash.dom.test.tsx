@@ -47,6 +47,8 @@ describe('BrandSplash', () => {
     const button = splashButton();
     expectAttribute(button, 'type', 'button');
     expectAttribute(button, 'aria-label', 'spooool');
+    expect(button.hasAttribute('autofocus')).toBe(false);
+    expect(button.querySelector('.splash__word')).not.toBeNull();
     const letters = Array.from(button.querySelectorAll<HTMLSpanElement>('.splash__letter'));
     expect(letters.map((letter) => letter.textContent)).toEqual([
       's',
@@ -116,6 +118,15 @@ describe('BrandSplash', () => {
     expectAttribute(splashButton(), 'data-phase', 'leaving');
     act(() => vi.advanceTimersByTime(280));
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets Escape dismiss the overlay before it receives focus', () => {
+    vi.useFakeTimers();
+    mount(<BrandSplash onDone={vi.fn()} />);
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
+
+    expectAttribute(splashButton(), 'data-phase', 'leaving');
   });
 
   it('uses the reduced-motion schedule and only completes once for duplicate skips', () => {

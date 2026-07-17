@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent } from 'react';
 
 type SplashPhase = 'entering' | 'holding' | 'leaving';
 
@@ -104,7 +104,17 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
     return () => window.clearTimeout(fallback);
   }, [finish, reducedMotion]);
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+  useEffect(() => {
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      leave();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [leave]);
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (event.key === 'Enter' || event.key === ' ' || event.key === 'Escape') {
       event.preventDefault();
       leave();
@@ -126,27 +136,28 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
       type="button"
       className="splash"
       aria-label="spooool"
-      autoFocus
       data-phase={phase}
       data-reduced-motion={String(reducedMotion)}
       style={style}
       onClick={leave}
       onKeyDown={handleKeyDown}
     >
-      {letters.map((letter, index) => {
-        const oIndex = index - 2;
-        const style: SplashStyle = letter === 'o' ? { '--splash-o-index': String(oIndex) } : {};
-        return (
-          <span
-            className={letter === 'o' ? 'splash__letter splash__letter--o' : 'splash__letter'}
-            aria-hidden="true"
-            style={style}
-            key={`${letter}-${index}`}
-          >
-            {letter}
-          </span>
-        );
-      })}
+      <span className="splash__word" aria-hidden="true">
+        {letters.map((letter, index) => {
+          const oIndex = index - 2;
+          const style: SplashStyle = letter === 'o' ? { '--splash-o-index': String(oIndex) } : {};
+          return (
+            <span
+              className={letter === 'o' ? 'splash__letter splash__letter--o' : 'splash__letter'}
+              aria-hidden="true"
+              style={style}
+              key={`${letter}-${index}`}
+            >
+              {letter}
+            </span>
+          );
+        })}
+      </span>
     </button>
   );
 }

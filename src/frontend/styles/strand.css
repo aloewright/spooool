@@ -499,7 +499,7 @@ code, kbd, pre, samp {
   appearance: none;
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: 10000;
   display: flex;
   width: 100%;
   min-height: 100dvh;
@@ -525,8 +525,17 @@ code, kbd, pre, samp {
 }
 
 .splash:focus-visible {
+  outline: none;
+}
+
+.splash__word {
+  display: inline-block;
+  border-radius: var(--radius-md);
+}
+
+.splash:focus-visible .splash__word {
   outline: 2px solid var(--foreground);
-  outline-offset: -8px;
+  outline-offset: 10px;
 }
 
 .splash[data-phase='leaving'] {

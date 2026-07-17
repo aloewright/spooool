@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type SaveState = "idle" | "saving" | "saved" | "error";
+
+export interface AutosaveControls {
+  // Stops both a scheduled save and the currently active request while
+  // preserving the local value. Callers can use this when a higher-level
+  // condition (for example, a stale draft) makes further writes unsafe.
+  cancelPendingSave: () => void;
+}
 
 // Debounced autosave for a single text field. Keeps a local draft, saves it
 // after `delay` ms of inactivity, aborts superseded requests, and adopts new
@@ -9,7 +16,7 @@ export function useAutosave(
   serverValue: string,
   saveFn: (value: string, signal: AbortSignal) => Promise<unknown>,
   delay = 800,
-): [string, (v: string) => void, SaveState] {
+): [string, (v: string) => void, SaveState, AutosaveControls] {
   const [local, setLocal] = useState(serverValue);
   const [state, setState] = useState<SaveState>("idle");
   const lastSaved = useRef(serverValue);
@@ -22,6 +29,18 @@ export function useAutosave(
   const saveFnRef = useRef(saveFn);
   saveFnRef.current = saveFn;
 
+  const cancelPendingSave = useCallback(() => {
+    if (timerRef.current !== undefined) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+    inFlight.current?.abort();
+    inFlight.current = null;
+    // Aborting fetch is best-effort. Invalidate the generation as well so a
+    // save implementation that ignores AbortSignal cannot update hook state.
+    gen.current += 1;
+  }, []);
+
   useEffect(() => {
     if (localRef.current !== lastSaved.current) return;
     if (state === "saving") return;
@@ -32,25 +51,19 @@ export function useAutosave(
     setState("idle");
   }, [serverValue, state]);
 
-  useEffect(
-    () => () => {
-      timerRef.current && clearTimeout(timerRef.current);
-      inFlight.current?.abort();
-    },
-    [],
-  );
+  useEffect(() => () => cancelPendingSave(), [cancelPendingSave]);
 
   function set(next: string) {
     localRef.current = next;
     setLocal(next);
-    if (timerRef.current) clearTimeout(timerRef.current);
+    cancelPendingSave();
     if (next === lastSaved.current) {
       setState("idle");
       return;
     }
     setState("saving");
     timerRef.current = window.setTimeout(async () => {
-      inFlight.current?.abort();
+      timerRef.current = undefined;
       const ctrl = new AbortController();
       inFlight.current = ctrl;
       const g = ++gen.current;
@@ -62,9 +75,11 @@ export function useAutosave(
       } catch {
         if (ctrl.signal.aborted || g !== gen.current) return;
         setState("error");
+      } finally {
+        if (inFlight.current === ctrl) inFlight.current = null;
       }
     }, delay);
   }
 
-  return [local, set, state];
+  return [local, set, state, { cancelPendingSave }];
 }

@@ -85,7 +85,13 @@ describe("projects", () => {
     const patchChapter = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Finished chapter draft.", status: "drafted" }),
+      body: JSON.stringify({
+        draft_md: "Finished chapter draft.",
+        draft_version: 0,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 1,
+        status: "drafted",
+      }),
     });
     expect(patchChapter.status).toBe(200);
 

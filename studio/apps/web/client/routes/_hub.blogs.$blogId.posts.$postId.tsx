@@ -7,6 +7,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Rss } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
+import {
+  DraftConflictError,
+  DraftConflictNotice,
+  getDraftConflictError,
+} from "../components/editor-ai/draft-conflict";
 import { BlogShell } from "../components/studio/BlogShell";
 import { type BlogDetail, type BlogPost, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
@@ -61,6 +67,11 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
   const format = getBlogFormat(blog.format);
   const darkMode = useDarkMode();
   const pendingSave = useRef<number | undefined>(undefined);
+  const draftVersion = useRef(post.draft_version);
+  const draftSequence = useRef(0);
+  const [draftSessionId] = useState(() => crypto.randomUUID());
+  const draftConflict = useRef(false);
+  const [hasDraftConflict, setHasDraftConflict] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
   const gen = useRef(0);
   const hydratedMarkdown = useRef(false);
@@ -75,6 +86,24 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         ? post.draft_json
         : undefined,
   });
+  const [title, setTitle, titleState, titleAutosave] = useAutosave(post.title, (v, sig) =>
+    api.updateBlogPost(blog.id, post.id, { title: v }, { signal: sig }),
+  );
+  const [summary, setSummary, summaryState, summaryAutosave] = useAutosave(post.summary, (v, sig) =>
+    api.updateBlogPost(blog.id, post.id, { summary: v }, { signal: sig }),
+  );
+
+  function enterDraftConflict() {
+    draftConflict.current = true;
+    editor.isEditable = false;
+    titleAutosave.cancelPendingSave();
+    summaryAutosave.cancelPendingSave();
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    setHasDraftConflict(true);
+  }
 
   // Posts drafted before the BlockNote editor only have markdown; hydrate it
   // into blocks once so nothing written in the old plain-text editor is lost.
@@ -88,28 +117,45 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
 
   const saveDraft = useMutation({
     mutationFn: async () => {
+      if (draftConflict.current) throw new DraftConflictError();
       // Serialize the live document and supersede any in-flight save so an
       // older request can't land after (and overwrite) a newer one.
       inFlight.current?.abort();
       const ctrl = new AbortController();
       inFlight.current = ctrl;
       const g = ++gen.current;
+      const sequence = ++draftSequence.current;
       const draftJson = editor.document;
       const draftMd = editor.blocksToMarkdownLossy(editor.document);
+      const expectedDraftVersion = draftVersion.current;
       try {
-        await api.updateBlogPost(
+        const response = await api.updateBlogPost(
           blog.id,
           post.id,
-          { draft_json: draftJson, draft_md: draftMd },
+          {
+            draft_json: draftJson,
+            draft_md: draftMd,
+            draft_version: expectedDraftVersion,
+            draft_session_id: draftSessionId,
+            draft_sequence: sequence,
+          },
           { signal: ctrl.signal },
         );
+        return { draftMd, draftVersion: response.draft_version, superseded: g !== gen.current };
       } catch (err) {
-        if (ctrl.signal.aborted) return { draftMd, superseded: true };
+        if (ctrl.signal.aborted) {
+          return { draftMd, draftVersion: expectedDraftVersion, superseded: true };
+        }
+        const conflictError = getDraftConflictError(err);
+        if (conflictError) {
+          enterDraftConflict();
+          throw conflictError;
+        }
         throw err;
       }
-      return { draftMd, superseded: g !== gen.current };
     },
-    onSuccess: ({ draftMd, superseded }) => {
+    onSuccess: ({ draftMd, draftVersion: savedDraftVersion, superseded }) => {
+      draftVersion.current = Math.max(draftVersion.current, savedDraftVersion);
       if (superseded) return;
       setIsDirty(false);
       setHasDraftContent(draftMd.trim().length > 0);
@@ -120,13 +166,26 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         qc.invalidateQueries({ queryKey: queryKeys.blogPosts(blog.id) });
       }
     },
-    onError: () => setIsDirty(false),
+    onError: (error) => {
+      if (error instanceof DraftConflictError) return;
+      setIsDirty(true);
+    },
   });
+
+  async function saveNow() {
+    if (draftConflict.current) throw new DraftConflictError();
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    return saveDraft.mutateAsync();
+  }
 
   // Flush (not drop) a pending debounced save when the editor unmounts so
   // edits made just before navigating away still land.
   const flushRef = useRef<() => void>(() => {});
   flushRef.current = () => {
+    if (draftConflict.current) return;
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -134,13 +193,6 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
     }
   };
   useEffect(() => () => flushRef.current(), []);
-
-  const [title, setTitle, titleState] = useAutosave(post.title, (v, sig) =>
-    api.updateBlogPost(blog.id, post.id, { title: v }, { signal: sig }),
-  );
-  const [summary, setSummary, summaryState] = useAutosave(post.summary, (v, sig) =>
-    api.updateBlogPost(blog.id, post.id, { summary: v }, { signal: sig }),
-  );
 
   const setStatus = useMutation({
     mutationFn: (status: BlogPost["status"]) => api.updateBlogPost(blog.id, post.id, { status }),
@@ -151,11 +203,12 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
       ]),
   });
 
-  const draftState: SaveState =
-    saveDraft.isPending || isDirty
-      ? "saving"
-      : saveDraft.isError
-        ? "error"
+  const draftState: SaveState = hasDraftConflict
+    ? "error"
+    : saveDraft.isError
+      ? "error"
+      : saveDraft.isPending || isDirty
+        ? "saving"
         : saveDraft.isSuccess
           ? "saved"
           : "idle";
@@ -173,7 +226,16 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <SaveBadge state={saveState} />
+          <SaveBadge
+            state={saveState}
+            onRetry={
+              saveDraft.isError && !hasDraftConflict
+                ? () => {
+                    void saveNow().catch(() => undefined);
+                  }
+                : undefined
+            }
+          />
           {post.status === "published" ? (
             <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-700 text-xs dark:text-emerald-400">
               Published
@@ -181,7 +243,11 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           ) : (
             <button
               className="rounded-full border border-black/10 bg-white/60 px-3 py-1 text-neutral-700 text-xs hover:bg-white/90 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300"
-              disabled={setStatus.isPending || (post.status !== "drafted" && !hasDraftContent)}
+              disabled={
+                hasDraftConflict ||
+                setStatus.isPending ||
+                (post.status !== "drafted" && !hasDraftContent)
+              }
               onClick={() => setStatus.mutate(post.status === "drafted" ? "drafting" : "drafted")}
               type="button"
             >
@@ -191,11 +257,18 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         </div>
       </div>
 
+      {hasDraftConflict ? (
+        <div className="mb-6">
+          <DraftConflictNotice onReload={() => window.location.reload()} />
+        </div>
+      ) : null}
+
       <input
         autoComplete="off"
         className="w-full bg-transparent font-serif text-3xl tracking-tight outline-none placeholder:text-neutral-400"
         id="post-title"
         name="post-title"
+        disabled={hasDraftConflict}
         onChange={(e) => setTitle(e.target.value)}
         placeholder={`Untitled post ${post.ordinal}`}
         value={title}
@@ -206,6 +279,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         className="mt-2 w-full bg-transparent text-neutral-600 text-sm outline-none placeholder:text-neutral-400 dark:text-neutral-400"
         id="post-summary"
         name="post-summary"
+        disabled={hasDraftConflict}
         onChange={(e) => setSummary(e.target.value)}
         placeholder="One-line summary (used as the excerpt when publishing)"
         value={summary}
@@ -236,17 +310,29 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
 
       <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
         <BlockNoteView
+          editable={!hasDraftConflict}
           editor={editor}
+          formattingToolbar={false}
+          slashMenu={false}
           theme={darkMode ? "dark" : "light"}
           onChange={() => {
             setIsDirty(true);
+            if (draftConflict.current) return;
             if (pendingSave.current) window.clearTimeout(pendingSave.current);
             pendingSave.current = window.setTimeout(() => {
               pendingSave.current = undefined;
               saveDraft.mutate();
             }, 1000);
           }}
-        />
+        >
+          <BlockNoteAiCommands
+            disabled={hasDraftConflict}
+            editor={editor}
+            resourceId={post.id}
+            resourceKind="blog-post"
+            saveNow={saveNow}
+          />
+        </BlockNoteView>
       </div>
     </div>
   );
@@ -275,7 +361,7 @@ function worstSaveState(states: SaveState[]): SaveState {
   return "idle";
 }
 
-function SaveBadge({ state }: { state: SaveState }) {
+function SaveBadge({ state, onRetry }: { state: SaveState; onRetry?: () => void }) {
   if (state === "idle") return null;
   const label = state === "saving" ? "Saving…" : state === "saved" ? "Saved" : "Save failed";
   const tone =
@@ -284,5 +370,18 @@ function SaveBadge({ state }: { state: SaveState }) {
       : state === "saved"
         ? "text-emerald-600 dark:text-emerald-400"
         : "text-neutral-500";
-  return <span className={`text-xs ${tone}`}>{label}</span>;
+  return (
+    <span className={`flex items-center gap-2 text-xs ${tone}`}>
+      <span>{label}</span>
+      {state === "error" && onRetry ? (
+        <button
+          className="rounded-full border border-current/30 px-2 py-0.5 font-medium hover:bg-current/10"
+          onClick={onRetry}
+          type="button"
+        >
+          Retry save
+        </button>
+      ) : null}
+    </span>
+  );
 }

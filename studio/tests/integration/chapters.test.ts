@@ -53,6 +53,13 @@ describe("chapters", () => {
     const sections = (await sectionRes.json()) as any;
     expect(sections.items.length).toBeGreaterThan(0);
 
+    const unversionedDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Missing its write order." }),
+    });
+    expect(unversionedDraft.status).toBe(400);
+
     const draftSection = await SELF.fetch(
       `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[0].id}/draft`,
       { method: "POST", headers },
@@ -63,12 +70,28 @@ describe("chapters", () => {
     expect(sectionDraft.section.draft_md).toContain("concrete moment");
     expect(sectionDraft.revision.after_md).toContain("concrete moment");
 
+    const draftSessionId = crypto.randomUUID();
+    const malformedDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        draft_json: [{ content: "A block without a type must not be stored." }],
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
+      }),
+    });
+    expect(malformedDraft.status).toBe(400);
+
     const patch = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify({
         draft_json: [{ type: "paragraph", content: "A saved chapter draft." }],
         draft_md: "A saved chapter draft.",
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
         status: "drafting",
       }),
     });
@@ -78,7 +101,36 @@ describe("chapters", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const chapter = (await get.json()) as any;
     expect(chapter.draft_md).toContain("saved chapter");
+    expect(chapter.draft_version).toBe(1);
     expect(chapter.status).toBe("drafting");
+
+    const newerDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        draft_md: "The newest chapter draft.",
+        draft_version: 1,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
+      }),
+    });
+    expect(newerDraft.status).toBe(200);
+    const staleDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        draft_md: "A delayed older draft.",
+        draft_version: 1,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 99,
+      }),
+    });
+    expect(staleDraft.status).toBe(409);
+    const afterStale = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterStaleBody = (await afterStale.json()) as any;
+    expect(afterStaleBody.draft_md).toBe("The newest chapter draft.");
+    expect(afterStaleBody.draft_version).toBe(2);
 
     const additiveDraft = await SELF.fetch(
       `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,
@@ -119,5 +171,35 @@ describe("chapters", () => {
     const inline = (await revise.json()) as any;
     expect(inline.revision.before_md).toContain("selected sentence");
     expect(inline.revision.after_md).toContain("Tightened:");
+
+    const revisions = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}/revisions`, {
+      headers,
+    });
+    expect(revisions.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const revisionBody = (await revisions.json()) as any;
+    expect(revisionBody.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target_table: "sections" }),
+        expect.objectContaining({
+          id: inline.revision.id,
+          target_table: "chapters",
+          target_id: chapterId,
+        }),
+      ]),
+    );
+    const sortedRevisionIds = [...revisionBody.items]
+      .sort((left, right) => left.created_at - right.created_at || left.id.localeCompare(right.id))
+      .map((revision) => revision.id);
+    expect(revisionBody.items.map((revision: { id: string }) => revision.id)).toEqual(
+      sortedRevisionIds,
+    );
+
+    const otherCookie = await signUp();
+    const unauthorizedRevisions = await SELF.fetch(
+      `http://x/api/v1/chapters/${chapterId}/revisions`,
+      { headers: { cookie: otherCookie } },
+    );
+    expect(unauthorizedRevisions.status).toBe(404);
   });
 });

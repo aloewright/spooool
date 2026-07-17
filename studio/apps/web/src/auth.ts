@@ -73,16 +73,18 @@ export function createAuth(env: Env, authBase?: { origin: string; prefix: string
     },
     user: {
       additionalFields: {
-        plan: { type: "string", required: false, defaultValue: "pro" },
+        plan: { type: "string", required: false, defaultValue: "pro", input: false },
         phase: {
           type: "string",
           required: false,
           defaultValue: "chassis",
+          input: false,
         },
         daily_budget_cents: {
           type: "number",
           required: false,
           defaultValue: 5000,
+          input: false,
         },
       },
     },

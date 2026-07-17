@@ -13,6 +13,8 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             KEYRING_MASTER_KEY: "test-keyring-master-key",
+            AI_GATEWAY_BASE_URL: "",
+            AI_GATEWAY_TOKEN: "",
           },
         },
       }),

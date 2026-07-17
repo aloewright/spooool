@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import React, { act } from 'react';
 import ReactDOM from 'react-dom/client';
-import { act } from 'react-dom/test-utils';
 import { MemoryRouter } from 'react-router-dom';
 import App from './App';
 import { BRAND_SPLASH_TIMINGS } from './components/BrandSplash';
@@ -18,9 +18,11 @@ function mountAt(pathname: string): void {
   root = ReactDOM.createRoot(container);
   act(() => {
     root!.render(
-      <MemoryRouter initialEntries={[pathname]}>
-        <App />
-      </MemoryRouter>,
+      <React.StrictMode>
+        <MemoryRouter initialEntries={[pathname]}>
+          <App />
+        </MemoryRouter>
+      </React.StrictMode>,
     );
   });
 }

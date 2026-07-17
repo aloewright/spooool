@@ -153,13 +153,7 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
 
 export function useBrandSplash(pathname: string): { show: boolean; dismiss: () => void } {
   const hasClaimedVisit = useRef(false);
-  const [show, setShow] = useState(() => {
-    if (pathname !== '/') return false;
-    hasClaimedVisit.current = true;
-    if (splashWasSeen()) return false;
-    markSplashSeen();
-    return true;
-  });
+  const [show, setShow] = useState(() => pathname === '/' && !splashWasSeen());
 
   useEffect(() => {
     if (pathname !== '/') {
@@ -168,7 +162,10 @@ export function useBrandSplash(pathname: string): { show: boolean; dismiss: () =
     }
     if (hasClaimedVisit.current) return;
     hasClaimedVisit.current = true;
-    if (splashWasSeen()) return;
+    if (splashWasSeen()) {
+      setShow(false);
+      return;
+    }
     markSplashSeen();
     setShow(true);
   }, [pathname]);

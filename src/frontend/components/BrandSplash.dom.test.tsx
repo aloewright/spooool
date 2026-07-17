@@ -149,6 +149,16 @@ function HookHarness({
 }
 
 describe('useBrandSplash', () => {
+  it('keeps an unseen home visit visible in StrictMode and marks it seen', () => {
+    mount(
+      <React.StrictMode>
+        <HookHarness pathname="/" onChange={vi.fn()} />
+      </React.StrictMode>,
+    );
+    expect(container!.textContent).toBe('true');
+    expect(window.sessionStorage.getItem('splash:seen')).toBe('1');
+  });
+
   it('only shows once on home and marks it seen', () => {
     const first = vi.fn();
     mount(<HookHarness pathname="/" onChange={first} />);

@@ -101,6 +101,7 @@ describe("scripts", () => {
     expect(replanTooFew.status).toBe(400);
 
     const sceneId = scenesBody.items[0].id;
+    const sceneDraftSessionId = crypto.randomUUID();
     const draftJson = [{ type: "paragraph", content: "INT. TOWER — NIGHT" }];
     const unversionedDraft = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
       method: "PATCH",
@@ -115,7 +116,9 @@ describe("scripts", () => {
         title: "Storm Watch",
         draft_json: draftJson,
         draft_md: "INT. TOWER — NIGHT",
-        draft_version: 1,
+        draft_version: 0,
+        draft_session_id: sceneDraftSessionId,
+        draft_sequence: 1,
         status: "drafted",
       }),
     });
@@ -151,10 +154,16 @@ describe("scripts", () => {
 
     // First draft content promotes a planned scene to drafting server-side…
     const secondSceneId = scenesBody.items[1].id;
+    const secondSceneDraftSessionId = crypto.randomUUID();
     await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line.", draft_version: 1 }),
+      body: JSON.stringify({
+        draft_md: "Opening line.",
+        draft_version: 0,
+        draft_session_id: secondSceneDraftSessionId,
+        draft_sequence: 1,
+      }),
     });
     const promoted = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       headers,
@@ -171,7 +180,12 @@ describe("scripts", () => {
     await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line, revised.", draft_version: 2 }),
+      body: JSON.stringify({
+        draft_md: "Opening line, revised.",
+        draft_version: 1,
+        draft_session_id: secondSceneDraftSessionId,
+        draft_sequence: 2,
+      }),
     });
     const stillDrafted = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       headers,
@@ -182,7 +196,12 @@ describe("scripts", () => {
     const staleDraft = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Delayed old line.", draft_version: 1 }),
+      body: JSON.stringify({
+        draft_md: "Delayed old line.",
+        draft_version: 1,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 99,
+      }),
     });
     expect(staleDraft.status).toBe(409);
     const afterStale = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${secondSceneId}`, {

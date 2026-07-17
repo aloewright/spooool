@@ -195,6 +195,8 @@ export const blog_posts = sqliteTable(
     draft_json: text("draft_json", { mode: "json" }),
     draft_md: text("draft_md").notNull().default(""),
     draft_version: integer("draft_version").notNull().default(0),
+    draft_session_id: text("draft_session_id"),
+    draft_sequence: integer("draft_sequence").notNull().default(0),
     status: text("status", {
       enum: ["planned", "drafting", "drafted", "published"],
     })
@@ -248,6 +250,8 @@ export const script_scenes = sqliteTable(
     draft_json: text("draft_json", { mode: "json" }),
     draft_md: text("draft_md").notNull().default(""),
     draft_version: integer("draft_version").notNull().default(0),
+    draft_session_id: text("draft_session_id"),
+    draft_sequence: integer("draft_sequence").notNull().default(0),
     status: text("status", {
       enum: ["planned", "drafting", "drafted"],
     })
@@ -290,6 +294,8 @@ export const chapters = sqliteTable(
     draft_json: text("draft_json", { mode: "json" }),
     draft_md: text("draft_md").notNull().default(""),
     draft_version: integer("draft_version").notNull().default(0),
+    draft_session_id: text("draft_session_id"),
+    draft_sequence: integer("draft_sequence").notNull().default(0),
     created_at: ts("created_at").default(sql`(unixepoch())`),
     updated_at: ts("updated_at").default(sql`(unixepoch())`),
   },

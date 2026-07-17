@@ -92,6 +92,7 @@ describe("blogs", () => {
     expect(replanTooFew.status).toBe(400);
 
     const postId = postsBody.items[0].id;
+    const postDraftSessionId = crypto.randomUUID();
     const draftJson = [{ type: "paragraph", content: "Step one." }];
     const unversionedDraft = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
       method: "PATCH",
@@ -106,7 +107,9 @@ describe("blogs", () => {
         title: "Ship it",
         draft_json: draftJson,
         draft_md: "Step one.",
-        draft_version: 1,
+        draft_version: 0,
+        draft_session_id: postDraftSessionId,
+        draft_sequence: 1,
         status: "drafted",
       }),
     });
@@ -140,10 +143,16 @@ describe("blogs", () => {
 
     // First draft content promotes a planned post to drafting server-side…
     const secondPostId = postsBody.items[1].id;
+    const secondPostDraftSessionId = crypto.randomUUID();
     await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line.", draft_version: 1 }),
+      body: JSON.stringify({
+        draft_md: "Opening line.",
+        draft_version: 0,
+        draft_session_id: secondPostDraftSessionId,
+        draft_sequence: 1,
+      }),
     });
     const promoted = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       headers,
@@ -160,7 +169,12 @@ describe("blogs", () => {
     await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line, revised.", draft_version: 2 }),
+      body: JSON.stringify({
+        draft_md: "Opening line, revised.",
+        draft_version: 1,
+        draft_session_id: secondPostDraftSessionId,
+        draft_sequence: 2,
+      }),
     });
     const stillDrafted = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       headers,
@@ -171,7 +185,12 @@ describe("blogs", () => {
     const staleDraft = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Delayed old line.", draft_version: 1 }),
+      body: JSON.stringify({
+        draft_md: "Delayed old line.",
+        draft_version: 1,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 99,
+      }),
     });
     expect(staleDraft.status).toBe(409);
     const afterStale = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${secondPostId}`, {

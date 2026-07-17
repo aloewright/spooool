@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -15,6 +15,8 @@ const patchChapterSchema = z.object({
   draft_json: z.unknown().optional(),
   draft_md: z.string().max(2_000_000).optional(),
   draft_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  draft_session_id: z.string().uuid().optional(),
+  draft_sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   status: z.enum(["pending", "drafting", "drafted", "approved"]).optional(),
 });
 
@@ -150,51 +152,55 @@ chaptersRoute.post("/:id/sections/reorder", async (c) => {
   return c.json({ ok: true });
 });
 
-chaptersRoute.post("/:id/revise", enforceBudget("chapter-inline-revise"), async (c) => {
-  const user = c.get("user");
-  const id = c.req.param("id");
-  const body = reviseInlineSchema.parse(await c.req.json());
-  const db = drizzle(c.env.DB);
-  const [row] = await db
-    .select({ chapter: chapters, project: projects, voice: voices })
-    .from(chapters)
-    .innerJoin(projects, eq(chapters.project_id, projects.id))
-    .leftJoin(voices, eq(projects.voice_id, voices.id))
-    .where(and(eq(chapters.id, id), eq(projects.user_id, user.id), isNull(projects.deleted_at)))
-    .limit(1);
-  if (!row) return c.json({ error: "not found" }, 404);
+chaptersRoute.post(
+  "/:id/revise",
+  enforceBudget("chapter-inline-revise", { allowLocalFallback: true }),
+  async (c) => {
+    const user = c.get("user");
+    const id = c.req.param("id");
+    const body = reviseInlineSchema.parse(await c.req.json());
+    const db = drizzle(c.env.DB);
+    const [row] = await db
+      .select({ chapter: chapters, project: projects, voice: voices })
+      .from(chapters)
+      .innerJoin(projects, eq(chapters.project_id, projects.id))
+      .leftJoin(voices, eq(projects.voice_id, voices.id))
+      .where(and(eq(chapters.id, id), eq(projects.user_id, user.id), isNull(projects.deleted_at)))
+      .limit(1);
+    if (!row) return c.json({ error: "not found" }, 404);
 
-  const result = await reviseInlineText(c.env, {
-    action: body.action,
-    tone: body.tone,
-    text: body.text,
-    contextMd: body.context_md,
-    chapterTitle: row.chapter.title,
-    chapterSummary: row.chapter.summary,
-    voiceProfile: row.voice?.profile_json,
-  });
-  const revisionId = crypto.randomUUID();
-  await db.insert(revisions).values({
-    id: revisionId,
-    target_table: "chapters",
-    target_id: id,
-    before_md: body.text,
-    after_md: result.markdown,
-    llm_response: result.llm_response,
-  });
-  await recordUsage(c.env.KV, user.id, aiUsageCostCents(result.llm_response));
-
-  return c.json({
-    revision: {
+    const result = await reviseInlineText(c.env, {
+      action: body.action,
+      tone: body.tone,
+      text: body.text,
+      contextMd: body.context_md,
+      chapterTitle: row.chapter.title,
+      chapterSummary: row.chapter.summary,
+      voiceProfile: row.voice?.profile_json,
+    });
+    const revisionId = crypto.randomUUID();
+    await recordUsage(c.env.KV, user.id, aiUsageCostCents(result.llm_response));
+    await db.insert(revisions).values({
       id: revisionId,
       target_table: "chapters",
       target_id: id,
       before_md: body.text,
       after_md: result.markdown,
       llm_response: result.llm_response,
-    },
-  });
-});
+    });
+
+    return c.json({
+      revision: {
+        id: revisionId,
+        target_table: "chapters",
+        target_id: id,
+        before_md: body.text,
+        after_md: result.markdown,
+        llm_response: result.llm_response,
+      },
+    });
+  },
+);
 
 chaptersRoute.post("/:id/sections/:sectionId/draft", async (c) => {
   const user = c.get("user");
@@ -382,11 +388,21 @@ chaptersRoute.patch("/:id", async (c) => {
   if (!row) return c.json({ error: "not found" }, 404);
 
   const hasDraftUpdate = body.draft_json !== undefined || body.draft_md !== undefined;
-  if (hasDraftUpdate && body.draft_version === undefined) {
-    return c.json({ error: "draft_version is required for draft updates" }, 400);
+  if (
+    hasDraftUpdate &&
+    (body.draft_version === undefined ||
+      body.draft_session_id === undefined ||
+      body.draft_sequence === undefined)
+  ) {
+    return c.json({ error: "draft concurrency fields are required for draft updates" }, 400);
   }
 
-  const { draft_version: draftVersion, ...patch } = body;
+  const {
+    draft_version: expectedDraftVersion,
+    draft_session_id: draftSessionId,
+    draft_sequence: draftSequence,
+    ...patch
+  } = body;
   if (!hasDraftUpdate) {
     await db
       .update(chapters)
@@ -397,8 +413,31 @@ chaptersRoute.patch("/:id", async (c) => {
 
   const [updated] = await db
     .update(chapters)
-    .set({ ...patch, draft_version: draftVersion, updated_at: new Date() })
-    .where(and(eq(chapters.id, id), lt(chapters.draft_version, draftVersion as number)))
+    .set({
+      ...patch,
+      draft_version: sql`${chapters.draft_version} + 1`,
+      draft_session_id: draftSessionId,
+      draft_sequence: draftSequence,
+      updated_at: new Date(),
+    })
+    .where(
+      and(
+        eq(chapters.id, id),
+        or(
+          and(
+            eq(chapters.draft_session_id, draftSessionId as string),
+            lt(chapters.draft_sequence, draftSequence as number),
+          ),
+          and(
+            or(
+              isNull(chapters.draft_session_id),
+              ne(chapters.draft_session_id, draftSessionId as string),
+            ),
+            eq(chapters.draft_version, expectedDraftVersion as number),
+          ),
+        ),
+      ),
+    )
     .returning({ draft_version: chapters.draft_version });
   if (!updated) {
     const [current] = await db

@@ -239,10 +239,15 @@ async function requestDraftPatch(
 
 async function draftState(resourceKind: ResourceKind, resourceId: string) {
   return env.DB.prepare(
-    `SELECT draft_md, draft_version FROM ${draftTable(resourceKind)} WHERE id = ?`,
+    `SELECT draft_md, draft_version, draft_session_id, draft_sequence FROM ${draftTable(resourceKind)} WHERE id = ?`,
   )
     .bind(resourceId)
-    .first<{ draft_md: string; draft_version: number }>();
+    .first<{
+      draft_md: string;
+      draft_version: number;
+      draft_session_id: string | null;
+      draft_sequence: number;
+    }>();
 }
 
 function streamedBody(value: string): ReadableStream<Uint8Array> {
@@ -409,6 +414,42 @@ describe("editor AI", () => {
     ).toBeNull();
   });
 
+  it("does not charge the editor route when gateway configuration is missing", async () => {
+    const fixture = await createFixture();
+    const resourceId = fixture.resourceIds.chapter;
+    mutableEnv.AI_GATEWAY_BASE_URL = "";
+    mutableEnv.AI_GATEWAY_TOKEN = "";
+
+    const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
+
+    expect(response.status).toBe(500);
+    expect(gatewayCalls).toBe(0);
+    expect(await revisionFor(resourceId)).toBeNull();
+    expect(await env.KV.get(`budget:${fixture.userId}:${todayIso()}`)).toBeNull();
+  });
+
+  it("records hosted usage even when revision persistence fails afterward", async () => {
+    const fixture = await createFixture();
+    const resourceId = fixture.resourceIds.chapter;
+    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
+    await env.DB.prepare(`
+      CREATE TRIGGER fail_editor_ai_revision
+      BEFORE INSERT ON revisions
+      BEGIN
+        SELECT RAISE(ABORT, 'revision persistence failed');
+      END
+    `).run();
+
+    try {
+      const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
+      expect(response.status).toBe(500);
+      expect(await env.KV.get(budgetKey)).toBe("1");
+      expect(await revisionFor(resourceId)).toBeNull();
+    } finally {
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_editor_ai_revision").run();
+    }
+  });
+
   it("records successful token usage and rejects the next call at the free-plan cap", async () => {
     const fixture = await createFixture("free");
     const budgetKey = `budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`;
@@ -494,6 +535,31 @@ describe("editor AI", () => {
     expect(await revisionFor(resourceId)).toBeNull();
   });
 
+  it("allows an exhausted user to use the zero-cost local chapter revision fallback", async () => {
+    const fixture = await createFixture("free");
+    const resourceId = fixture.resourceIds.chapter;
+    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
+    await env.KV.put(budgetKey, "1000");
+    mutableEnv.AI_GATEWAY_BASE_URL = "";
+    mutableEnv.AI_GATEWAY_TOKEN = "";
+
+    const response = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
+      body: JSON.stringify({
+        action: "fix-grammar",
+        text: "This are selected prose.",
+        context_md: "This are selected prose.",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as RevisionResponse;
+    expect(body.revision.llm_response.route).toBe("deterministic/local");
+    expect(await env.KV.get(budgetKey)).toBe("1000");
+    expect(gatewayCalls).toBe(0);
+  });
+
   it("records editor-ai usage after a successful request and blocks the next call at cap", async () => {
     const fixture = await createFixture("free");
     const resourceId = fixture.resourceIds.chapter;
@@ -550,7 +616,7 @@ describe("editor AI", () => {
   });
 
   it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
-    "rejects draft saves without a draft_version for %s",
+    "rejects draft saves without concurrency fields for %s",
     async (resourceKind) => {
       const fixture = await createFixture();
       const response = await requestDraftPatch(fixture, resourceKind, {
@@ -562,30 +628,119 @@ describe("editor AI", () => {
   );
 
   it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
-    "rejects stale out-of-order draft saves for %s",
+    "keeps same-session sequence 2 when it arrives before sequence 1 for %s",
     async (resourceKind) => {
       const fixture = await createFixture();
       const resourceId = fixture.resourceIds[resourceKind];
+      const draftSessionId = crypto.randomUUID();
 
       const newest = await requestDraftPatch(fixture, resourceKind, {
         draft_md: "Newest draft wins.",
-        draft_version: 2,
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
       });
       expect(newest.status).toBe(200);
+      await expect(newest.json()).resolves.toMatchObject({ draft_version: 1 });
 
       const stale = await requestDraftPatch(fixture, resourceKind, {
         draft_md: "Older draft should be rejected.",
+        // Even knowing the fresh server version must not let an older
+        // same-session sequence roll the draft back.
         draft_version: 1,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
       });
       expect(stale.status).toBe(409);
       await expect(stale.json()).resolves.toMatchObject({
         error: "stale draft",
-        draft_version: 2,
+        draft_version: 1,
       });
 
       await expect(draftState(resourceKind, resourceId)).resolves.toEqual({
         draft_md: "Newest draft wins.",
+        draft_version: 1,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
+      });
+    },
+  );
+
+  it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
+    "accepts same-session sequences 1 then 2 from the same expected base for %s",
+    async (resourceKind) => {
+      const fixture = await createFixture();
+      const resourceId = fixture.resourceIds[resourceKind];
+      const draftSessionId = crypto.randomUUID();
+
+      const first = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "First draft.",
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
+      });
+      expect(first.status).toBe(200);
+      await expect(first.json()).resolves.toMatchObject({ draft_version: 1 });
+
+      const second = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Second draft wins.",
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
+      });
+      expect(second.status).toBe(200);
+      await expect(second.json()).resolves.toMatchObject({ draft_version: 2 });
+
+      await expect(draftState(resourceKind, resourceId)).resolves.toEqual({
+        draft_md: "Second draft wins.",
         draft_version: 2,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
+      });
+    },
+  );
+
+  it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(
+    "rejects a different stale session even with a high sequence for %s",
+    async (resourceKind) => {
+      const fixture = await createFixture();
+      const resourceId = fixture.resourceIds[resourceKind];
+      const currentSessionId = crypto.randomUUID();
+
+      const current = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Current session draft.",
+        draft_version: 0,
+        draft_session_id: currentSessionId,
+        draft_sequence: 1,
+      });
+      expect(current.status).toBe(200);
+
+      const staleSessionId = crypto.randomUUID();
+      const stale = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Stale other-tab draft.",
+        draft_version: 0,
+        draft_session_id: staleSessionId,
+        draft_sequence: 99_999,
+      });
+      expect(stale.status).toBe(409);
+      await expect(stale.json()).resolves.toMatchObject({
+        error: "stale draft",
+        draft_version: 1,
+      });
+
+      const repeatedStale = await requestDraftPatch(fixture, resourceKind, {
+        draft_md: "Stale tab retries with a higher sequence.",
+        draft_version: 0,
+        draft_session_id: staleSessionId,
+        draft_sequence: 100_000,
+      });
+      expect(repeatedStale.status).toBe(409);
+
+      await expect(draftState(resourceKind, resourceId)).resolves.toEqual({
+        draft_md: "Current session draft.",
+        draft_version: 1,
+        draft_session_id: currentSessionId,
+        draft_sequence: 1,
       });
     },
   );

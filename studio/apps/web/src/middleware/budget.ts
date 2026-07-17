@@ -6,12 +6,17 @@ import type { AuthVariables } from "./auth";
 export const enforceBudget =
   (
     _route: string,
+    options: { allowLocalFallback?: boolean } = {},
   ): MiddlewareHandler<{
     Bindings: Env;
     Variables: AuthVariables;
   }> =>
   async (c, next) => {
     const user = c.get("user");
+    if (options.allowLocalFallback && (!c.env.AI_GATEWAY_BASE_URL || !c.env.AI_GATEWAY_TOKEN)) {
+      await next();
+      return;
+    }
     // For now use a fixed cap from env defaults; per-user override comes in a later phase.
     const cap = user.plan === "pro" ? 5000 : 1000;
     await assertBudget(c.env.KV, user.id, cap);

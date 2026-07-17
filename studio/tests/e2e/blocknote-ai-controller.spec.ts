@@ -318,7 +318,12 @@ async function createBlogFixture(page: Page): Promise<{
 
   const patchPath = `/api/v1/blogs/${blogId}/posts/${postId}`;
   const seeded = await page.request.patch(patchPath, {
-    data: { draft_md: initialDraft, draft_version: 1 },
+    data: {
+      draft_md: initialDraft,
+      draft_version: 0,
+      draft_session_id: crypto.randomUUID(),
+      draft_sequence: 1,
+    },
   });
   expect(seeded.ok()).toBe(true);
 

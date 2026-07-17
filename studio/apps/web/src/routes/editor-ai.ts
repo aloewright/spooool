@@ -192,6 +192,7 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
     after_md: result.markdown,
     llm_response: result.llm_response,
   };
+  await recordUsage(c.env.KV, c.get("user").id, aiUsageCostCents(result.llm_response));
   await db.insert(revisions).values({
     id: revision.id,
     target_table: resolved.targetTable,
@@ -200,7 +201,6 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
     after_md: revision.after_md,
     llm_response: revision.llm_response,
   });
-  await recordUsage(c.env.KV, c.get("user").id, aiUsageCostCents(result.llm_response));
 
   return c.json({ revision });
 });

@@ -118,6 +118,8 @@ export type BlogPost = {
   draft_json?: unknown;
   draft_md: string;
   draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   status: "planned" | "drafting" | "drafted" | "published";
   emdash_post_id?: string | null;
   published_at?: number | null;
@@ -150,6 +152,8 @@ export type ScriptScene = {
   draft_json?: unknown;
   draft_md: string;
   draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   status: "planned" | "drafting" | "drafted";
   created_at: number;
   updated_at: number;
@@ -217,6 +221,8 @@ export type Chapter = {
   draft_json?: unknown;
   draft_md: string;
   draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   created_at: number;
   updated_at: number;
 };
@@ -566,6 +572,8 @@ export const api = {
       draft_json?: unknown;
       draft_md?: string;
       draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: BlogPost["status"];
     },
     options?: { signal?: AbortSignal },
@@ -615,6 +623,8 @@ export const api = {
       draft_json?: unknown;
       draft_md?: string;
       draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: ScriptScene["status"];
     },
     options?: { signal?: AbortSignal },
@@ -750,6 +760,8 @@ export const api = {
       draft_json?: unknown;
       draft_md?: string;
       draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: Chapter["status"];
     },
     options?: { signal?: AbortSignal },

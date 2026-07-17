@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -50,6 +50,8 @@ const patchPostSchema = z.object({
     .optional(),
   draft_md: z.string().max(200_000).optional(),
   draft_version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
+  draft_session_id: z.string().uuid().optional(),
+  draft_sequence: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   status: z.enum(["planned", "drafting", "drafted"]).optional(),
 });
 
@@ -302,14 +304,24 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
   if (!post) return c.json({ error: "post not found" }, 404);
 
   const hasDraftUpdate = body.draft_json !== undefined || body.draft_md !== undefined;
-  if (hasDraftUpdate && body.draft_version === undefined) {
-    return c.json({ error: "draft_version is required for draft updates" }, 400);
+  if (
+    hasDraftUpdate &&
+    (body.draft_version === undefined ||
+      body.draft_session_id === undefined ||
+      body.draft_sequence === undefined)
+  ) {
+    return c.json({ error: "draft concurrency fields are required for draft updates" }, 400);
   }
 
   // First draft content promotes a planned post to drafting. Done here (not
   // in the client autosave) so a delayed save can never downgrade a status
   // the user set explicitly in the meantime.
-  const { draft_version: draftVersion, ...patch } = body;
+  const {
+    draft_version: expectedDraftVersion,
+    draft_session_id: draftSessionId,
+    draft_sequence: draftSequence,
+    ...patch
+  } = body;
   const values = { ...patch, updated_at: new Date() };
   if (
     values.status === undefined &&
@@ -327,8 +339,30 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
 
   const [updated] = await db
     .update(blog_posts)
-    .set({ ...values, draft_version: draftVersion })
-    .where(and(eq(blog_posts.id, postId), lt(blog_posts.draft_version, draftVersion as number)))
+    .set({
+      ...values,
+      draft_version: sql`${blog_posts.draft_version} + 1`,
+      draft_session_id: draftSessionId,
+      draft_sequence: draftSequence,
+    })
+    .where(
+      and(
+        eq(blog_posts.id, postId),
+        or(
+          and(
+            eq(blog_posts.draft_session_id, draftSessionId as string),
+            lt(blog_posts.draft_sequence, draftSequence as number),
+          ),
+          and(
+            or(
+              isNull(blog_posts.draft_session_id),
+              ne(blog_posts.draft_session_id, draftSessionId as string),
+            ),
+            eq(blog_posts.draft_version, expectedDraftVersion as number),
+          ),
+        ),
+      ),
+    )
     .returning({ draft_version: blog_posts.draft_version });
   if (!updated) {
     const [current] = await db

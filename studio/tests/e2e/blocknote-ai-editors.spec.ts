@@ -137,12 +137,19 @@ for (const editorSetup of editorSetups) {
     await selectionReview.getByRole("button", { name: "Apply", exact: true }).click();
 
     const patchRequest = await failedPatch;
-    const patchBody = patchRequest.postDataJSON() as { draft_md: string; draft_version: number };
+    const patchBody = patchRequest.postDataJSON() as {
+      draft_md: string;
+      draft_version: number;
+      draft_session_id: string;
+      draft_sequence: number;
+    };
     expect(patchBody.draft_md).toContain("Opening line.");
     expect(patchBody.draft_md).toContain(replacementDraft);
     expect(patchBody.draft_md).toContain("Closing line.");
     expect(patchBody.draft_md).not.toContain(selectedDraft);
     expect(patchBody.draft_version).toBeGreaterThan(0);
+    expect(patchBody.draft_session_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(patchBody.draft_sequence).toBeGreaterThan(0);
     expect((await patchRequest.response())?.status()).toBe(500);
     await expect(editor).toContainText(`Opening line. ${replacementDraft} Closing line.`);
     await expect(editor).not.toContainText(selectedDraft);
@@ -207,7 +214,12 @@ async function createBlogPost(page: Page): Promise<EditorFixture> {
 
   const patchPath = `/api/v1/blogs/${blogId}/posts/${postId}`;
   const seeded = await page.request.patch(patchPath, {
-    data: { draft_md: initialDraft, draft_version: 1 },
+    data: {
+      draft_md: initialDraft,
+      draft_version: 0,
+      draft_session_id: crypto.randomUUID(),
+      draft_sequence: 1,
+    },
   });
   expect(seeded.ok()).toBe(true);
 
@@ -243,7 +255,12 @@ async function createScriptScene(page: Page): Promise<EditorFixture> {
 
   const patchPath = `/api/v1/scripts/${scriptId}/scenes/${sceneId}`;
   const seeded = await page.request.patch(patchPath, {
-    data: { draft_md: initialDraft, draft_version: 1 },
+    data: {
+      draft_md: initialDraft,
+      draft_version: 0,
+      draft_session_id: crypto.randomUUID(),
+      draft_sequence: 1,
+    },
   });
   expect(seeded.ok()).toBe(true);
 

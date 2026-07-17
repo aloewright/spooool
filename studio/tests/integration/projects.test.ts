@@ -87,7 +87,9 @@ describe("projects", () => {
       headers,
       body: JSON.stringify({
         draft_md: "Finished chapter draft.",
-        draft_version: 1,
+        draft_version: 0,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 1,
         status: "drafted",
       }),
     });

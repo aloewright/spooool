@@ -70,13 +70,16 @@ describe("chapters", () => {
     expect(sectionDraft.section.draft_md).toContain("concrete moment");
     expect(sectionDraft.revision.after_md).toContain("concrete moment");
 
+    const draftSessionId = crypto.randomUUID();
     const patch = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify({
         draft_json: [{ type: "paragraph", content: "A saved chapter draft." }],
         draft_md: "A saved chapter draft.",
-        draft_version: 1,
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
         status: "drafting",
       }),
     });
@@ -92,20 +95,30 @@ describe("chapters", () => {
     const newerDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "The newest chapter draft.", draft_version: 3 }),
+      body: JSON.stringify({
+        draft_md: "The newest chapter draft.",
+        draft_version: 1,
+        draft_session_id: draftSessionId,
+        draft_sequence: 2,
+      }),
     });
     expect(newerDraft.status).toBe(200);
     const staleDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "A delayed older draft.", draft_version: 2 }),
+      body: JSON.stringify({
+        draft_md: "A delayed older draft.",
+        draft_version: 1,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 99,
+      }),
     });
     expect(staleDraft.status).toBe(409);
     const afterStale = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, { headers });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const afterStaleBody = (await afterStale.json()) as any;
     expect(afterStaleBody.draft_md).toBe("The newest chapter draft.");
-    expect(afterStaleBody.draft_version).toBe(3);
+    expect(afterStaleBody.draft_version).toBe(2);
 
     const additiveDraft = await SELF.fetch(
       `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,

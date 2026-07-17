@@ -152,6 +152,9 @@ describe("editor command prompts", () => {
     expect(prompt).toContain(
       `Author instructions: ${instructions.slice(0, EDITOR_AI_INSTRUCTIONS_MAX_LENGTH)}`,
     );
+    expect(prompt).toContain(
+      `Voice profile JSON: ${JSON.stringify(voiceProfile).slice(0, EDITOR_AI_VOICE_PROFILE_MAX_LENGTH)}`,
+    );
     expect(prompt).not.toContain("__blog-title_tail__");
     expect(prompt).not.toContain("__blog-description_tail__");
     expect(prompt).not.toContain("__post-title_tail__");

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Rss } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
 import { BlogShell } from "../components/studio/BlogShell";
 import { type BlogDetail, type BlogPost, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
@@ -123,6 +124,14 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
     onError: () => setIsDirty(false),
   });
 
+  async function saveNow() {
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    return saveDraft.mutateAsync();
+  }
+
   // Flush (not drop) a pending debounced save when the editor unmounts so
   // edits made just before navigating away still land.
   const flushRef = useRef<() => void>(() => {});
@@ -237,6 +246,8 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
       <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
         <BlockNoteView
           editor={editor}
+          formattingToolbar={false}
+          slashMenu={false}
           theme={darkMode ? "dark" : "light"}
           onChange={() => {
             setIsDirty(true);
@@ -246,7 +257,14 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
               saveDraft.mutate();
             }, 1000);
           }}
-        />
+        >
+          <BlockNoteAiCommands
+            editor={editor}
+            resourceId={post.id}
+            resourceKind="blog-post"
+            saveNow={saveNow}
+          />
+        </BlockNoteView>
       </div>
     </div>
   );

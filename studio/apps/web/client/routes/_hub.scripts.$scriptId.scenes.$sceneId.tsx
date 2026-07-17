@@ -8,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import { Clapperboard } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
 import { ScriptShell } from "../components/studio/ScriptShell";
 import { type Script, type ScriptScene, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
@@ -159,6 +160,14 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
     onError: () => setIsDirty(false),
   });
 
+  async function saveNow() {
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    return saveDraft.mutateAsync();
+  }
+
   // Flush (not drop) a pending debounced save when the editor unmounts so
   // edits made just before navigating away still land.
   const flushRef = useRef<() => void>(() => {});
@@ -250,6 +259,8 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
       <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
         <BlockNoteView
           editor={editor}
+          formattingToolbar={false}
+          slashMenu={false}
           theme={darkMode ? "dark" : "light"}
           onChange={() => {
             setIsDirty(true);
@@ -259,7 +270,14 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
               saveDraft.mutate();
             }, 1000);
           }}
-        />
+        >
+          <BlockNoteAiCommands
+            editor={editor}
+            resourceId={scene.id}
+            resourceKind="script-scene"
+            saveNow={saveNow}
+          />
+        </BlockNoteView>
       </div>
     </div>
   );

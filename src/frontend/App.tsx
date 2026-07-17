@@ -1,13 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import {
-  Link,
-  Navigate,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-  useSearchParams,
-} from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
 import { CookieBanner } from './components/CookieBanner';
@@ -42,12 +34,8 @@ const AccountSettings = lazy(() =>
 );
 const Tag = lazy(() => import('./pages/Tag').then((m) => ({ default: m.Tag })));
 const DmcaForm = lazy(() => import('./pages/DmcaForm').then((m) => ({ default: m.DmcaForm })));
-const DmcaCounter = lazy(() =>
-  import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })),
-);
-const DmcaNotice = lazy(() =>
-  import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })),
-);
+const DmcaCounter = lazy(() => import('./pages/DmcaCounter').then((m) => ({ default: m.DmcaCounter })));
+const DmcaNotice = lazy(() => import('./pages/DmcaNotice').then((m) => ({ default: m.DmcaNotice })));
 const Tos = lazy(() => import('./pages/Tos').then((m) => ({ default: m.Tos })));
 const Privacy = lazy(() => import('./pages/Privacy').then((m) => ({ default: m.Privacy })));
 const ForgotPassword = lazy(() =>
@@ -131,14 +119,10 @@ function HeaderNav(): JSX.Element {
     return (
       <nav className="app-header__nav">
         <Link to="/login">
-          <button type="button" className="btn btn--ghost btn--sm">
-            Sign in
-          </button>
+          <button type="button" className="btn btn--ghost btn--sm">Sign in</button>
         </Link>
         <Link to="/signup">
-          <button type="button" className="btn btn--secondary btn--sm">
-            Sign up
-          </button>
+          <button type="button" className="btn btn--secondary btn--sm">Sign up</button>
         </Link>
       </nav>
     );
@@ -161,48 +145,26 @@ function HeaderNav(): JSX.Element {
     <nav className="app-header__nav">
       <NotificationBell />
       <Link to="/payouts">
-        <button type="button" className="btn btn--ghost btn--sm">
-          Payouts
-        </button>
+        <button type="button" className="btn btn--ghost btn--sm">Payouts</button>
       </Link>
       <Link to="/feeds">
-        <button type="button" className="btn btn--ghost btn--sm">
-          Feeds
-        </button>
+        <button type="button" className="btn btn--ghost btn--sm">Feeds</button>
       </Link>
       <Link to="/discover">
-        <button type="button" className="btn btn--ghost btn--sm">
-          Discover
-        </button>
+        <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
       {/* Studio is served by the content-hub worker in production. Keep the
           hard navigation so the zone route can intercept; the in-shell route
           below is only a non-refreshing fallback when the SPA receives it. */}
-      <a href="/studio" className="btn btn--ghost btn--sm">
-        Studio
-      </a>
-      <Link
-        to="/upload"
-        aria-label="Upload"
-        title={`Upload — ${session.user?.email ?? ''}`}
-        style={iconBtn}
-      >
+      <a href="/studio" className="btn btn--ghost btn--sm">Studio</a>
+      <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
+
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link
-        to="/profile"
-        aria-label="Profile"
-        title={`Profile — ${session.user?.email ?? ''}`}
-        style={iconBtn}
-      >
+      <Link to="/profile" aria-label="Profile" title={`Profile — ${session.user?.email ?? ''}`} style={iconBtn}>
         <UserCircle2 aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
-      <Link
-        to="/settings/account"
-        aria-label="Account settings"
-        title="Account settings"
-        style={iconBtn}
-      >
+      <Link to="/settings/account" aria-label="Account settings" title="Account settings" style={iconBtn}>
         <Settings aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
       </Link>
       <button
@@ -347,24 +309,9 @@ const SUGGESTIONS: {
   to: string;
   Icon: (props: { className?: string; style?: React.CSSProperties }) => JSX.Element;
 }[] = [
-  {
-    title: 'Upload a clip',
-    helper: 'Drop in an MP4, WebM, MOV, or MKV.',
-    to: '/upload',
-    Icon: UploadIcon,
-  },
-  {
-    title: 'Open a channel',
-    helper: 'Visit a creator and skim their library.',
-    to: '/channel/explore',
-    Icon: ChannelIcon,
-  },
-  {
-    title: 'Watch something',
-    helper: 'Jump into a video by id.',
-    to: '/watch/demo',
-    Icon: PlayIcon,
-  },
+  { title: 'Upload a clip', helper: 'Drop in an MP4, WebM, MOV, or MKV.', to: '/upload', Icon: UploadIcon },
+  { title: 'Open a channel', helper: 'Visit a creator and skim their library.', to: '/channel/explore', Icon: ChannelIcon },
+  { title: 'Watch something', helper: 'Jump into a video by id.', to: '/watch/demo', Icon: PlayIcon },
 ];
 
 function TrendingCard({ video }: { video: TrendingVideo }): JSX.Element {
@@ -523,20 +470,9 @@ function Home(): JSX.Element {
             Creator-first video hosting — adaptive streaming, channel pages, memberships, and
             tipping. No ads. No algorithm fighting you.
           </p>
-          <div
-            style={{
-              display: 'flex',
-              gap: 'var(--space-3)',
-              flexWrap: 'wrap',
-              justifyContent: 'center',
-            }}
-          >
-            <Link to="/signup" className="btn">
-              Sign up free
-            </Link>
-            <Link to="/pricing" className="btn btn--secondary">
-              See pricing
-            </Link>
+          <div style={{ display: 'flex', gap: 'var(--space-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <Link to="/signup" className="btn">Sign up free</Link>
+            <Link to="/pricing" className="btn btn--secondary">See pricing</Link>
           </div>
 
           <div
@@ -568,12 +504,8 @@ function Home(): JSX.Element {
             ].map(({ emoji, title, body }) => (
               <article key={title} className="card stack-sm">
                 <span style={{ fontSize: 'var(--text-2xl)' }}>{emoji}</span>
-                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 'var(--text-base)' }}>
-                  {title}
-                </h3>
-                <p className="ds-meta" style={{ margin: 0 }}>
-                  {body}
-                </p>
+                <h3 style={{ margin: 0, fontWeight: 700, fontSize: 'var(--text-base)' }}>{title}</h3>
+                <p className="ds-meta" style={{ margin: 0 }}>{body}</p>
               </article>
             ))}
           </div>
@@ -596,17 +528,8 @@ function Home(): JSX.Element {
 
       {session?.user && history !== null && history.length > 0 ? (
         <section className="stack-sm" aria-label="Continue watching">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
-              gap: 'var(--space-2)',
-            }}
-          >
-            <h2 className="ds-h3" style={{ margin: 0 }}>
-              Continue watching
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 'var(--space-2)' }}>
+            <h2 className="ds-h3" style={{ margin: 0 }}>Continue watching</h2>
             <button
               type="button"
               className="ds-btn ds-btn--ghost ds-btn--sm"
@@ -631,9 +554,7 @@ function Home(): JSX.Element {
       ) : null}
 
       <section className="stack-sm" aria-label="Trending">
-        <h2 className="ds-h3" style={{ margin: 0 }}>
-          Trending this week
-        </h2>
+        <h2 className="ds-h3" style={{ margin: 0 }}>Trending this week</h2>
         {trendingError ? (
           <p className="status-error">{trendingError}</p>
         ) : trending === null ? (
@@ -665,9 +586,7 @@ function Home(): JSX.Element {
           marginTop: 'var(--space-6)',
         }}
       >
-        <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>
-          Start here
-        </h2>
+        <h2 className="ds-h3" style={{ margin: 0, marginBottom: 'var(--space-4)' }}>Start here</h2>
         <div className="suggestion-grid">
           {SUGGESTIONS.map((item, i) => (
             <Link
@@ -782,148 +701,148 @@ export default function App(): JSX.Element {
 
   return (
     <MantineProvider>
-      <div className="app-shell" {...(splash.show ? coveredShellAttributes : {})}>
-        <AppHeader />
-        <Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/signup" element={<Signup />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/watch/:id" element={<Watch />} />
-            <Route
-              path="/upload"
-              element={
-                <RequireAuth>
-                  <Upload />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/record"
-              element={
-                <RequireAuth>
-                  <Record />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/create"
-              element={
-                <RequireAuth>
-                  <Create />
-                </RequireAuth>
-              }
-            />
-            <Route path="/studio" element={<Studio />} />
-            <Route
-              path="/profile"
-              element={
-                <RequireAuth>
-                  <Profile />
-                </RequireAuth>
-              }
-            />
-            <Route path="/channel/:username" element={<Channel />} />
-            <Route path="/search" element={<Search />} />
-            <Route path="/tag/:slug" element={<Tag />} />
-            <Route
-              path="/admin/moderation"
-              element={
-                <RequireAuth>
-                  <AdminModeration />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/admin/roles"
-              element={
-                <RequireAuth>
-                  <AdminRoles />
-                </RequireAuth>
-              }
-            />
-            <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
-            <Route
-              path="/settings/account"
-              element={
-                <RequireAuth>
-                  <AccountSettings />
-                </RequireAuth>
-              }
-            />
-            <Route path="/legal/dmca" element={<DmcaForm />} />
-            <Route
-              path="/legal/dmca/counter"
-              element={
-                <RequireAuth>
-                  <DmcaCounter />
-                </RequireAuth>
-              }
-            />
-            <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
-            <Route path="/legal/tos" element={<Tos />} />
-            <Route path="/legal/privacy" element={<Privacy />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route
-              path="/subscriptions"
-              element={
-                <RequireAuth>
-                  <Subscriptions />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/feeds"
-              element={
-                <RequireAuth>
-                  <Feeds />
-                </RequireAuth>
-              }
-            />
-            <Route path="/feeds/:id" element={<FeedView />} />
-            <Route
-              path="/discover"
-              element={
-                <RequireAuth>
-                  <Discover />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/onboarding"
-              element={
-                <RequireAuth>
-                  <Onboarding />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/payouts"
-              element={
-                <RequireAuth>
-                  <Payouts />
-                </RequireAuth>
-              }
-            />
-            <Route path="/status" element={<Status />} />
-            <Route
-              path="/admin/status"
-              element={
-                <RequireAuth>
-                  <AdminStatus />
-                </RequireAuth>
-              }
-            />
-            <Route path="/waitlist" element={<Waitlist />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </Suspense>
-        <SiteFooter />
-        <CookieBanner />
-      </div>
-      {splash.show && <BrandSplash onDone={splash.dismiss} />}
+    <div className="app-shell" {...(splash.show ? coveredShellAttributes : {})}>
+      <AppHeader />
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/watch/:id" element={<Watch />} />
+          <Route
+            path="/upload"
+            element={
+              <RequireAuth>
+                <Upload />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/record"
+            element={
+              <RequireAuth>
+                <Record />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/create"
+            element={
+              <RequireAuth>
+                <Create />
+              </RequireAuth>
+            }
+          />
+          <Route path="/studio" element={<Studio />} />
+          <Route
+            path="/profile"
+            element={
+              <RequireAuth>
+                <Profile />
+              </RequireAuth>
+            }
+          />
+          <Route path="/channel/:username" element={<Channel />} />
+          <Route path="/search" element={<Search />} />
+          <Route path="/tag/:slug" element={<Tag />} />
+          <Route
+            path="/admin/moderation"
+            element={
+              <RequireAuth>
+                <AdminModeration />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/admin/roles"
+            element={
+              <RequireAuth>
+                <AdminRoles />
+              </RequireAuth>
+            }
+          />
+          <Route path="/settings" element={<Navigate to="/settings/account" replace />} />
+          <Route
+            path="/settings/account"
+            element={
+              <RequireAuth>
+                <AccountSettings />
+              </RequireAuth>
+            }
+          />
+          <Route path="/legal/dmca" element={<DmcaForm />} />
+          <Route
+            path="/legal/dmca/counter"
+            element={
+              <RequireAuth>
+                <DmcaCounter />
+              </RequireAuth>
+            }
+          />
+          <Route path="/dmca-notice/:videoId" element={<DmcaNotice />} />
+          <Route path="/legal/tos" element={<Tos />} />
+          <Route path="/legal/privacy" element={<Privacy />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route
+            path="/subscriptions"
+            element={
+              <RequireAuth>
+                <Subscriptions />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/feeds"
+            element={
+              <RequireAuth>
+                <Feeds />
+              </RequireAuth>
+            }
+          />
+          <Route path="/feeds/:id" element={<FeedView />} />
+          <Route
+            path="/discover"
+            element={
+              <RequireAuth>
+                <Discover />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/onboarding"
+            element={
+              <RequireAuth>
+                <Onboarding />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/payouts"
+            element={
+              <RequireAuth>
+                <Payouts />
+              </RequireAuth>
+            }
+          />
+          <Route path="/status" element={<Status />} />
+          <Route
+            path="/admin/status"
+            element={
+              <RequireAuth>
+                <AdminStatus />
+              </RequireAuth>
+            }
+          />
+          <Route path="/waitlist" element={<Waitlist />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+      <SiteFooter />
+      <CookieBanner />
+    </div>
+    {splash.show && <BrandSplash onDone={splash.dismiss} />}
     </MantineProvider>
   );
 }

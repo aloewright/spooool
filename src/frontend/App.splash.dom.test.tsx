@@ -86,6 +86,7 @@ describe('App brand splash integration', () => {
     expect(container!.querySelector('button[aria-label="spooool"]')).toBeNull();
     expect(shell?.getAttribute('inert')).toBeNull();
     expect(shell?.getAttribute('aria-hidden')).toBeNull();
+    expect(container!.querySelector('.app-shell')).toBe(shell);
     expect(window.sessionStorage.getItem('splash:seen')).toBe('1');
 
     unmount();
@@ -94,8 +95,15 @@ describe('App brand splash integration', () => {
     expect(container!.querySelector('button[aria-label="spooool"]')).toBeNull();
   });
 
-  it.each(['/studio', '/embed/example-id'])('does not show a splash at %s', (pathname) => {
-    mountAt(pathname);
+  it('does not show a splash and keeps the shell at /studio', () => {
+    mountAt('/studio');
     expect(container!.querySelector('button[aria-label="spooool"]')).toBeNull();
+    expect(container!.querySelector('.app-shell')).not.toBeNull();
+  });
+
+  it('does not show a splash or app shell at a bare embed route', () => {
+    mountAt('/embed/example-id');
+    expect(container!.querySelector('button[aria-label="spooool"]')).toBeNull();
+    expect(container!.querySelector('.app-shell')).toBeNull();
   });
 });

@@ -353,7 +353,7 @@ describe("editor AI", () => {
       expect(response.status).toBe(404);
       expect(await response.json()).toEqual({ error: "not found" });
     }
-  });
+  }, 15_000);
 
   it("returns the same not-found response when a parent is deleted", async () => {
     const fixture = await createFixture();

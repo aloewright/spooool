@@ -1,3 +1,4 @@
+import type { EditorAiRequest, EditorAiRevision } from "@/shared/editor-ai";
 import { QueryClient } from "@tanstack/react-query";
 import { withBase } from "./app-base";
 
@@ -432,6 +433,12 @@ export type GtmBrief = {
 };
 
 export const api = {
+  runEditorAiCommand: (input: EditorAiRequest, options?: { signal?: AbortSignal }) =>
+    fetchJson<{ revision: EditorAiRevision }>("/api/v1/editor/ai", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal: options?.signal,
+    }),
   listProjects: () => fetchJson<{ items: Project[] }>("/api/v1/projects"),
   listDeletedProjects: () =>
     fetchJson<{ items: Project[]; retention_days: number }>("/api/v1/projects/deleted/recent"),

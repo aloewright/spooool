@@ -9,6 +9,7 @@ import { useSession } from './lib/auth-client';
 import { signOutWithAnalyticsReset } from './lib/auth-signout';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
+import { BrandSplash, useBrandSplash } from './components/BrandSplash';
 import './styles/strand.css';
 
 // Route-level code splitting: each page (and the @cloudflare/stream-react
@@ -65,6 +66,7 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+const Studio = lazy(() => import('./pages/Studio').then((m) => ({ default: m.Studio })));
 
 function RouteFallback(): JSX.Element {
   return (
@@ -94,54 +96,6 @@ type HistoryItem = {
   channel_username: string | null;
 };
 
-function SpoolWave({
-  fontPx,
-  paced = false,
-}: {
-  fontPx: number;
-  paced?: boolean;
-}): JSX.Element {
-  // Cursive-script "loop-dee-loop" path translated 1:1 from the lottie
-  // spiral bezier data. Each loop is 4 cubic segments; we repeat the
-  // pattern 6× across a 0..48 viewBox so dashoffset can scroll the
-  // visible window continuously. viewBox aspect (4:1) matches the
-  // rendered box so preserveAspectRatio="none" doesn't distort. Loops
-  // sit AT the text baseline going UP (y=12 = baseline, y=0 = x-height).
-  const width = Math.round(fontPx * 2);
-  const height = Math.round(fontPx * 0.5);
-  const loops = [0, 8, 16, 24, 32, 40]
-    .map((x) => {
-      return [
-        `C ${x + 4.452} 12, ${x + 6.736} 8.284, ${x + 7.025} 4.988`,
-        `C ${x + 7.255} 2.361, ${x + 6.218} 0, ${x + 4} 0`,
-        `C ${x + 1.782} 0, ${x + 0.745} 2.361, ${x + 0.975} 4.988`,
-        `C ${x + 1.264} 8.284, ${x + 3.548} 12, ${x + 8} 12`,
-      ].join(' ');
-    })
-    .join(' ');
-  return (
-    <svg
-      viewBox="0 0 48 12"
-      width={width}
-      height={height}
-      preserveAspectRatio="none"
-      aria-hidden="true"
-      style={{ display: 'inline-block', verticalAlign: 'baseline', overflow: 'visible' }}
-    >
-      <path
-        d={`M 0 12 ${loops}`}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={fontPx * 0.04}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        pathLength={100}
-        className={paced ? 'spooool-wave--paced' : 'spooool-wave'}
-      />
-    </svg>
-  );
-}
-
 function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
   // Plain text title set in Nunito (via .ds-wordmark) — no per-letter motion.
   return (
@@ -152,51 +106,6 @@ function Wordmark({ size = 'lg' }: { size?: 'lg' | 'sm' }): JSX.Element {
     >
       spooool
     </Link>
-  );
-}
-
-const SPLASH_DURATION_MS = 3200;
-const SPLASH_FADE_MS = 600;
-
-function Splash({ onDone }: { onDone: () => void }): JSX.Element {
-  const [leaving, setLeaving] = useState(false);
-
-  useEffect(() => {
-    const dismiss = window.setTimeout(() => setLeaving(true), SPLASH_DURATION_MS);
-    return () => window.clearTimeout(dismiss);
-  }, []);
-
-  useEffect(() => {
-    if (!leaving) return;
-    const finish = window.setTimeout(onDone, SPLASH_FADE_MS);
-    return () => window.clearTimeout(finish);
-  }, [leaving, onDone]);
-
-  // Click-to-skip — start the leave animation immediately.
-  const skip = () => setLeaving(true);
-
-  // Splash mark gets its own font sizing (clamp() on the wrapper) so the
-  // SVG width tracks the rendered font size. We size the wave at a
-  // representative middle value; CSS clamps the mark itself.
-  const splashFontPx = 120;
-  return (
-    <div
-      className={leaving ? 'splash splash--leaving' : 'splash'}
-      onClick={skip}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') skip();
-      }}
-      aria-label="spooool — tap to enter"
-    >
-      <span className="splash__mark">
-        <span aria-hidden="true">sp</span>
-        <SpoolWave fontPx={splashFontPx} paced />
-        <span aria-hidden="true" style={{ marginLeft: '-0.05em' }}>l</span>
-      </span>
-      <span className="splash__hint">tap to enter</span>
-    </div>
   );
 }
 
@@ -246,11 +155,10 @@ function HeaderNav(): JSX.Element {
       <Link to="/discover">
         <button type="button" className="btn btn--ghost btn--sm">Discover</button>
       </Link>
-      {/* Studio is the content hub served by the `editor` worker via the
-          spooool.com/studio* zone route — full page load, not client routing. */}
-      <a href="/studio">
-        <button type="button" className="btn btn--ghost btn--sm">Studio</button>
-      </a>
+      {/* Studio is served by the content-hub worker in production. Keep the
+          hard navigation so the zone route can intercept; the in-shell route
+          below is only a non-refreshing fallback when the SPA receives it. */}
+      <a href="/studio" className="btn btn--ghost btn--sm">Studio</a>
       <Link to="/upload" aria-label="Upload" title={`Upload — ${session.user?.email ?? ''}`} style={iconBtn}>
 
         <UploadIconLucide aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -765,42 +673,16 @@ function RequireAuth({ children }: { children: JSX.Element }): JSX.Element {
   return children;
 }
 
-function useSplash(): { show: boolean; dismiss: () => void } {
-  // First-visit splash. sessionStorage scopes it per browser tab session
-  // so users don't see it on every internal navigation.
-  const [show, setShow] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    if (window.location.pathname !== '/') return false;
-    return window.sessionStorage.getItem('splash:seen') !== '1';
-  });
-  const dismiss = () => {
-    window.sessionStorage.setItem('splash:seen', '1');
-    setShow(false);
-  };
-  return { show, dismiss };
-}
-
-// The content hub (books/blogs/scripts + AI studio, ALO spec
-// docs/superpowers/specs/studio-content-hub.md) is a separate worker mounted
-// at spooool.com/studio via a zone route; a full page load hands the URL to
-// it. The legacy AI Studio component remains for its panels to be absorbed
-// into the hub. This component backs the in-shell `/studio` route as a
-// belt-and-suspenders client redirect for the rare case the SPA serves
-// `/studio` before the zone route intercepts it.
-function StudioHubRedirect() {
-  useEffect(() => {
-    window.location.replace('/studio');
-  }, []);
-  return null;
-}
-
 // `App` is the default export mounted by main.tsx — the full spooool shell
-// (header, routed pages, footer). The /studio handoff lives on its own route
-// (StudioHubRedirect) and via the HeaderNav <a href="/studio"> hard link, so
-// the rest of the app keeps client-side routing.
+// (header, routed pages, footer). The `/studio` route renders a fallback when
+// the SPA receives that URL instead of the production content-hub worker.
 export default function App(): JSX.Element {
   const location = useLocation();
-  const splash = useSplash();
+  const splash = useBrandSplash(location.pathname);
+  const coveredShellAttributes: { inert: ''; 'aria-hidden': true } = {
+    inert: '',
+    'aria-hidden': true,
+  };
 
   // Embed pages render as a bare player with no app shell so they can be
   // iframed into third-party sites without nav chrome. They still go through
@@ -818,12 +700,9 @@ export default function App(): JSX.Element {
     );
   }
 
-  if (splash.show) {
-    return <Splash onDone={splash.dismiss} />;
-  }
   return (
     <MantineProvider>
-    <div className="app-shell">
+    <div className="app-shell" {...(splash.show ? coveredShellAttributes : {})}>
       <AppHeader />
       <Suspense fallback={<RouteFallback />}>
         <Routes>
@@ -857,7 +736,7 @@ export default function App(): JSX.Element {
               </RequireAuth>
             }
           />
-          <Route path="/studio" element={<StudioHubRedirect />} />
+          <Route path="/studio" element={<Studio />} />
           <Route
             path="/profile"
             element={
@@ -965,6 +844,7 @@ export default function App(): JSX.Element {
       <AnalyticsIdentity />
       <CookieBanner />
     </div>
+    {splash.show && <BrandSplash onDone={splash.dismiss} />}
     </MantineProvider>
   );
 }

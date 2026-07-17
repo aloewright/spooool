@@ -6,22 +6,30 @@ import {
   blogs,
   chapters,
   projects,
-  revisions,
   script_scenes,
   scripts,
   voices,
 } from "../db/schema";
 import type { Env } from "../env";
-import { aiUsageCostCents, recordUsage } from "../lib/budget";
+import {
+  aiRequestFingerprint,
+  aiReservationCostCents,
+  aiUsageCostCents,
+  budgetCapCents,
+  completeAiBudgetRequest,
+  failAiBudgetRequest,
+  parseIdempotencyKey,
+  reserveAiBudgetRequest,
+  stageAiBudgetRequest,
+} from "../lib/budget";
 import { type AuthVariables, requireUser } from "../middleware/auth";
-import { enforceBudget } from "../middleware/budget";
 import {
   type EditorAiRequest,
   type EditorAiRevision,
   editorAiRequestSchema,
 } from "../shared/editor-ai";
 import type { EditorResourceContext } from "../skills/editor-command";
-import { runEditorCommand } from "../skills/editor-command";
+import { buildEditorCommandMessages, runEditorCommand } from "../skills/editor-command";
 
 type EditorTargetTable = "chapters" | "blog_posts" | "script_scenes";
 const EDITOR_AI_REQUEST_BODY_MAX_BYTES = 310_000;
@@ -152,7 +160,7 @@ export const editorAiRoute = new Hono<{
 
 editorAiRoute.use("*", requireUser);
 
-editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
+editorAiRoute.post("/ai", async (c) => {
   const declaredLength = Number(c.req.header("content-length"));
   if (Number.isFinite(declaredLength) && declaredLength > EDITOR_AI_REQUEST_BODY_MAX_BYTES) {
     return c.json({ error: "request too large" }, 413);
@@ -175,6 +183,10 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
   const parsed = editorAiRequestSchema.safeParse(json);
   if (!parsed.success) return c.json({ error: "invalid request" }, 400);
   const request = parsed.data;
+  const requestId = parseIdempotencyKey(c.req.header("Idempotency-Key"));
+  if (!requestId) {
+    return c.json({ error: "a valid Idempotency-Key UUID is required" }, 400);
+  }
 
   const db = drizzle(c.env.DB);
   const resolved = await resolveEditorResourceContext(
@@ -185,24 +197,77 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
   );
   if (!resolved) return c.json({ error: "not found" }, 404);
 
-  const result = await runEditorCommand(c.env, { request, context: resolved.context });
+  const user = c.get("user");
+  const route = request.command === "cite" ? "dynamic/research_gen" : "dynamic/text_gen";
+  const maxOutputTokens = request.scope === "selection" ? 1_500 : 4_000;
+  const fingerprint = await aiRequestFingerprint(["editor-ai", request]);
+  const reservationResult = await reserveAiBudgetRequest(c.env.DB, {
+    requestId,
+    userId: user.id,
+    fingerprint,
+    route,
+    reservedCents: aiReservationCostCents(
+      route,
+      JSON.stringify(buildEditorCommandMessages({ request, context: resolved.context })),
+      maxOutputTokens,
+    ),
+    capCents: budgetCapCents(user.plan),
+  });
+  if (reservationResult.state === "conflict") {
+    return c.json({ error: "Idempotency-Key was already used for another request" }, 409);
+  }
+  if (reservationResult.state === "pending") {
+    c.header("Retry-After", "1");
+    return c.json({ error: "request is still in progress", retryable: true }, 409);
+  }
+  if (reservationResult.state === "replay") {
+    return c.json(reservationResult.response as { revision: EditorAiRevision });
+  }
+  if (reservationResult.state === "staged") {
+    const response = reservationResult.response as { revision: EditorAiRevision };
+    if (response.revision.id !== reservationResult.revisionId) {
+      throw new Error("staged editor AI revision does not match its reservation");
+    }
+    await completeAiBudgetRequest(c.env.DB, reservationResult.reservation, {
+      id: response.revision.id,
+      targetTable: resolved.targetTable,
+      targetId: request.resource_id,
+      beforeMarkdown: response.revision.before_md,
+      afterMarkdown: response.revision.after_md,
+      llmResponse: response.revision.llm_response,
+    });
+    return c.json(response);
+  }
+
+  let result: Awaited<ReturnType<typeof runEditorCommand>>;
+  try {
+    result = await runEditorCommand(c.env, { request, context: resolved.context });
+  } catch (error) {
+    await failAiBudgetRequest(c.env.DB, reservationResult.reservation).catch(() => undefined);
+    throw error;
+  }
   const revision: EditorAiRevision = {
     id: crypto.randomUUID(),
     before_md: request.target_md,
     after_md: result.markdown,
     llm_response: result.llm_response,
   };
-  await recordUsage(c.env.KV, c.get("user").id, aiUsageCostCents(result.llm_response));
-  await db.insert(revisions).values({
+  const response = { revision };
+  await stageAiBudgetRequest(c.env.DB, reservationResult.reservation, {
+    actualCents: aiUsageCostCents(result.llm_response),
+    response,
+    revisionId: revision.id,
+  });
+  await completeAiBudgetRequest(c.env.DB, reservationResult.reservation, {
     id: revision.id,
-    target_table: resolved.targetTable,
-    target_id: request.resource_id,
-    before_md: revision.before_md,
-    after_md: revision.after_md,
-    llm_response: revision.llm_response,
+    targetTable: resolved.targetTable,
+    targetId: request.resource_id,
+    beforeMarkdown: revision.before_md,
+    afterMarkdown: revision.after_md,
+    llmResponse: revision.llm_response,
   });
 
-  return c.json({ revision });
+  return c.json(response);
 });
 
 async function readBoundedRequestBody(

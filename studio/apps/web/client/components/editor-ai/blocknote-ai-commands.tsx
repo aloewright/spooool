@@ -28,6 +28,7 @@ import {
 } from "react";
 import { api } from "../../lib/api";
 import { EDITOR_AI_MENU_ITEMS, flattenReplacementBlocks, needsInstructions } from "./commands";
+import { getDraftConflictError } from "./draft-conflict";
 import { EditorAiDialog } from "./editor-ai-dialog";
 
 type ProseMirrorSelection = BlockNoteEditor["prosemirrorState"]["selection"];
@@ -39,6 +40,7 @@ export type CapturedRun = {
   scope: EditorAiScope;
   targetMd: string;
   contextMd: string;
+  idempotencyKey: string;
   instructions?: string;
 };
 
@@ -61,6 +63,7 @@ export type EditorAiUiState =
     };
 
 export type BlockNoteAiCommandsProps = {
+  disabled?: boolean;
   editor: BlockNoteEditor;
   resourceKind: EditorAiResourceKind;
   resourceId: string;
@@ -126,6 +129,7 @@ function AiFormattingToolbar({
 }
 
 export function BlockNoteAiCommands({
+  disabled = false,
   editor,
   resourceKind,
   resourceId,
@@ -140,6 +144,9 @@ export function BlockNoteAiCommands({
   const commandOpenRef = useRef(false);
   const applyStartedRef = useRef(false);
   const mountedRef = useRef(true);
+  const editableBeforeCommandRef = useRef<boolean | null>(null);
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   const transition = useCallback((next: EditorAiUiState) => {
     stateRef.current = next;
@@ -147,7 +154,9 @@ export function BlockNoteAiCommands({
   }, []);
 
   const focusEditor = useCallback(() => {
-    window.requestAnimationFrame(() => editor.focus());
+    window.requestAnimationFrame(() => {
+      if (editor.isEditable) editor.focus();
+    });
   }, [editor]);
 
   const abortPendingRequest = useCallback(() => {
@@ -156,16 +165,36 @@ export function BlockNoteAiCommands({
     abortRef.current = null;
   }, []);
 
+  const lockEditor = useCallback(() => {
+    if (editableBeforeCommandRef.current === null) {
+      editableBeforeCommandRef.current = editor.isEditable;
+    }
+    editor.isEditable = false;
+  }, [editor]);
+
+  const restoreEditorEditability = useCallback(
+    (focus: boolean, forceReadOnly = false) => {
+      const editableBeforeCommand = editableBeforeCommandRef.current;
+      editableBeforeCommandRef.current = null;
+      if (forceReadOnly || disabledRef.current) {
+        editor.isEditable = false;
+      } else if (editableBeforeCommand !== null) {
+        editor.isEditable = editableBeforeCommand;
+      }
+      if (focus && editor.isEditable) focusEditor();
+    },
+    [editor, focusEditor],
+  );
+
   const releaseEditor = useCallback(
-    (focus: boolean) => {
-      editor.isEditable = true;
+    (focus: boolean, forceReadOnly = false) => {
+      restoreEditorEditability(focus, forceReadOnly);
       bookmarkRef.current = null;
       selectionCaptureRef.current = null;
       commandOpenRef.current = false;
       applyStartedRef.current = false;
-      if (focus) focusEditor();
     },
-    [editor, focusEditor],
+    [restoreEditorEditability],
   );
 
   const closeDialog = useCallback(() => {
@@ -181,13 +210,29 @@ export function BlockNoteAiCommands({
       requestVersionRef.current += 1;
       abortRef.current?.abort();
       abortRef.current = null;
-      editor.isEditable = true;
+      restoreEditorEditability(false);
       bookmarkRef.current = null;
       selectionCaptureRef.current = null;
       commandOpenRef.current = false;
       applyStartedRef.current = false;
     };
-  }, [editor]);
+  }, [restoreEditorEditability]);
+
+  useEffect(() => {
+    if (!disabled) return;
+    abortPendingRequest();
+    editor.isEditable = false;
+    const current = stateRef.current;
+    if (
+      current.stage === "choose" ||
+      current.stage === "instructions" ||
+      current.stage === "loading" ||
+      current.stage === "review"
+    ) {
+      releaseEditor(false, true);
+      transition({ stage: "idle" });
+    }
+  }, [abortPendingRequest, disabled, editor, releaseEditor, transition]);
 
   const runRequest = useCallback(
     async (run: CapturedRun) => {
@@ -195,7 +240,7 @@ export function BlockNoteAiCommands({
       const controller = new AbortController();
       abortRef.current = controller;
       const requestVersion = requestVersionRef.current;
-      editor.isEditable = false;
+      lockEditor();
       transition({ stage: "loading", run });
 
       try {
@@ -213,7 +258,7 @@ export function BlockNoteAiCommands({
             context_md: run.contextMd,
             instructions: run.instructions,
           },
-          { signal: controller.signal },
+          { idempotencyKey: run.idempotencyKey, signal: controller.signal },
         );
 
         if (
@@ -235,7 +280,7 @@ export function BlockNoteAiCommands({
           return;
         }
 
-        editor.isEditable = true;
+        restoreEditorEditability(false);
         transition({
           stage: "error",
           run,
@@ -246,11 +291,25 @@ export function BlockNoteAiCommands({
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [abortPendingRequest, editor, resourceId, resourceKind, transition],
+    [
+      abortPendingRequest,
+      lockEditor,
+      resourceId,
+      resourceKind,
+      restoreEditorEditability,
+      transition,
+    ],
   );
 
   const beginSelectionChooser = useCallback(() => {
-    if (commandOpenRef.current || applyStartedRef.current) return;
+    if (
+      disabledRef.current ||
+      !editor.isEditable ||
+      commandOpenRef.current ||
+      applyStartedRef.current
+    ) {
+      return;
+    }
 
     const selection = editor.prosemirrorState.selection;
     if (selection.empty) return;
@@ -268,13 +327,20 @@ export function BlockNoteAiCommands({
     bookmarkRef.current = bookmark;
     selectionCaptureRef.current = capture;
     commandOpenRef.current = true;
-    editor.isEditable = false;
+    lockEditor();
     transition({ stage: "choose", scope: "selection" });
-  }, [editor, transition]);
+  }, [editor, lockEditor, transition]);
 
   const beginDocumentCommand = useCallback(
     (command: EditorAiCommand) => {
-      if (commandOpenRef.current || applyStartedRef.current) return;
+      if (
+        disabledRef.current ||
+        !editor.isEditable ||
+        commandOpenRef.current ||
+        applyStartedRef.current
+      ) {
+        return;
+      }
 
       const contextMd = editor.blocksToMarkdownLossy(editor.document);
       const run: CapturedRun = {
@@ -282,50 +348,71 @@ export function BlockNoteAiCommands({
         scope: "document",
         targetMd: contextMd,
         contextMd,
+        idempotencyKey: crypto.randomUUID(),
       };
       const requirement = needsInstructions(command);
 
       commandOpenRef.current = true;
-      editor.isEditable = false;
+      lockEditor();
       if (requirement === "none") void runRequest(run);
       else transition({ stage: "instructions", run, requirement });
     },
-    [editor, runRequest, transition],
+    [editor, lockEditor, runRequest, transition],
   );
 
   const chooseSelectionCommand = useCallback(
     (command: EditorAiCommand) => {
       const capture = selectionCaptureRef.current;
       if (stateRef.current.stage !== "choose" || !capture) return;
+      if (disabledRef.current) {
+        releaseEditor(false, true);
+        transition({ stage: "idle" });
+        return;
+      }
 
-      const run: CapturedRun = { command, scope: "selection", ...capture };
+      const run: CapturedRun = {
+        command,
+        scope: "selection",
+        ...capture,
+        idempotencyKey: crypto.randomUUID(),
+      };
       const requirement = needsInstructions(command);
       if (requirement === "none") void runRequest(run);
       else transition({ stage: "instructions", run, requirement });
     },
-    [runRequest, transition],
+    [releaseEditor, runRequest, transition],
   );
 
   const submitInstructions = useCallback(
     (instructions?: string) => {
       const current = stateRef.current;
       if (current.stage !== "instructions") return;
+      if (disabledRef.current) {
+        releaseEditor(false, true);
+        transition({ stage: "idle" });
+        return;
+      }
 
       const trimmed = instructions?.trim();
       if (current.requirement === "required" && !trimmed) return;
       void runRequest({ ...current.run, instructions: trimmed || undefined });
     },
-    [runRequest],
+    [releaseEditor, runRequest, transition],
   );
 
   const retry = useCallback(() => {
     const current = stateRef.current;
     if (current.stage !== "review" && current.stage !== "error") return;
+    if (disabledRef.current) {
+      releaseEditor(false, true);
+      transition({ stage: "idle" });
+      return;
+    }
 
     if (current.stage === "error" && current.retryAction === "save") {
       if (applyStartedRef.current) return;
       applyStartedRef.current = true;
-      editor.isEditable = false;
+      lockEditor();
       transition({ stage: "saving", run: current.run });
 
       void (async () => {
@@ -336,7 +423,7 @@ export function BlockNoteAiCommands({
           transition({ stage: "idle" });
         } catch (error) {
           if (!mountedRef.current) return;
-          editor.isEditable = true;
+          restoreEditorEditability(false, Boolean(getDraftConflictError(error)));
           applyStartedRef.current = false;
           transition({
             stage: "error",
@@ -351,7 +438,7 @@ export function BlockNoteAiCommands({
 
     const currentContext = editor.blocksToMarkdownLossy(editor.document);
     if (currentContext !== current.run.contextMd) {
-      editor.isEditable = true;
+      restoreEditorEditability(false);
       transition({
         stage: "error",
         run: current.run,
@@ -362,7 +449,7 @@ export function BlockNoteAiCommands({
       return;
     }
     if (current.run.scope === "selection" && !bookmarkRef.current) {
-      editor.isEditable = true;
+      restoreEditorEditability(false);
       transition({
         stage: "error",
         run: current.run,
@@ -372,13 +459,26 @@ export function BlockNoteAiCommands({
       return;
     }
 
-    editor.isEditable = false;
+    lockEditor();
     void runRequest(current.run);
-  }, [editor, releaseEditor, runRequest, saveNow, transition]);
+  }, [
+    editor,
+    lockEditor,
+    releaseEditor,
+    restoreEditorEditability,
+    runRequest,
+    saveNow,
+    transition,
+  ]);
 
   const applyRevision = useCallback(async () => {
     const current = stateRef.current;
     if (current.stage !== "review" || applyStartedRef.current) return;
+    if (disabledRef.current) {
+      releaseEditor(false, true);
+      transition({ stage: "idle" });
+      return;
+    }
     applyStartedRef.current = true;
     let mutated = false;
 
@@ -405,7 +505,6 @@ export function BlockNoteAiCommands({
       }
       mutated = true;
 
-      editor.isEditable = true;
       bookmarkRef.current = null;
       selectionCaptureRef.current = null;
       await saveNow();
@@ -415,7 +514,7 @@ export function BlockNoteAiCommands({
       transition({ stage: "idle" });
     } catch (error) {
       if (!mountedRef.current) return;
-      editor.isEditable = true;
+      restoreEditorEditability(false, Boolean(getDraftConflictError(error)));
       applyStartedRef.current = false;
       if (mutated) {
         bookmarkRef.current = null;
@@ -430,7 +529,7 @@ export function BlockNoteAiCommands({
         retryAction: mutated ? "save" : "command",
       });
     }
-  }, [editor, releaseEditor, saveNow, transition]);
+  }, [editor, releaseEditor, restoreEditorEditability, saveNow, transition]);
 
   const slashItems = useMemo<DefaultReactSuggestionItem[]>(
     () => [

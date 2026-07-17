@@ -252,6 +252,67 @@ describe("blogs", () => {
     expect(items3.items.find((b: any) => b.id === id)).toBeTruthy();
   });
 
+  it("preserves an explicit status racing first-draft promotion and returns current versions", async () => {
+    const cookie = await signUp();
+    const headers = { "Content-Type": "application/json", cookie };
+    const created = await SELF.fetch("http://x/api/v1/blogs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(blogPayload({ title: "Concurrent Notes" })),
+    });
+    expect(created.status).toBe(201);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const { id } = (await created.json()) as any;
+
+    const planned = await SELF.fetch(`http://x/api/v1/blogs/${id}/plan`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ structure: "single-tutorial", planned_posts: 1 }),
+    });
+    expect(planned.status).toBe(200);
+    const posts = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const postsBody = (await posts.json()) as any;
+    const postId = postsBody.items[0].id;
+
+    const [explicitStatus, firstDraft] = await Promise.all([
+      SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "drafted" }),
+      }),
+      SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          draft_md: "A concurrently saved opening.",
+          draft_version: 0,
+          draft_session_id: crypto.randomUUID(),
+          draft_sequence: 1,
+        }),
+      }),
+    ]);
+    expect(explicitStatus.status).toBe(200);
+    expect(firstDraft.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await firstDraft.json()) as any).draft_version).toBe(1);
+
+    const afterRace = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterRaceBody = (await afterRace.json()) as any;
+    expect(afterRaceBody.status).toBe("drafted");
+    expect(afterRaceBody.draft_version).toBe(1);
+
+    const metadataPatch = await SELF.fetch(`http://x/api/v1/blogs/${id}/posts/${postId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "Concurrent Notes, Revised" }),
+    });
+    expect(metadataPatch.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await metadataPatch.json()) as any).draft_version).toBe(1);
+  });
+
   it("requires at least one voice sample", async () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };

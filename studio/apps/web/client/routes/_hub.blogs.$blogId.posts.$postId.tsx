@@ -86,9 +86,18 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         ? post.draft_json
         : undefined,
   });
+  const [title, setTitle, titleState, titleAutosave] = useAutosave(post.title, (v, sig) =>
+    api.updateBlogPost(blog.id, post.id, { title: v }, { signal: sig }),
+  );
+  const [summary, setSummary, summaryState, summaryAutosave] = useAutosave(post.summary, (v, sig) =>
+    api.updateBlogPost(blog.id, post.id, { summary: v }, { signal: sig }),
+  );
 
   function enterDraftConflict() {
     draftConflict.current = true;
+    editor.isEditable = false;
+    titleAutosave.cancelPendingSave();
+    summaryAutosave.cancelPendingSave();
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -159,7 +168,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
     },
     onError: (error) => {
       if (error instanceof DraftConflictError) return;
-      setIsDirty(false);
+      setIsDirty(true);
     },
   });
 
@@ -185,13 +194,6 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
   };
   useEffect(() => () => flushRef.current(), []);
 
-  const [title, setTitle, titleState] = useAutosave(post.title, (v, sig) =>
-    api.updateBlogPost(blog.id, post.id, { title: v }, { signal: sig }),
-  );
-  const [summary, setSummary, summaryState] = useAutosave(post.summary, (v, sig) =>
-    api.updateBlogPost(blog.id, post.id, { summary: v }, { signal: sig }),
-  );
-
   const setStatus = useMutation({
     mutationFn: (status: BlogPost["status"]) => api.updateBlogPost(blog.id, post.id, { status }),
     onSuccess: () =>
@@ -203,10 +205,10 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
 
   const draftState: SaveState = hasDraftConflict
     ? "error"
-    : saveDraft.isPending || isDirty
-      ? "saving"
-      : saveDraft.isError
-        ? "error"
+    : saveDraft.isError
+      ? "error"
+      : saveDraft.isPending || isDirty
+        ? "saving"
         : saveDraft.isSuccess
           ? "saved"
           : "idle";
@@ -224,7 +226,16 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <SaveBadge state={saveState} />
+          <SaveBadge
+            state={saveState}
+            onRetry={
+              saveDraft.isError && !hasDraftConflict
+                ? () => {
+                    void saveNow().catch(() => undefined);
+                  }
+                : undefined
+            }
+          />
           {post.status === "published" ? (
             <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-emerald-700 text-xs dark:text-emerald-400">
               Published
@@ -232,7 +243,11 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           ) : (
             <button
               className="rounded-full border border-black/10 bg-white/60 px-3 py-1 text-neutral-700 text-xs hover:bg-white/90 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300"
-              disabled={setStatus.isPending || (post.status !== "drafted" && !hasDraftContent)}
+              disabled={
+                hasDraftConflict ||
+                setStatus.isPending ||
+                (post.status !== "drafted" && !hasDraftContent)
+              }
               onClick={() => setStatus.mutate(post.status === "drafted" ? "drafting" : "drafted")}
               type="button"
             >
@@ -253,6 +268,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         className="w-full bg-transparent font-serif text-3xl tracking-tight outline-none placeholder:text-neutral-400"
         id="post-title"
         name="post-title"
+        disabled={hasDraftConflict}
         onChange={(e) => setTitle(e.target.value)}
         placeholder={`Untitled post ${post.ordinal}`}
         value={title}
@@ -263,6 +279,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         className="mt-2 w-full bg-transparent text-neutral-600 text-sm outline-none placeholder:text-neutral-400 dark:text-neutral-400"
         id="post-summary"
         name="post-summary"
+        disabled={hasDraftConflict}
         onChange={(e) => setSummary(e.target.value)}
         placeholder="One-line summary (used as the excerpt when publishing)"
         value={summary}
@@ -293,6 +310,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
 
       <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
         <BlockNoteView
+          editable={!hasDraftConflict}
           editor={editor}
           formattingToolbar={false}
           slashMenu={false}
@@ -308,6 +326,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           }}
         >
           <BlockNoteAiCommands
+            disabled={hasDraftConflict}
             editor={editor}
             resourceId={post.id}
             resourceKind="blog-post"
@@ -342,7 +361,7 @@ function worstSaveState(states: SaveState[]): SaveState {
   return "idle";
 }
 
-function SaveBadge({ state }: { state: SaveState }) {
+function SaveBadge({ state, onRetry }: { state: SaveState; onRetry?: () => void }) {
   if (state === "idle") return null;
   const label = state === "saving" ? "Saving…" : state === "saved" ? "Saved" : "Save failed";
   const tone =
@@ -351,5 +370,18 @@ function SaveBadge({ state }: { state: SaveState }) {
       : state === "saved"
         ? "text-emerald-600 dark:text-emerald-400"
         : "text-neutral-500";
-  return <span className={`text-xs ${tone}`}>{label}</span>;
+  return (
+    <span className={`flex items-center gap-2 text-xs ${tone}`}>
+      <span>{label}</span>
+      {state === "error" && onRetry ? (
+        <button
+          className="rounded-full border border-current/30 px-2 py-0.5 font-medium hover:bg-current/10"
+          onClick={onRetry}
+          type="button"
+        >
+          Retry save
+        </button>
+      ) : null}
+    </span>
+  );
 }

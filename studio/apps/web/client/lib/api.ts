@@ -22,8 +22,8 @@ export class ApiError extends Error {
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(withBase(path), {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (res.status === 401) {
     if (
@@ -455,9 +455,15 @@ export type GtmBrief = {
 };
 
 export const api = {
-  runEditorAiCommand: (input: EditorAiRequest, options?: { signal?: AbortSignal }) =>
+  runEditorAiCommand: (
+    input: EditorAiRequest,
+    options?: { signal?: AbortSignal; idempotencyKey?: string },
+  ) =>
     fetchJson<{ revision: EditorAiRevision }>("/api/v1/editor/ai", {
       method: "POST",
+      headers: {
+        "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+      },
       body: JSON.stringify(input),
       signal: options?.signal,
     }),
@@ -747,9 +753,13 @@ export const api = {
       text: string;
       context_md?: string;
     },
+    options?: { idempotencyKey?: string },
   ) =>
     fetchJson<{ revision: Revision }>(`/api/v1/chapters/${id}/revise`, {
       method: "POST",
+      headers: {
+        "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+      },
       body: JSON.stringify(input),
     }),
   updateChapter: (

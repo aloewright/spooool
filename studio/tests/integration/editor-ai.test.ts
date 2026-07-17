@@ -1,6 +1,13 @@
 import { SELF, env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { aiUsageCostCents, todayIso } from "../../apps/web/src/lib/budget";
+import {
+  aiRequestFingerprint,
+  aiReservationCostCents,
+  aiUsageCostCents,
+  reserveAiBudgetRequest,
+  todayIso,
+} from "../../apps/web/src/lib/budget";
+import { buildEditorCommandMessages } from "../../apps/web/src/skills/editor-command";
 
 type ResourceKind = "chapter" | "blog-post" | "script-scene";
 
@@ -89,17 +96,19 @@ const payload = (resource_kind: ResourceKind, resource_id: string) => ({
 
 async function signUp(plan: "free" | "pro" = "pro") {
   const email = `editor-ai-${crypto.randomUUID()}@x.test`;
+  const password = "correct-horse-battery-staple";
   const response = await SELF.fetch("http://x/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       email,
-      password: "correct-horse-battery-staple",
+      password,
       name: "Editor AI Test",
-      plan,
     }),
   });
   expect(response.status).toBe(200);
+
+  await env.DB.prepare("UPDATE users SET plan = ? WHERE email = ?").bind(plan, email).run();
 
   const user = await env.DB.prepare("SELECT id, plan FROM users WHERE email = ?")
     .bind(email)
@@ -107,8 +116,18 @@ async function signUp(plan: "free" | "pro" = "pro") {
   expect(user?.plan).toBe(plan);
   if (!user) throw new Error("signed-up user was not persisted");
 
+  // Create a fresh session after the server-side plan assignment so the
+  // authenticated user reflects the persisted plan without trusting sign-up
+  // input for privileged fields.
+  const signIn = await SELF.fetch("http://x/api/auth/sign-in/email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  expect(signIn.status).toBe(200);
+
   return {
-    cookie: response.headers.get("set-cookie") ?? "",
+    cookie: signIn.headers.get("set-cookie") ?? "",
     userId: user.id,
   };
 }
@@ -198,8 +217,34 @@ async function requestEditorAi(cookie: string, body: unknown, headers: HeadersIn
 async function requestEditorAiRaw(cookie: string, body: BodyInit, headers: HeadersInit = {}) {
   return SELF.fetch("http://x/api/v1/editor/ai", {
     method: "POST",
-    headers: { "Content-Type": "application/json", cookie, ...headers },
+    headers: {
+      "Content-Type": "application/json",
+      cookie,
+      "Idempotency-Key": crypto.randomUUID(),
+      ...headers,
+    },
     body,
+  });
+}
+
+async function requestInlineRevision(
+  fixture: Fixture,
+  body: Record<string, unknown> = {
+    action: "fix-grammar",
+    text: "This are selected prose.",
+    context_md: "This are selected prose.",
+  },
+  headers: HeadersInit = {},
+) {
+  return SELF.fetch(`http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      cookie: fixture.cookie,
+      "Idempotency-Key": crypto.randomUUID(),
+      ...headers,
+    },
+    body: JSON.stringify(body),
   });
 }
 
@@ -277,6 +322,50 @@ async function revisionFor(targetId: string) {
       before_md: string;
       after_md: string;
       llm_response: string;
+    }>();
+}
+
+async function budgetUsageCents(userId: string): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COALESCE(SUM(
+      CASE
+        WHEN status IN ('pending', 'generated') THEN reserved_cents
+        WHEN status = 'succeeded' THEN COALESCE(actual_cents, reserved_cents)
+        ELSE 0
+      END
+    ), 0) AS cents
+    FROM ai_budget_requests
+    WHERE user_id = ? AND usage_date = ? AND expires_at > unixepoch()`,
+  )
+    .bind(userId, todayIso())
+    .first<{ cents: number }>();
+  return row?.cents ?? 0;
+}
+
+async function seedBudgetUsage(userId: string, cents: number): Promise<void> {
+  if (cents <= 0) return;
+  await env.DB.prepare(
+    `INSERT INTO ai_budget_requests (
+      request_id, user_id, usage_date, fingerprint, route,
+      reserved_cents, actual_cents, status, response_json, expires_at
+    ) VALUES (?, ?, ?, ?, 'dynamic/text_gen', ?, ?, 'succeeded', '{}', unixepoch() + 93600)`,
+  )
+    .bind(crypto.randomUUID(), userId, todayIso(), crypto.randomUUID(), cents, cents)
+    .run();
+}
+
+async function budgetRequest(requestId: string) {
+  return env.DB.prepare(
+    `SELECT status, reserved_cents, actual_cents, revision_id, response_json
+    FROM ai_budget_requests WHERE request_id = ?`,
+  )
+    .bind(requestId)
+    .first<{
+      status: string;
+      reserved_cents: number;
+      actual_cents: number | null;
+      revision_id: string | null;
+      response_json: string | null;
     }>();
 }
 
@@ -401,218 +490,283 @@ describe("editor AI", () => {
     expect(await revisionFor(resourceId)).toBeNull();
   });
 
-  it("does not record a revision when the gateway fails", async () => {
+  it("requires a UUID idempotency key before invoking the hosted editor provider", async () => {
     const fixture = await createFixture();
-    const resourceId = fixture.resourceIds.chapter;
-    gatewayStatus = 503;
+    const response = await requestEditorAi(
+      fixture.cookie,
+      payload("chapter", fixture.resourceIds.chapter),
+      { "Idempotency-Key": "" },
+    );
 
-    const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
-    expect(response.status).toBe(500);
-    expect(await revisionFor(resourceId)).toBeNull();
-    expect(
-      await env.KV.get(`budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`),
-    ).toBeNull();
+    expect(response.status).toBe(400);
+    expect(gatewayCalls).toBe(0);
   });
 
-  it("does not charge the editor route when gateway configuration is missing", async () => {
+  it("releases a failed provider reservation and safely retries the same key", async () => {
     const fixture = await createFixture();
     const resourceId = fixture.resourceIds.chapter;
+    const requestId = crypto.randomUUID();
+    gatewayStatus = 503;
+
+    const failed = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(failed.status).toBe(500);
+    expect(await budgetRequest(requestId)).toMatchObject({ status: "failed", actual_cents: 0 });
+    expect(await budgetUsageCents(fixture.userId)).toBe(0);
+    expect(await revisionFor(resourceId)).toBeNull();
+
+    gatewayStatus = 200;
+    const retried = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(retried.status).toBe(200);
+    const retriedBody = (await retried.json()) as RevisionResponse;
+
+    const replay = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(replay.status).toBe(200);
+    await expect(replay.json()).resolves.toEqual(retriedBody);
+    expect(gatewayCalls).toBe(2);
+  });
+
+  it("keeps a failed reservation released when its retry no longer fits the cap", async () => {
+    const fixture = await createFixture("free");
+    const resourceId = fixture.resourceIds.chapter;
+    const requestId = crypto.randomUUID();
+    gatewayStatus = 503;
+
+    const failed = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(failed.status).toBe(500);
+    await seedBudgetUsage(fixture.userId, 1_000);
+
+    gatewayStatus = 200;
+    const blockedRetry = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(blockedRetry.status).toBe(402);
+    expect(await budgetRequest(requestId)).toMatchObject({ status: "failed", actual_cents: 0 });
+    expect(gatewayCalls).toBe(1);
+  });
+
+  it("does not charge when gateway configuration is missing", async () => {
+    const fixture = await createFixture();
+    const resourceId = fixture.resourceIds.chapter;
+    const requestId = crypto.randomUUID();
     mutableEnv.AI_GATEWAY_BASE_URL = "";
     mutableEnv.AI_GATEWAY_TOKEN = "";
 
-    const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
+    const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
 
     expect(response.status).toBe(500);
     expect(gatewayCalls).toBe(0);
     expect(await revisionFor(resourceId)).toBeNull();
-    expect(await env.KV.get(`budget:${fixture.userId}:${todayIso()}`)).toBeNull();
+    expect(await budgetRequest(requestId)).toMatchObject({ status: "failed" });
+    expect(await budgetUsageCents(fixture.userId)).toBe(0);
   });
 
-  it("records hosted usage even when revision persistence fails afterward", async () => {
+  it("finishes a staged provider result after settlement failure without calling twice", async () => {
     const fixture = await createFixture();
     const resourceId = fixture.resourceIds.chapter;
-    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
+    const requestId = crypto.randomUUID();
     await env.DB.prepare(`
-      CREATE TRIGGER fail_editor_ai_revision
-      BEFORE INSERT ON revisions
+      CREATE TRIGGER fail_editor_ai_settlement
+      BEFORE UPDATE OF status ON ai_budget_requests
+      WHEN NEW.status = 'succeeded'
       BEGIN
-        SELECT RAISE(ABORT, 'revision persistence failed');
+        SELECT RAISE(ABORT, 'settlement failed');
       END
     `).run();
 
+    let firstBody: RevisionResponse | null = null;
     try {
-      const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
-      expect(response.status).toBe(500);
-      expect(await env.KV.get(budgetKey)).toBe("1");
+      const first = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+        "Idempotency-Key": requestId,
+      });
+      expect(first.status).toBe(500);
+      const staged = await budgetRequest(requestId);
+      expect(staged).toMatchObject({ status: "generated", actual_cents: 1 });
+      firstBody = JSON.parse(staged?.response_json ?? "null") as RevisionResponse;
+      expect(firstBody.revision.after_md).toBe("Gateway replacement.");
       expect(await revisionFor(resourceId)).toBeNull();
+      expect(gatewayCalls).toBe(1);
     } finally {
-      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_editor_ai_revision").run();
+      await env.DB.prepare("DROP TRIGGER IF EXISTS fail_editor_ai_settlement").run();
     }
-  });
 
-  it("records successful token usage and rejects the next call at the free-plan cap", async () => {
-    const fixture = await createFixture("free");
-    const budgetKey = `budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`;
-    await env.KV.put(budgetKey, "999");
-
-    const first = await requestEditorAi(
-      fixture.cookie,
-      payload("chapter", fixture.resourceIds.chapter),
-    );
-    expect(first.status).toBe(200);
-    expect(await env.KV.get(budgetKey)).toBe("1000");
-
-    const second = await requestEditorAi(
-      fixture.cookie,
-      payload("chapter", fixture.resourceIds.chapter),
-    );
-    expect(second.status).toBe(402);
-    expect(gatewayCalls).toBe(1);
-  });
-
-  it("records successful retained chapter revision usage", async () => {
-    const fixture = await createFixture("free");
-    const budgetKey = `budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`;
-    await env.KV.put(budgetKey, "999");
-
-    const first = await SELF.fetch(
-      `http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-        body: JSON.stringify({
-          action: "fix-grammar",
-          text: "This are selected prose.",
-          context_md: "This are selected prose.",
-        }),
-      },
-    );
-    expect(first.status).toBe(200);
-    expect(await env.KV.get(budgetKey)).toBe("1000");
-
-    const second = await SELF.fetch(
-      `http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-        body: JSON.stringify({
-          action: "fix-grammar",
-          text: "This are selected prose.",
-          context_md: "This are selected prose.",
-        }),
-      },
-    );
-    expect(second.status).toBe(402);
-    expect(gatewayCalls).toBe(1);
-  });
-
-  it("returns 402 when the free-plan daily budget is exhausted", async () => {
-    const fixture = await createFixture("free");
-    const resourceId = fixture.resourceIds.chapter;
-    await env.KV.put(`budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`, "1000");
-
-    const response = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
-    expect(response.status).toBe(402);
-    expect(await revisionFor(resourceId)).toBeNull();
-  });
-
-  it("also enforces the daily budget on retained chapter inline revisions", async () => {
-    const fixture = await createFixture("free");
-    const resourceId = fixture.resourceIds.chapter;
-    await env.KV.put(`budget:${fixture.userId}:${new Date().toISOString().slice(0, 10)}`, "1000");
-
-    const response = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-      body: JSON.stringify({
-        action: "fix-grammar",
-        text: "This are selected prose.",
-        context_md: "This are selected prose.",
-      }),
+    const retry = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
     });
+    expect(retry.status).toBe(200);
+    await expect(retry.json()).resolves.toEqual(firstBody);
+    expect(gatewayCalls).toBe(1);
+    expect(await budgetRequest(requestId)).toMatchObject({ status: "succeeded", actual_cents: 1 });
+    expect(await revisionFor(resourceId)).toMatchObject({ after_md: "Gateway replacement." });
+  });
 
-    expect(response.status).toBe(402);
-    expect(await revisionFor(resourceId)).toBeNull();
+  it("returns retryable pending for a duplicate of an in-flight reservation", async () => {
+    const fixture = await createFixture("free");
+    const request = payload("chapter", fixture.resourceIds.chapter);
+    const requestId = crypto.randomUUID();
+    const reservation = await reserveAiBudgetRequest(env.DB, {
+      requestId,
+      userId: fixture.userId,
+      fingerprint: await aiRequestFingerprint(["editor-ai", request]),
+      route: "dynamic/text_gen",
+      reservedCents: 20,
+      capCents: 1_000,
+    });
+    expect(reservation.state).toBe("acquired");
+
+    const pending = await requestEditorAi(fixture.cookie, request, {
+      "Idempotency-Key": requestId,
+    });
+    expect(pending.status).toBe(409);
+    expect(pending.headers.get("retry-after")).toBe("1");
+    await expect(pending.json()).resolves.toMatchObject({ retryable: true });
+    expect(gatewayCalls).toBe(0);
+  });
+
+  it("rejects reuse of an idempotency key with a different request fingerprint", async () => {
+    const fixture = await createFixture();
+    const requestId = crypto.randomUUID();
+    const original = payload("chapter", fixture.resourceIds.chapter);
+    const first = await requestEditorAi(fixture.cookie, original, {
+      "Idempotency-Key": requestId,
+    });
+    expect(first.status).toBe(200);
+
+    const conflict = await requestEditorAi(
+      fixture.cookie,
+      { ...original, target_md: "Different prose.", context_md: "Different prose." },
+      { "Idempotency-Key": requestId },
+    );
+    expect(conflict.status).toBe(409);
+    expect(gatewayCalls).toBe(1);
+  });
+
+  it("atomically admits only one concurrent request at the remaining free-plan cap", async () => {
+    const fixture = await createFixture("free");
+    const request = payload("chapter", fixture.resourceIds.chapter);
+    const reservation = aiReservationCostCents(
+      "dynamic/text_gen",
+      JSON.stringify(
+        buildEditorCommandMessages({
+          request,
+          context: {
+            kind: "chapter",
+            projectTitle: "Quiet Operator",
+            projectType: "nonfiction",
+            chapterTitle: "The Cost of Staying Stuck",
+            chapterSummary: "Show why reactive work remains expensive.",
+            voiceProfile: { cadence: "short and direct" },
+          },
+        }),
+      ),
+      4_000,
+    );
+    await seedBudgetUsage(fixture.userId, 1_000 - reservation);
+
+    const responses = await Promise.all([
+      requestEditorAi(fixture.cookie, request),
+      requestEditorAi(fixture.cookie, request),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 402]);
+    expect(gatewayCalls).toBe(1);
+    expect(await budgetUsageCents(fixture.userId)).toBe(1_000 - reservation + 1);
+  });
+
+  it("settles a conservative reservation down to actual hosted usage", async () => {
+    const fixture = await createFixture("free");
+    const requestId = crypto.randomUUID();
+    const response = await requestEditorAi(
+      fixture.cookie,
+      payload("chapter", fixture.resourceIds.chapter),
+      { "Idempotency-Key": requestId },
+    );
+    expect(response.status).toBe(200);
+
+    const request = await budgetRequest(requestId);
+    expect(request).toMatchObject({ status: "succeeded", actual_cents: 1 });
+    expect(request?.reserved_cents).toBeGreaterThan(1);
+    expect(await budgetUsageCents(fixture.userId)).toBe(1);
+  });
+
+  it("enforces the D1 daily cap on editor and retained chapter requests", async () => {
+    const fixture = await createFixture("free");
+    await seedBudgetUsage(fixture.userId, 1_000);
+
+    const editor = await requestEditorAi(
+      fixture.cookie,
+      payload("chapter", fixture.resourceIds.chapter),
+    );
+    expect(editor.status).toBe(402);
+
+    const inline = await requestInlineRevision(fixture);
+    expect(inline.status).toBe(402);
+    expect(gatewayCalls).toBe(0);
+  });
+
+  it("replays a hosted chapter inline revision without invoking the provider twice", async () => {
+    const fixture = await createFixture();
+    const requestId = crypto.randomUUID();
+    const first = await requestInlineRevision(fixture, undefined, {
+      "Idempotency-Key": requestId,
+    });
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as RevisionResponse;
+
+    const replay = await requestInlineRevision(fixture, undefined, {
+      "Idempotency-Key": requestId,
+    });
+    expect(replay.status).toBe(200);
+    await expect(replay.json()).resolves.toEqual(firstBody);
+    expect(gatewayCalls).toBe(1);
   });
 
   it("allows an exhausted user to use the zero-cost local chapter revision fallback", async () => {
     const fixture = await createFixture("free");
-    const resourceId = fixture.resourceIds.chapter;
-    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
-    await env.KV.put(budgetKey, "1000");
+    await seedBudgetUsage(fixture.userId, 1_000);
     mutableEnv.AI_GATEWAY_BASE_URL = "";
     mutableEnv.AI_GATEWAY_TOKEN = "";
 
-    const response = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-      body: JSON.stringify({
-        action: "fix-grammar",
-        text: "This are selected prose.",
-        context_md: "This are selected prose.",
-      }),
+    const response = await requestInlineRevision(fixture, undefined, {
+      "Idempotency-Key": "",
     });
 
     expect(response.status).toBe(200);
     const body = (await response.json()) as RevisionResponse;
     expect(body.revision.llm_response.route).toBe("deterministic/local");
-    expect(await env.KV.get(budgetKey)).toBe("1000");
+    expect(await budgetUsageCents(fixture.userId)).toBe(1_000);
     expect(gatewayCalls).toBe(0);
   });
 
-  it("records editor-ai usage after a successful request and blocks the next call at cap", async () => {
-    const fixture = await createFixture("free");
-    const resourceId = fixture.resourceIds.chapter;
-    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
-    const usage = aiUsageCostCents({
-      route: "dynamic/text_gen",
-      tokens_in: 11,
-      tokens_out: 3,
-    });
-    await env.KV.put(budgetKey, String(1000 - usage));
+  it("returns the chapter draft version observed by a metadata update", async () => {
+    const fixture = await createFixture();
+    const chapterId = fixture.resourceIds.chapter;
+    await env.DB.prepare(`
+      CREATE TRIGGER bump_chapter_version_before_metadata_update
+      BEFORE UPDATE OF title ON chapters
+      BEGIN
+        UPDATE chapters SET draft_version = draft_version + 1 WHERE id = OLD.id;
+      END
+    `).run();
 
-    const first = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
-    expect(first.status).toBe(200);
-    expect(await env.KV.get(budgetKey)).toBe("1000");
-
-    const second = await requestEditorAi(fixture.cookie, payload("chapter", resourceId));
-    expect(second.status).toBe(402);
-  });
-
-  it("records retained chapter inline revision usage after a successful request", async () => {
-    const fixture = await createFixture("free");
-    const resourceId = fixture.resourceIds.chapter;
-    const budgetKey = `budget:${fixture.userId}:${todayIso()}`;
-    const usage = aiUsageCostCents({
-      route: "dynamic/text_gen",
-      tokens_in: 11,
-      tokens_out: 3,
-    });
-    await env.KV.put(budgetKey, String(1000 - usage));
-
-    const first = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-      body: JSON.stringify({
-        action: "fix-grammar",
-        text: "This are selected prose.",
-        context_md: "This are selected prose.",
-      }),
-    });
-
-    expect(first.status).toBe(200);
-    expect(await env.KV.get(budgetKey)).toBe("1000");
-
-    const second = await SELF.fetch(`http://x/api/v1/chapters/${resourceId}/revise`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", cookie: fixture.cookie },
-      body: JSON.stringify({
-        action: "fix-grammar",
-        text: "This are selected prose.",
-        context_md: "This are selected prose.",
-      }),
-    });
-    expect(second.status).toBe(402);
+    try {
+      const response = await requestDraftPatch(fixture, "chapter", { title: "Updated chapter" });
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({ draft_version: 1 });
+    } finally {
+      await env.DB.prepare(
+        "DROP TRIGGER IF EXISTS bump_chapter_version_before_metadata_update",
+      ).run();
+    }
   });
 
   it.each([["chapter" as const], ["blog-post" as const], ["script-scene" as const]])(

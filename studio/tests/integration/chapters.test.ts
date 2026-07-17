@@ -71,6 +71,18 @@ describe("chapters", () => {
     expect(sectionDraft.revision.after_md).toContain("concrete moment");
 
     const draftSessionId = crypto.randomUUID();
+    const malformedDraft = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        draft_json: [{ content: "A block without a type must not be stored." }],
+        draft_version: 0,
+        draft_session_id: draftSessionId,
+        draft_sequence: 1,
+      }),
+    });
+    expect(malformedDraft.status).toBe(400);
+
     const patch = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
@@ -159,5 +171,35 @@ describe("chapters", () => {
     const inline = (await revise.json()) as any;
     expect(inline.revision.before_md).toContain("selected sentence");
     expect(inline.revision.after_md).toContain("Tightened:");
+
+    const revisions = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}/revisions`, {
+      headers,
+    });
+    expect(revisions.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const revisionBody = (await revisions.json()) as any;
+    expect(revisionBody.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target_table: "sections" }),
+        expect.objectContaining({
+          id: inline.revision.id,
+          target_table: "chapters",
+          target_id: chapterId,
+        }),
+      ]),
+    );
+    const sortedRevisionIds = [...revisionBody.items]
+      .sort((left, right) => left.created_at - right.created_at || left.id.localeCompare(right.id))
+      .map((revision) => revision.id);
+    expect(revisionBody.items.map((revision: { id: string }) => revision.id)).toEqual(
+      sortedRevisionIds,
+    );
+
+    const otherCookie = await signUp();
+    const unauthorizedRevisions = await SELF.fetch(
+      `http://x/api/v1/chapters/${chapterId}/revisions`,
+      { headers: { cookie: otherCookie } },
+    );
+    expect(unauthorizedRevisions.status).toBe(404);
   });
 });

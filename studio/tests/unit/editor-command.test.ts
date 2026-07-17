@@ -235,6 +235,39 @@ describe("editor command prompts", () => {
     expect(result.llm_response.route).toBe(route);
   });
 
+  it.each([
+    ["Markdown label", "```markdown\r\n  Replacement prose.  \r\n```"],
+    ["md label", "```md\r\n  Replacement prose.  \r\n```"],
+    ["no label", "```\r\n  Replacement prose.  \r\n```"],
+  ])("normalizes CRLF fenced output with %s", async (_label, content) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 12, completion_tokens: 4 },
+        }),
+      ),
+    );
+
+    const result = await runEditorCommand(
+      { AI_GATEWAY_BASE_URL: "https://gateway.test", AI_GATEWAY_TOKEN: "token" },
+      {
+        request: {
+          resource_kind: "chapter",
+          resource_id: "chapter-1",
+          command: "proofread",
+          scope: "document",
+          target_md: "Draft prose.",
+          context_md: "Draft prose.",
+        },
+        context: chapterContext,
+      },
+      { fetch: fetchMock },
+    );
+
+    expect(result.markdown).toBe("Replacement prose.");
+  });
+
   it("rejects missing gateway configuration", async () => {
     await expect(
       runEditorCommand(

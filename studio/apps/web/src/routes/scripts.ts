@@ -262,8 +262,6 @@ scriptsRoute.patch("/:id/scenes/:sceneId", async (c) => {
   const [scene] = await db
     .select({
       id: script_scenes.id,
-      status: script_scenes.status,
-      draftVersion: script_scenes.draft_version,
     })
     .from(script_scenes)
     .where(and(eq(script_scenes.id, sceneId), eq(script_scenes.script_id, id)))
@@ -289,19 +287,26 @@ scriptsRoute.patch("/:id/scenes/:sceneId", async (c) => {
     draft_sequence: draftSequence,
     ...patch
   } = body;
-  const values = { ...patch, updated_at: new Date() };
-  if (
-    values.status === undefined &&
-    scene.status === "planned" &&
-    body.draft_md !== undefined &&
-    body.draft_md.trim().length > 0
-  ) {
-    values.status = "drafting";
-  }
+  const shouldAutoPromote =
+    patch.status === undefined && body.draft_md !== undefined && body.draft_md.trim().length > 0;
+  const values = {
+    ...patch,
+    ...(shouldAutoPromote
+      ? {
+          status: sql`case when ${script_scenes.status} = 'planned' then 'drafting' else ${script_scenes.status} end`,
+        }
+      : {}),
+    updated_at: new Date(),
+  };
 
   if (!hasDraftUpdate) {
-    await db.update(script_scenes).set(values).where(eq(script_scenes.id, sceneId));
-    return c.json({ ok: true, draft_version: scene.draftVersion });
+    const [updated] = await db
+      .update(script_scenes)
+      .set(values)
+      .where(eq(script_scenes.id, sceneId))
+      .returning({ draft_version: script_scenes.draft_version });
+    if (!updated) return c.json({ error: "scene not found" }, 404);
+    return c.json({ ok: true, draft_version: updated.draft_version });
   }
 
   const [updated] = await db

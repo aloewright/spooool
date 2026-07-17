@@ -59,7 +59,7 @@ const routeFor = (command: EditorAiCommand): EditorAiRoute =>
 
 const normalizeOutput = (text: string): string => {
   const trimmed = text.trim();
-  const fenced = /^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  const fenced = /^```(?:markdown|md)?[ \t]*\r?\n([\s\S]*?)(?:\r?\n)?```$/.exec(trimmed);
   const markdown = (fenced ? fenced[1] : trimmed).trim();
   if (!markdown) throw new Error("AI returned no usable replacement");
   if (markdown.length > 200_000) throw new Error("AI replacement is too large");

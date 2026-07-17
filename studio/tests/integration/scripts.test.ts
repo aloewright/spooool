@@ -240,6 +240,69 @@ describe("scripts", () => {
     expect(items3.items.find((s: any) => s.id === id)).toBeTruthy();
   });
 
+  it("preserves an explicit status racing first-draft promotion and returns current versions", async () => {
+    const cookie = await signUp();
+    const headers = { "Content-Type": "application/json", cookie };
+    const created = await SELF.fetch("http://x/api/v1/scripts", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(scriptPayload({ title: "Concurrent Cut", format: "short-film" })),
+    });
+    expect(created.status).toBe(201);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const { id } = (await created.json()) as any;
+
+    const planned = await SELF.fetch(`http://x/api/v1/scripts/${id}/plan`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ structure: "mini-arc", planned_scenes: 3 }),
+    });
+    expect(planned.status).toBe(200);
+    const scenes = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const scenesBody = (await scenes.json()) as any;
+    const sceneId = scenesBody.items[0].id;
+
+    const [explicitStatus, firstDraft] = await Promise.all([
+      SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "drafted" }),
+      }),
+      SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          draft_md: "INT. GARAGE — NIGHT",
+          draft_version: 0,
+          draft_session_id: crypto.randomUUID(),
+          draft_sequence: 1,
+        }),
+      }),
+    ]);
+    expect(explicitStatus.status).toBe(200);
+    expect(firstDraft.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await firstDraft.json()) as any).draft_version).toBe(1);
+
+    const afterRace = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
+      headers,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterRaceBody = (await afterRace.json()) as any;
+    expect(afterRaceBody.status).toBe("drafted");
+    expect(afterRaceBody.draft_version).toBe(1);
+
+    const metadataPatch = await SELF.fetch(`http://x/api/v1/scripts/${id}/scenes/${sceneId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "Concurrent Cut, Revised" }),
+    });
+    expect(metadataPatch.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await metadataPatch.json()) as any).draft_version).toBe(1);
+  });
+
   it("rejects a logline that is too short", async () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };

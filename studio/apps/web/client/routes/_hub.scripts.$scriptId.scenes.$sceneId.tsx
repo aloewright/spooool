@@ -121,9 +121,19 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         ? scene.draft_json
         : undefined,
   });
+  const [title, setTitle, titleState, titleAutosave] = useAutosave(scene.title, (v, sig) =>
+    api.updateScriptScene(script.id, scene.id, { title: v }, { signal: sig }),
+  );
+  const [summary, setSummary, summaryState, summaryAutosave] = useAutosave(
+    scene.summary,
+    (v, sig) => api.updateScriptScene(script.id, scene.id, { summary: v }, { signal: sig }),
+  );
 
   function enterDraftConflict() {
     draftConflict.current = true;
+    editor.isEditable = false;
+    titleAutosave.cancelPendingSave();
+    summaryAutosave.cancelPendingSave();
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -195,7 +205,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
     },
     onError: (error) => {
       if (error instanceof DraftConflictError) return;
-      setIsDirty(false);
+      setIsDirty(true);
     },
   });
 
@@ -221,13 +231,6 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
   };
   useEffect(() => () => flushRef.current(), []);
 
-  const [title, setTitle, titleState] = useAutosave(scene.title, (v, sig) =>
-    api.updateScriptScene(script.id, scene.id, { title: v }, { signal: sig }),
-  );
-  const [summary, setSummary, summaryState] = useAutosave(scene.summary, (v, sig) =>
-    api.updateScriptScene(script.id, scene.id, { summary: v }, { signal: sig }),
-  );
-
   const setStatus = useMutation({
     mutationFn: (status: ScriptScene["status"]) =>
       api.updateScriptScene(script.id, scene.id, { status }),
@@ -240,10 +243,10 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
 
   const draftState: SaveState = hasDraftConflict
     ? "error"
-    : saveDraft.isPending || isDirty
-      ? "saving"
-      : saveDraft.isError
-        ? "error"
+    : saveDraft.isError
+      ? "error"
+      : saveDraft.isPending || isDirty
+        ? "saving"
         : saveDraft.isSuccess
           ? "saved"
           : "idle";
@@ -266,10 +269,23 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <SaveBadge state={saveState} />
+          <SaveBadge
+            state={saveState}
+            onRetry={
+              saveDraft.isError && !hasDraftConflict
+                ? () => {
+                    void saveNow().catch(() => undefined);
+                  }
+                : undefined
+            }
+          />
           <button
             className="rounded-full border border-black/10 bg-white/60 px-3 py-1 text-neutral-700 text-xs hover:bg-white/90 disabled:opacity-50 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300"
-            disabled={setStatus.isPending || (scene.status !== "drafted" && !hasDraftContent)}
+            disabled={
+              hasDraftConflict ||
+              setStatus.isPending ||
+              (scene.status !== "drafted" && !hasDraftContent)
+            }
             onClick={() => setStatus.mutate(scene.status === "drafted" ? "drafting" : "drafted")}
             type="button"
           >
@@ -289,6 +305,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         className="w-full bg-transparent font-serif text-3xl tracking-tight outline-none placeholder:text-neutral-400"
         id="scene-title"
         name="scene-title"
+        disabled={hasDraftConflict}
         onChange={(e) => setTitle(e.target.value)}
         placeholder={`Untitled scene ${scene.ordinal}`}
         value={title}
@@ -299,6 +316,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         className="mt-2 w-full bg-transparent text-neutral-600 text-sm outline-none placeholder:text-neutral-400 dark:text-neutral-400"
         id="scene-summary"
         name="scene-summary"
+        disabled={hasDraftConflict}
         onChange={(e) => setSummary(e.target.value)}
         placeholder="One-line summary of what this scene must accomplish"
         value={summary}
@@ -306,6 +324,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
 
       <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
         <BlockNoteView
+          editable={!hasDraftConflict}
           editor={editor}
           formattingToolbar={false}
           slashMenu={false}
@@ -321,6 +340,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
           }}
         >
           <BlockNoteAiCommands
+            disabled={hasDraftConflict}
             editor={editor}
             resourceId={scene.id}
             resourceKind="script-scene"
@@ -355,7 +375,7 @@ function worstSaveState(states: SaveState[]): SaveState {
   return "idle";
 }
 
-function SaveBadge({ state }: { state: SaveState }) {
+function SaveBadge({ state, onRetry }: { state: SaveState; onRetry?: () => void }) {
   if (state === "idle") return null;
   const label = state === "saving" ? "Saving…" : state === "saved" ? "Saved" : "Save failed";
   const tone =
@@ -364,5 +384,18 @@ function SaveBadge({ state }: { state: SaveState }) {
       : state === "saved"
         ? "text-emerald-600 dark:text-emerald-400"
         : "text-neutral-500";
-  return <span className={`text-xs ${tone}`}>{label}</span>;
+  return (
+    <span className={`flex items-center gap-2 text-xs ${tone}`}>
+      <span>{label}</span>
+      {state === "error" && onRetry ? (
+        <button
+          className="rounded-full border border-current/30 px-2 py-0.5 font-medium hover:bg-current/10"
+          onClick={onRetry}
+          type="button"
+        >
+          Retry save
+        </button>
+      ) : null}
+    </span>
+  );
 }

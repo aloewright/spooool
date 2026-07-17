@@ -341,6 +341,33 @@ export const revisions = sqliteTable(
   (t) => ({ byTarget: index("revisions_by_target").on(t.target_table, t.target_id) }),
 );
 
+export const ai_budget_requests = sqliteTable(
+  "ai_budget_requests",
+  {
+    request_id: text("request_id").primaryKey().notNull(),
+    user_id: text("user_id")
+      .references(() => users.id)
+      .notNull(),
+    usage_date: text("usage_date").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    route: text("route", { enum: ["dynamic/text_gen", "dynamic/research_gen"] }).notNull(),
+    reserved_cents: integer("reserved_cents").notNull(),
+    actual_cents: integer("actual_cents"),
+    status: text("status", {
+      enum: ["pending", "generated", "succeeded", "failed"],
+    }).notNull(),
+    // Set while the provider result is staged, before the revision row exists.
+    revision_id: text("revision_id"),
+    response_json: text("response_json", { mode: "json" }),
+    expires_at: ts("expires_at"),
+    created_at: ts("created_at").default(sql`(unixepoch())`),
+    updated_at: ts("updated_at").default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    byUserDay: index("ai_budget_requests_by_user_day").on(t.user_id, t.usage_date, t.expires_at),
+  }),
+);
+
 export const chat_messages = sqliteTable(
   "chat_messages",
   {

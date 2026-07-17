@@ -1,44 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiRequestFingerprint,
+  aiReservationCostCents,
   aiUsageCostCents,
-  assertBudget,
-  recordUsage,
-  todayIso,
+  budgetCapCents,
+  parseIdempotencyKey,
 } from "../../apps/web/src/lib/budget";
 
-function fakeKv() {
-  const store = new Map<string, string>();
-  return {
-    async get(k: string) {
-      return store.get(k) ?? null;
-    },
-    async put(k: string, v: string) {
-      store.set(k, v);
-    },
-    _store: store,
-    // biome-ignore lint/suspicious/noExplicitAny: minimal KV stub
-  } as any;
-}
-
 describe("budget", () => {
-  it("permits when under cap", async () => {
-    const kv = fakeKv();
-    await expect(assertBudget(kv, "user1", 5000)).resolves.toBeUndefined();
-  });
-
-  it("throws BudgetExceeded when over cap", async () => {
-    const kv = fakeKv();
-    await kv.put(`budget:user1:${todayIso()}`, "5500");
-    await expect(assertBudget(kv, "user1", 5000)).rejects.toThrow(/BudgetExceeded/);
-  });
-
-  it("recordUsage increments counter", async () => {
-    const kv = fakeKv();
-    await recordUsage(kv, "user1", 200);
-    await recordUsage(kv, "user1", 300);
-    expect(kv._store.get(`budget:user1:${todayIso()}`)).toBe("500");
-  });
-
   it("meters completed remote token usage with route-aware weighting", () => {
     expect(aiUsageCostCents({ route: "dynamic/text_gen", tokens_in: 700, tokens_out: 100 })).toBe(
       1,
@@ -51,8 +20,42 @@ describe("budget", () => {
     ).toBe(0);
   });
 
-  it("rejects invalid usage increments", async () => {
-    const kv = fakeKv();
-    await expect(recordUsage(kv, "user1", -1)).rejects.toThrow(/non-negative safe integer/);
+  it("reserves a conservative upper bound before provider invocation", () => {
+    const prompt = JSON.stringify({ messages: [{ content: "Revise this paragraph." }] });
+    const reservation = aiReservationCostCents("dynamic/text_gen", prompt, 900);
+
+    expect(reservation).toBeGreaterThanOrEqual(
+      aiUsageCostCents({
+        route: "dynamic/text_gen",
+        tokens_in: new TextEncoder().encode(prompt).byteLength,
+        tokens_out: 900,
+      }),
+    );
+    expect(reservation).toBeGreaterThan(
+      aiUsageCostCents({ route: "dynamic/text_gen", tokens_in: 11, tokens_out: 3 }),
+    );
+  });
+
+  it("normalizes valid UUID idempotency keys and rejects malformed keys", () => {
+    expect(parseIdempotencyKey(" 01234567-89AB-4DEF-8123-456789ABCDEF ")).toBe(
+      "01234567-89ab-4def-8123-456789abcdef",
+    );
+    expect(parseIdempotencyKey("not-a-uuid")).toBeNull();
+    expect(parseIdempotencyKey(undefined)).toBeNull();
+  });
+
+  it("fingerprints the complete ordered request and changes with content", async () => {
+    const first = await aiRequestFingerprint(["editor-ai", "chapter", "one"]);
+    const same = await aiRequestFingerprint(["editor-ai", "chapter", "one"]);
+    const changed = await aiRequestFingerprint(["editor-ai", "chapter", "two"]);
+
+    expect(first).toMatch(/^[0-9a-f]{64}$/);
+    expect(same).toBe(first);
+    expect(changed).not.toBe(first);
+  });
+
+  it("uses the existing plan caps", () => {
+    expect(budgetCapCents("free")).toBe(1_000);
+    expect(budgetCapCents("pro")).toBe(5_000);
   });
 });

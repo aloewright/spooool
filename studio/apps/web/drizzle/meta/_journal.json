@@ -71,6 +71,13 @@
       "when": 1784325339366,
       "tag": "0009_smooth_millenium_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1784328887722,
+      "tag": "0010_steady_dark_beast",
+      "breakpoints": true
     }
   ]
 }

@@ -295,8 +295,6 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
   const [post] = await db
     .select({
       id: blog_posts.id,
-      status: blog_posts.status,
-      draftVersion: blog_posts.draft_version,
     })
     .from(blog_posts)
     .where(and(eq(blog_posts.id, postId), eq(blog_posts.blog_id, id)))
@@ -322,19 +320,26 @@ blogsRoute.patch("/:id/posts/:postId", async (c) => {
     draft_sequence: draftSequence,
     ...patch
   } = body;
-  const values = { ...patch, updated_at: new Date() };
-  if (
-    values.status === undefined &&
-    post.status === "planned" &&
-    body.draft_md !== undefined &&
-    body.draft_md.trim().length > 0
-  ) {
-    values.status = "drafting";
-  }
+  const shouldAutoPromote =
+    patch.status === undefined && body.draft_md !== undefined && body.draft_md.trim().length > 0;
+  const values = {
+    ...patch,
+    ...(shouldAutoPromote
+      ? {
+          status: sql`case when ${blog_posts.status} = 'planned' then 'drafting' else ${blog_posts.status} end`,
+        }
+      : {}),
+    updated_at: new Date(),
+  };
 
   if (!hasDraftUpdate) {
-    await db.update(blog_posts).set(values).where(eq(blog_posts.id, postId));
-    return c.json({ ok: true, draft_version: post.draftVersion });
+    const [updated] = await db
+      .update(blog_posts)
+      .set(values)
+      .where(eq(blog_posts.id, postId))
+      .returning({ draft_version: blog_posts.draft_version });
+    if (!updated) return c.json({ error: "post not found" }, 404);
+    return c.json({ ok: true, draft_version: updated.draft_version });
   }
 
   const [updated] = await db

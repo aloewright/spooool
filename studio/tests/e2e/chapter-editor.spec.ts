@@ -68,6 +68,23 @@ test("sign-up -> outline -> chapter editor autosave", async ({ page }) => {
     "The Cost of Staying Stuck",
   );
 
+  const chapterResponsePattern = /\/api\/v1\/chapters\/[^/]+$/;
+  await page.route(chapterResponsePattern, async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const chapter = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({
+      response,
+      json: {
+        ...chapter,
+        draft_json: [{ content: "Malformed persisted block" }],
+        draft_md: "",
+      },
+    });
+  });
   await page.getByRole("link", { name: "Open chapter editor" }).first().click();
   await expect(page).toHaveURL(/\/chapters\//);
   await expect(page.getByRole("heading", { name: "The Cost of Staying Stuck" })).toBeVisible();
@@ -105,6 +122,8 @@ test("sign-up -> outline -> chapter editor autosave", async ({ page }) => {
     .click();
 
   const editor = page.locator('[data-testid="chapter-editor"] [contenteditable="true"]').first();
+  await expect(editor).toContainText("The Cost of Staying Stuck");
+  await page.unroute(chapterResponsePattern);
   await expect(editor).toContainText("concrete moment", { timeout: 10_000 });
   await page.evaluate(() => document.documentElement.classList.add("dark"));
   await expect

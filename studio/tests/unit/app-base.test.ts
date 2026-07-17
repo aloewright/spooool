@@ -21,6 +21,7 @@ describe("detectAppBase", () => {
 
 describe("rewriteHtmlBase", () => {
   const html = [
+    "<title>Book Cook</title>",
     '<link rel="icon" href="/favicon.svg" />',
     '<link rel="modulepreload" href="/assets/chunk.js" />',
     '<script type="module" src="/assets/index.js"></script>',
@@ -32,6 +33,12 @@ describe("rewriteHtmlBase", () => {
     expect(out).toContain('href="/studio/favicon.svg"');
     expect(out).toContain('href="/studio/assets/chunk.js"');
     expect(out).toContain('src="/studio/assets/index.js"');
+  });
+
+  it("uses Editor as the document title for the studio mount", () => {
+    const out = rewriteHtmlBase(html, "/studio");
+    expect(out).toContain("<title>Editor</title>");
+    expect(out).not.toContain("<title>Book Cook</title>");
   });
 
   it("leaves protocol-relative URLs alone", () => {

@@ -18,5 +18,8 @@ export function detectAppBase(pathname: string): "" | typeof APP_BASE_PREFIX {
 // ("//cdn…") are left alone.
 export function rewriteHtmlBase(html: string, base: string): string {
   if (!base) return html;
-  return html.replace(/(src|href)="\/(?!\/)/g, `$1="${base}/`);
+  const rebasedHtml = html.replace(/(src|href)="\/(?!\/)/g, `$1="${base}/`);
+  return base === APP_BASE_PREFIX
+    ? rebasedHtml.replace(/<title>[^<]*<\/title>/i, "<title>Editor</title>")
+    : rebasedHtml;
 }

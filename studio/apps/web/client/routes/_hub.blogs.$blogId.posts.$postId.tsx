@@ -109,7 +109,9 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         );
         return { draftMd, draftVersion: response.draft_version, superseded: g !== gen.current };
       } catch (err) {
-        if (ctrl.signal.aborted) return { draftMd, superseded: true };
+        if (ctrl.signal.aborted) {
+          return { draftMd, draftVersion: nextVersion, superseded: true };
+        }
         if (
           err instanceof ApiError &&
           err.status === 409 &&

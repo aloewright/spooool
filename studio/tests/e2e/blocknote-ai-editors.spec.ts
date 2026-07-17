@@ -5,6 +5,7 @@ const selectedDraft = "Replace this phrase only.";
 const replacementDraft = "Sharper selected prose.";
 
 type EditorFixture = {
+  draftVersion: number;
   editorPath: string;
   patchPath: string;
   resourceKind: "blog-post" | "script-scene";
@@ -171,6 +172,100 @@ for (const editorSetup of editorSetups) {
   });
 }
 
+test("stale blog editor stops saving and reloads the latest draft", async ({ page }) => {
+  await signUp(page, "blog draft conflict");
+  const fixture = await createBlogPost(page, true);
+  const externalDraft = "The latest draft saved from another tab.";
+
+  await page.goto(fixture.editorPath);
+  const editor = page.locator('[contenteditable="true"]');
+  await expect(editor).toContainText(initialDraft);
+
+  const externalSave = await page.request.patch(fixture.patchPath, {
+    data: {
+      draft_json: [{ type: "paragraph", content: externalDraft }],
+      draft_md: externalDraft,
+      draft_version: fixture.draftVersion,
+      draft_session_id: crypto.randomUUID(),
+      draft_sequence: 1,
+    },
+  });
+  expect(externalSave.ok()).toBe(true);
+
+  let localDraftPatchAttempts = 0;
+  page.on("request", (request) => {
+    if (request.method() !== "PATCH" || new URL(request.url()).pathname !== fixture.patchPath) {
+      return;
+    }
+    const body = request.postDataJSON() as { draft_md?: string } | null;
+    if (body?.draft_md !== undefined) localDraftPatchAttempts += 1;
+  });
+
+  const conflictResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PATCH" &&
+      new URL(response.url()).pathname === fixture.patchPath &&
+      response.status() === 409,
+  );
+  await editor.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" Local stale change.");
+  await conflictResponse;
+
+  const conflictNotice = page.getByTestId("draft-conflict-notice");
+  await expect(conflictNotice).toContainText("Draft changed in another tab");
+  await expect(conflictNotice).toContainText("local unsaved changes cannot be saved");
+  await expect(
+    conflictNotice.getByRole("button", { name: "Reload latest draft", exact: true }),
+  ).toBeVisible();
+  expect(localDraftPatchAttempts).toBe(1);
+
+  await editor.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.type(" This must stay local.");
+  await page.waitForTimeout(1_250);
+  expect(localDraftPatchAttempts).toBe(1);
+
+  await page.route("**/api/v1/editor/ai", async (route) => {
+    const request = route.request().postDataJSON() as { target_md?: string };
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        revision: {
+          id: "stale-editor-revision",
+          before_md: request.target_md,
+          after_md: "An AI replacement that remains local.",
+          llm_response: { route: "dynamic/text_gen", tokens_in: 5, tokens_out: 3 },
+        },
+      }),
+    });
+  });
+  await openSlashMenu(page, editor);
+  await page.getByText("Proofread", { exact: true }).click();
+  const review = page.getByRole("dialog", { name: "Ready to review" });
+  await expect(review).toBeVisible();
+  await review.getByRole("button", { name: "Apply", exact: true }).click();
+
+  const saveFailure = page.getByRole("dialog", { name: "Replacement not saved" });
+  await expect(saveFailure).toContainText("changed in another tab");
+  await expect(saveFailure).toContainText("Reload the latest draft");
+  expect(localDraftPatchAttempts).toBe(1);
+  await saveFailure.getByRole("button", { name: "Close", exact: true }).click();
+
+  const current = await page.request.get(fixture.patchPath);
+  expect(current.ok()).toBe(true);
+  await expect(current.json()).resolves.toMatchObject({ draft_md: externalDraft });
+
+  await Promise.all([
+    page.waitForNavigation(),
+    conflictNotice.getByRole("button", { name: "Reload latest draft", exact: true }).click(),
+  ]);
+  await expect(editor).toContainText(externalDraft);
+  await expect(editor).not.toContainText("Local stale change");
+  expect(localDraftPatchAttempts).toBe(1);
+});
+
 async function signUp(page: Page, label: string) {
   await page.goto("/sign-up");
   const response = await page.request.post("/api/auth/sign-up/email", {
@@ -184,7 +279,7 @@ async function signUp(page: Page, label: string) {
   expect(response.ok()).toBe(true);
 }
 
-async function createBlogPost(page: Page): Promise<EditorFixture> {
+async function createBlogPost(page: Page, persistDraftJson = false): Promise<EditorFixture> {
   const created = await page.request.post("/api/v1/blogs", {
     data: {
       title: "Field Notes",
@@ -215,6 +310,7 @@ async function createBlogPost(page: Page): Promise<EditorFixture> {
   const patchPath = `/api/v1/blogs/${blogId}/posts/${postId}`;
   const seeded = await page.request.patch(patchPath, {
     data: {
+      ...(persistDraftJson ? { draft_json: [{ type: "paragraph", content: initialDraft }] } : {}),
       draft_md: initialDraft,
       draft_version: 0,
       draft_session_id: crypto.randomUUID(),
@@ -222,8 +318,10 @@ async function createBlogPost(page: Page): Promise<EditorFixture> {
     },
   });
   expect(seeded.ok()).toBe(true);
+  const { draft_version: draftVersion } = (await seeded.json()) as { draft_version: number };
 
   return {
+    draftVersion,
     editorPath: `/blogs/${blogId}/posts/${postId}`,
     patchPath,
     resourceKind: "blog-post",
@@ -263,8 +361,10 @@ async function createScriptScene(page: Page): Promise<EditorFixture> {
     },
   });
   expect(seeded.ok()).toBe(true);
+  const { draft_version: draftVersion } = (await seeded.json()) as { draft_version: number };
 
   return {
+    draftVersion,
     editorPath: `/scripts/${scriptId}/scenes/${sceneId}`,
     patchPath,
     resourceKind: "script-scene",

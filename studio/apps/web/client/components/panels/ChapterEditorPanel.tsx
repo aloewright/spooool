@@ -16,6 +16,11 @@ import {
 } from "../../lib/api";
 import { useDarkMode } from "../../lib/use-theme-mode";
 import { BlockNoteAiCommands } from "../editor-ai/blocknote-ai-commands";
+import {
+  DraftConflictError,
+  DraftConflictNotice,
+  getDraftConflictError,
+} from "../editor-ai/draft-conflict";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -151,6 +156,8 @@ function ChapterEditorInner({
   const draftVersion = useRef(chapter.draft_version);
   const draftSequence = useRef(0);
   const [draftSessionId] = useState(() => crypto.randomUUID());
+  const draftConflict = useRef(false);
+  const [hasDraftConflict, setHasDraftConflict] = useState(false);
   // Tracks the in-flight autosave so a newer save can abort an older one
   // before it lands — without this an earlier (slow) request could resolve
   // last and clobber the editor's latest content on the server.
@@ -160,8 +167,18 @@ function ChapterEditorInner({
     initialContent: initialContent(chapter),
   });
 
+  function enterDraftConflict() {
+    draftConflict.current = true;
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    setHasDraftConflict(true);
+  }
+
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (draftConflict.current) throw new DraftConflictError();
       // Supersede any save still in flight so out-of-order responses can't
       // overwrite newer content.
       inFlightSave.current?.abort();
@@ -172,19 +189,28 @@ function ChapterEditorInner({
       const words = wordCount(draftMd);
       const expectedDraftVersion = draftVersion.current;
       const sequence = ++draftSequence.current;
-      const response = await api.updateChapter(
-        chapter.id,
-        {
-          draft_json: draftJson,
-          draft_md: draftMd,
-          draft_version: expectedDraftVersion,
-          draft_session_id: draftSessionId,
-          draft_sequence: sequence,
-          status: words > 0 ? "drafting" : "pending",
-        },
-        { signal: controller.signal },
-      );
-      return { draftVersion: response.draft_version, sequence, words };
+      try {
+        const response = await api.updateChapter(
+          chapter.id,
+          {
+            draft_json: draftJson,
+            draft_md: draftMd,
+            draft_version: expectedDraftVersion,
+            draft_session_id: draftSessionId,
+            draft_sequence: sequence,
+            status: words > 0 ? "drafting" : "pending",
+          },
+          { signal: controller.signal },
+        );
+        return { draftVersion: response.draft_version, sequence, words };
+      } catch (error) {
+        const conflictError = getDraftConflictError(error);
+        if (conflictError) {
+          enterDraftConflict();
+          throw conflictError;
+        }
+        throw error;
+      }
     },
     onMutate: () => setSaveState("saving"),
     onSuccess: async ({ draftVersion: savedDraftVersion, sequence, words }) => {
@@ -288,6 +314,7 @@ function ChapterEditorInner({
   }, [saveState]);
 
   async function saveNow() {
+    if (draftConflict.current) throw new DraftConflictError();
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -296,6 +323,7 @@ function ChapterEditorInner({
   }
 
   function scheduleExistingChapterSave() {
+    if (draftConflict.current) return;
     if (pendingSave.current) window.clearTimeout(pendingSave.current);
     pendingSave.current = window.setTimeout(() => saveMutation.mutate(), 1000);
   }
@@ -342,6 +370,8 @@ function ChapterEditorInner({
 
   return (
     <div className="space-y-4">
+      {hasDraftConflict ? <DraftConflictNotice onReload={() => window.location.reload()} /> : null}
+
       <SectionDraftPanel
         sections={sections}
         activeSectionId={draftMutation.variables?.sectionId}
@@ -369,7 +399,13 @@ function ChapterEditorInner({
             <span aria-hidden>·</span>
             <span>{lastSavedWords.toLocaleString()} saved words</span>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={() => void saveNow()}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={hasDraftConflict}
+            onClick={() => void saveNow()}
+          >
             Save now
           </Button>
         </div>

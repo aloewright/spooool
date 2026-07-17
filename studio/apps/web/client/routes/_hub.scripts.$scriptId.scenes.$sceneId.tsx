@@ -9,6 +9,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Clapperboard } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
+import {
+  DraftConflictError,
+  DraftConflictNotice,
+  getDraftConflictError,
+} from "../components/editor-ai/draft-conflict";
 import { ScriptShell } from "../components/studio/ScriptShell";
 import { type Script, type ScriptScene, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
@@ -97,6 +102,8 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
   const draftVersion = useRef(scene.draft_version);
   const draftSequence = useRef(0);
   const [draftSessionId] = useState(() => crypto.randomUUID());
+  const draftConflict = useRef(false);
+  const [hasDraftConflict, setHasDraftConflict] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
   const gen = useRef(0);
   const hydratedMarkdown = useRef(false);
@@ -115,6 +122,15 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         : undefined,
   });
 
+  function enterDraftConflict() {
+    draftConflict.current = true;
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    setHasDraftConflict(true);
+  }
+
   // Scenes drafted outside the BlockNote editor only have markdown; hydrate
   // it into blocks once so nothing written elsewhere is lost.
   useEffect(() => {
@@ -127,6 +143,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
 
   const saveDraft = useMutation({
     mutationFn: async () => {
+      if (draftConflict.current) throw new DraftConflictError();
       // Serialize the live document and supersede any in-flight save so an
       // older request can't land after (and overwrite) a newer one.
       inFlight.current?.abort();
@@ -155,6 +172,11 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         if (ctrl.signal.aborted) {
           return { draftMd, draftVersion: expectedDraftVersion, superseded: true };
         }
+        const conflictError = getDraftConflictError(err);
+        if (conflictError) {
+          enterDraftConflict();
+          throw conflictError;
+        }
         throw err;
       }
     },
@@ -171,10 +193,14 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         qc.invalidateQueries({ queryKey: queryKeys.scriptScenes(script.id) });
       }
     },
-    onError: () => setIsDirty(false),
+    onError: (error) => {
+      if (error instanceof DraftConflictError) return;
+      setIsDirty(false);
+    },
   });
 
   async function saveNow() {
+    if (draftConflict.current) throw new DraftConflictError();
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -186,6 +212,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
   // edits made just before navigating away still land.
   const flushRef = useRef<() => void>(() => {});
   flushRef.current = () => {
+    if (draftConflict.current) return;
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -211,8 +238,9 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
       ]),
   });
 
-  const draftState: SaveState =
-    saveDraft.isPending || isDirty
+  const draftState: SaveState = hasDraftConflict
+    ? "error"
+    : saveDraft.isPending || isDirty
       ? "saving"
       : saveDraft.isError
         ? "error"
@@ -250,6 +278,12 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
         </div>
       </div>
 
+      {hasDraftConflict ? (
+        <div className="mb-6">
+          <DraftConflictNotice onReload={() => window.location.reload()} />
+        </div>
+      ) : null}
+
       <input
         autoComplete="off"
         className="w-full bg-transparent font-serif text-3xl tracking-tight outline-none placeholder:text-neutral-400"
@@ -278,6 +312,7 @@ function Editor({ script, scene }: { script: Script; scene: ScriptScene }) {
           theme={darkMode ? "dark" : "light"}
           onChange={() => {
             setIsDirty(true);
+            if (draftConflict.current) return;
             if (pendingSave.current) window.clearTimeout(pendingSave.current);
             pendingSave.current = window.setTimeout(() => {
               pendingSave.current = undefined;

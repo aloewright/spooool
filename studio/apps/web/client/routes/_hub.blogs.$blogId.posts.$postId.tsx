@@ -8,6 +8,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Rss } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BlockNoteAiCommands } from "../components/editor-ai/blocknote-ai-commands";
+import {
+  DraftConflictError,
+  DraftConflictNotice,
+  getDraftConflictError,
+} from "../components/editor-ai/draft-conflict";
 import { BlogShell } from "../components/studio/BlogShell";
 import { type BlogDetail, type BlogPost, api, queryKeys } from "../lib/api";
 import { type SaveState, useAutosave } from "../lib/use-autosave";
@@ -65,6 +70,8 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
   const draftVersion = useRef(post.draft_version);
   const draftSequence = useRef(0);
   const [draftSessionId] = useState(() => crypto.randomUUID());
+  const draftConflict = useRef(false);
+  const [hasDraftConflict, setHasDraftConflict] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
   const gen = useRef(0);
   const hydratedMarkdown = useRef(false);
@@ -80,6 +87,15 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         : undefined,
   });
 
+  function enterDraftConflict() {
+    draftConflict.current = true;
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    setHasDraftConflict(true);
+  }
+
   // Posts drafted before the BlockNote editor only have markdown; hydrate it
   // into blocks once so nothing written in the old plain-text editor is lost.
   useEffect(() => {
@@ -92,6 +108,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
 
   const saveDraft = useMutation({
     mutationFn: async () => {
+      if (draftConflict.current) throw new DraftConflictError();
       // Serialize the live document and supersede any in-flight save so an
       // older request can't land after (and overwrite) a newer one.
       inFlight.current?.abort();
@@ -120,6 +137,11 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         if (ctrl.signal.aborted) {
           return { draftMd, draftVersion: expectedDraftVersion, superseded: true };
         }
+        const conflictError = getDraftConflictError(err);
+        if (conflictError) {
+          enterDraftConflict();
+          throw conflictError;
+        }
         throw err;
       }
     },
@@ -135,10 +157,14 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         qc.invalidateQueries({ queryKey: queryKeys.blogPosts(blog.id) });
       }
     },
-    onError: () => setIsDirty(false),
+    onError: (error) => {
+      if (error instanceof DraftConflictError) return;
+      setIsDirty(false);
+    },
   });
 
   async function saveNow() {
+    if (draftConflict.current) throw new DraftConflictError();
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -150,6 +176,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
   // edits made just before navigating away still land.
   const flushRef = useRef<() => void>(() => {});
   flushRef.current = () => {
+    if (draftConflict.current) return;
     if (pendingSave.current) {
       window.clearTimeout(pendingSave.current);
       pendingSave.current = undefined;
@@ -174,8 +201,9 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
       ]),
   });
 
-  const draftState: SaveState =
-    saveDraft.isPending || isDirty
+  const draftState: SaveState = hasDraftConflict
+    ? "error"
+    : saveDraft.isPending || isDirty
       ? "saving"
       : saveDraft.isError
         ? "error"
@@ -213,6 +241,12 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           )}
         </div>
       </div>
+
+      {hasDraftConflict ? (
+        <div className="mb-6">
+          <DraftConflictNotice onReload={() => window.location.reload()} />
+        </div>
+      ) : null}
 
       <input
         autoComplete="off"
@@ -265,6 +299,7 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
           theme={darkMode ? "dark" : "light"}
           onChange={() => {
             setIsDirty(true);
+            if (draftConflict.current) return;
             if (pendingSave.current) window.clearTimeout(pendingSave.current);
             pendingSave.current = window.setTimeout(() => {
               pendingSave.current = undefined;

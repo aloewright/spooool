@@ -1,6 +1,13 @@
 import type { Env } from "../env";
 import { gateway } from "../lib/gateway";
-import type { EditorAiCommand, EditorAiRequest, EditorAiRoute } from "../shared/editor-ai";
+import {
+  EDITOR_AI_INSTRUCTIONS_MAX_LENGTH,
+  EDITOR_AI_RESOURCE_METADATA_TEXT_MAX_LENGTH,
+  EDITOR_AI_VOICE_PROFILE_MAX_LENGTH,
+  type EditorAiCommand,
+  type EditorAiRequest,
+  type EditorAiRoute,
+} from "../shared/editor-ai";
 
 export type EditorResourceContext =
   | {
@@ -52,8 +59,8 @@ const routeFor = (command: EditorAiCommand): EditorAiRoute =>
 
 const normalizeOutput = (text: string): string => {
   const trimmed = text.trim();
-  const fenced = /^```(?:markdown|md)?\s*\n([\s\S]*?)\n```$/.exec(trimmed);
-  const markdown = (fenced?.[1] ?? trimmed).trim();
+  const fenced = /^```(?:markdown|md)?[ \t]*\n([\s\S]*?)\n?```$/.exec(trimmed);
+  const markdown = (fenced ? fenced[1] : trimmed).trim();
   if (!markdown) throw new Error("AI returned no usable replacement");
   if (markdown.length > 200_000) throw new Error("AI replacement is too large");
   return markdown;
@@ -118,18 +125,20 @@ function userPromptFor(input: EditorCommandInput): string {
     resourceMetadata(input.context),
     "",
     commandInstruction(request.command),
-    request.instructions ? `Author instructions: ${request.instructions}` : "",
+    request.instructions
+      ? `Author instructions: ${normalizeMetadataText(request.instructions, EDITOR_AI_INSTRUCTIONS_MAX_LENGTH)}`
+      : "",
     "",
     request.scope === "selection"
       ? "Return only replacement Markdown for the selected passage. Do not include surrounding document content."
       : "Return the complete replacement Markdown body for the document.",
     "",
     "<target_md>",
-    request.target_md,
+    encodeSourceMarkdown(request.target_md),
     "</target_md>",
     "",
     "<context_md>",
-    request.context_md,
+    encodeSourceMarkdown(request.context_md),
     "</context_md>",
   ]
     .filter(Boolean)
@@ -152,11 +161,11 @@ function commandInstruction(command: EditorAiCommand): string {
 function resourceMetadata(context: EditorResourceContext): string {
   if (context.kind === "chapter") {
     return [
-      `Project title: ${context.projectTitle}`,
-      `Project type: ${context.projectType}`,
-      `Chapter title: ${context.chapterTitle}`,
-      `Chapter summary: ${context.chapterSummary || "No summary supplied."}`,
-      context.voiceProfile ? `Voice profile JSON: ${JSON.stringify(context.voiceProfile)}` : "",
+      `Project title: ${metadataText(context.projectTitle)}`,
+      `Project type: ${metadataText(context.projectType)}`,
+      `Chapter title: ${metadataText(context.chapterTitle)}`,
+      `Chapter summary: ${metadataText(context.chapterSummary, "No summary supplied.")}`,
+      voiceProfileMetadata(context.voiceProfile),
     ]
       .filter(Boolean)
       .join("\n");
@@ -164,26 +173,64 @@ function resourceMetadata(context: EditorResourceContext): string {
 
   if (context.kind === "blog-post") {
     return [
-      `Blog title: ${context.blogTitle}`,
-      `Blog description: ${context.blogDescription || "No description supplied."}`,
-      `Blog format: ${context.blogFormat}`,
-      `Post title: ${context.postTitle}`,
-      `Post summary: ${context.postSummary || "No summary supplied."}`,
-      context.voiceProfile ? `Voice profile JSON: ${JSON.stringify(context.voiceProfile)}` : "",
-      context.doRules?.length ? `Do rules: ${context.doRules.join("; ")}` : "",
-      context.dontRules?.length ? `Don't rules: ${context.dontRules.join("; ")}` : "",
+      `Blog title: ${metadataText(context.blogTitle)}`,
+      `Blog description: ${metadataText(context.blogDescription, "No description supplied.")}`,
+      `Blog format: ${metadataText(context.blogFormat)}`,
+      `Post title: ${metadataText(context.postTitle)}`,
+      `Post summary: ${metadataText(context.postSummary, "No summary supplied.")}`,
+      voiceProfileMetadata(context.voiceProfile),
+      rulesMetadata("Do rules", context.doRules),
+      rulesMetadata("Don't rules", context.dontRules),
     ]
       .filter(Boolean)
       .join("\n");
   }
 
   return [
-    `Script title: ${context.scriptTitle}`,
-    `Script format: ${context.scriptFormat}`,
-    `Logline: ${context.logline}`,
-    `Genre: ${context.genre}`,
-    `Scene title: ${context.sceneTitle}`,
-    `Scene summary: ${context.sceneSummary || "No summary supplied."}`,
-    `Scene ordinal: ${context.sceneOrdinal}`,
+    `Script title: ${metadataText(context.scriptTitle)}`,
+    `Script format: ${metadataText(context.scriptFormat)}`,
+    `Logline: ${metadataText(context.logline)}`,
+    `Genre: ${metadataText(context.genre)}`,
+    `Scene title: ${metadataText(context.sceneTitle)}`,
+    `Scene summary: ${metadataText(context.sceneSummary, "No summary supplied.")}`,
+    `Scene ordinal: ${Number.isFinite(context.sceneOrdinal) ? context.sceneOrdinal : "Unknown"}`,
   ].join("\n");
+}
+
+function encodeSourceMarkdown(markdown: string): string {
+  return JSON.stringify(markdown)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026");
+}
+
+function normalizeMetadataText(
+  value: unknown,
+  maxLength = EDITOR_AI_RESOURCE_METADATA_TEXT_MAX_LENGTH,
+): string {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function metadataText(value: unknown, fallback = ""): string {
+  return normalizeMetadataText(value) || fallback;
+}
+
+function voiceProfileMetadata(voiceProfile: unknown): string {
+  if (voiceProfile === undefined || voiceProfile === null) return "";
+  try {
+    const serialized = JSON.stringify(voiceProfile);
+    if (typeof serialized !== "string") return "";
+    return `Voice profile JSON: ${serialized.slice(0, EDITOR_AI_VOICE_PROFILE_MAX_LENGTH)}`;
+  } catch {
+    return "";
+  }
+}
+
+function rulesMetadata(label: string, rules: unknown): string {
+  if (!Array.isArray(rules)) return "";
+  const normalizedRules = rules
+    .map((rule) => normalizeMetadataText(rule))
+    .filter(Boolean)
+    .join("; ");
+  return normalizedRules ? `${label}: ${normalizeMetadataText(normalizedRules)}` : "";
 }

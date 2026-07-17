@@ -234,7 +234,10 @@ function Editor({ blog, post }: { blog: BlogDetail; post: BlogPost }) {
         </details>
       )}
 
-      <div className="mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5">
+      <div
+        className="blocknote-editor-shell mt-6 min-h-[60vh] rounded-2xl bg-white/70 py-5 ring-1 ring-black/5 dark:bg-neutral-900/70 dark:ring-white/5"
+        data-testid="blocknote-editor-shell"
+      >
         <BlockNoteView
           editor={editor}
           theme={darkMode ? "dark" : "light"}

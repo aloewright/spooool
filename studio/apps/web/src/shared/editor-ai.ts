@@ -25,6 +25,7 @@ export const editorAiRequestSchema = z
     context_md: z.string().max(EDITOR_AI_CONTEXT_MARKDOWN_MAX_LENGTH),
     instructions: z.string().trim().min(1).max(EDITOR_AI_INSTRUCTIONS_MAX_LENGTH).optional(),
   })
+  .strict()
   .superRefine((value, ctx) => {
     if (value.command === "rewrite" && !value.instructions) {
       ctx.addIssue({

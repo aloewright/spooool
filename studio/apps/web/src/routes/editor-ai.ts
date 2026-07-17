@@ -23,6 +23,14 @@ import type { EditorResourceContext } from "../skills/editor-command";
 import { runEditorCommand } from "../skills/editor-command";
 
 type EditorTargetTable = "chapters" | "blog_posts" | "script_scenes";
+const EDITOR_AI_REQUEST_BODY_MAX_BYTES = 310_000;
+
+type BoundedRequestBody =
+  | { tooLarge: true }
+  | {
+      tooLarge: false;
+      text: string;
+    };
 
 type ResolvedEditorResourceContext = {
   context: EditorResourceContext;
@@ -145,11 +153,24 @@ editorAiRoute.use("*", requireUser);
 
 editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
   const declaredLength = Number(c.req.header("content-length"));
-  if (Number.isFinite(declaredLength) && declaredLength > 310_000) {
+  if (Number.isFinite(declaredLength) && declaredLength > EDITOR_AI_REQUEST_BODY_MAX_BYTES) {
     return c.json({ error: "request too large" }, 413);
   }
 
-  const json = await c.req.json().catch(() => null);
+  let body: BoundedRequestBody;
+  try {
+    body = await readBoundedRequestBody(c.req.raw, EDITOR_AI_REQUEST_BODY_MAX_BYTES);
+  } catch {
+    return c.json({ error: "invalid request" }, 400);
+  }
+  if (body.tooLarge) return c.json({ error: "request too large" }, 413);
+
+  let json: unknown;
+  try {
+    json = JSON.parse(body.text);
+  } catch {
+    return c.json({ error: "invalid request" }, 400);
+  }
   const parsed = editorAiRequestSchema.safeParse(json);
   if (!parsed.success) return c.json({ error: "invalid request" }, 400);
   const request = parsed.data;
@@ -181,6 +202,42 @@ editorAiRoute.post("/ai", enforceBudget("editor-ai"), async (c) => {
 
   return c.json({ revision });
 });
+
+async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<BoundedRequestBody> {
+  if (!request.body) return { tooLarge: false, text: "" };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = value as Uint8Array;
+      totalBytes += chunk.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel("request too large").catch(() => undefined);
+        return { tooLarge: true };
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { tooLarge: false, text: new TextDecoder().decode(bytes) };
+}
 
 function stringArray(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;

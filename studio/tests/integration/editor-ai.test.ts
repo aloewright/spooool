@@ -30,12 +30,14 @@ const mutableEnv = env as typeof env & {
 };
 let expectedGatewayFragments: string[] = [];
 let gatewayStatus = 200;
+let gatewayCalls = 0;
 
 beforeEach(() => {
   mutableEnv.AI_GATEWAY_BASE_URL = gatewayOrigin;
   mutableEnv.AI_GATEWAY_TOKEN = "test-token";
   expectedGatewayFragments = [];
   gatewayStatus = 200;
+  gatewayCalls = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const outbound = new Request(input, init);
     const url = new URL(outbound.url);
@@ -46,6 +48,7 @@ beforeEach(() => {
     ) {
       throw new Error(`No outbound mock for ${outbound.method} ${outbound.url}`);
     }
+    gatewayCalls += 1;
 
     const request = JSON.parse(await outbound.text()) as {
       messages?: Array<{ content?: string }>;
@@ -188,10 +191,30 @@ async function createFixture(plan: "free" | "pro" = "pro"): Promise<Fixture> {
 }
 
 async function requestEditorAi(cookie: string, body: unknown, headers: HeadersInit = {}) {
+  return requestEditorAiRaw(cookie, JSON.stringify(body), headers);
+}
+
+async function requestEditorAiRaw(cookie: string, body: BodyInit, headers: HeadersInit = {}) {
   return SELF.fetch("http://x/api/v1/editor/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json", cookie, ...headers },
-    body: JSON.stringify(body),
+    body,
+  });
+}
+
+function streamedBody(value: string): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(value);
+  let offset = 0;
+  return new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.byteLength) {
+        controller.close();
+        return;
+      }
+      const nextOffset = Math.min(offset + 64_000, bytes.byteLength);
+      controller.enqueue(bytes.slice(offset, nextOffset));
+      offset = nextOffset;
+    },
   });
 }
 
@@ -215,7 +238,7 @@ const successCases = [
     targetTable: "chapters",
     context: [
       "Project title: Quiet Operator",
-      'Voice profile JSON: {"cadence":"short and direct"}',
+      'Voice profile JSON: {\\"cadence\\":\\"short and direct\\"}',
     ],
   },
   {
@@ -377,6 +400,44 @@ describe("editor AI", () => {
     });
 
     expect(response.status).toBe(413);
+    expect(gatewayCalls).toBe(0);
+    expect(await revisionFor(resourceId)).toBeNull();
+  });
+
+  it.each([
+    ["missing", {}],
+    ["understated", { "Content-Length": "100" }],
+  ])(
+    "rejects an oversized body with %s Content-Length before generation",
+    async (_description, headers) => {
+      const fixture = await createFixture();
+      const resourceId = fixture.resourceIds.chapter;
+      const body = streamedBody(
+        JSON.stringify({
+          ...payload("chapter", resourceId),
+          oversized_unknown: "x".repeat(310_000),
+        }),
+      );
+
+      const response = await requestEditorAiRaw(fixture.cookie, body, headers);
+
+      expect(response.status).toBe(413);
+      expect(gatewayCalls).toBe(0);
+      expect(await revisionFor(resourceId)).toBeNull();
+    },
+  );
+
+  it("rejects a small request with an unknown key before generation", async () => {
+    const fixture = await createFixture();
+    const resourceId = fixture.resourceIds.chapter;
+
+    const response = await requestEditorAi(fixture.cookie, {
+      ...payload("chapter", resourceId),
+      unknown_key: "must not be silently discarded",
+    });
+
+    expect(response.status).toBe(400);
+    expect(gatewayCalls).toBe(0);
     expect(await revisionFor(resourceId)).toBeNull();
   });
 });

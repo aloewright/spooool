@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRight, ChevronLeft, GripVertical, Lock, Unlock } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import ChapterEditorPanel from "../components/panels/ChapterEditorPanel";
 import { SideDrawer } from "../components/studio/SideDrawer";
 import { TopLeftPill } from "../components/studio/TopLeftPill";
 import { type Section, api, queryKeys } from "../lib/api";
@@ -17,8 +18,9 @@ type FlatBlock = { sectionId: string; field: BmeField; label: string };
 
 function StudioChapter() {
   const { projectId, chapterId } = Route.useParams();
-  const navigate = useNavigate();
   const drawer = useDrawerLayout();
+  const [view, setView] = useState<"draft" | "scenes">("scenes");
+  const [draftMounted, setDraftMounted] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [flatOrder, setFlatOrder] = useState<FlatBlock[]>([]);
   const [flatDragIdx, setFlatDragIdx] = useState<number | null>(null);
@@ -112,6 +114,38 @@ function StudioChapter() {
           <span className="truncate text-[13px] text-neutral-400">{chapterLabel}</span>
         </div>
         <div className="pointer-events-auto flex items-center gap-2">
+          <fieldset
+            className="flex items-center rounded-lg bg-neutral-900/90 p-0.5 ring-1 ring-white/10"
+            aria-label="Chapter view"
+          >
+            <button
+              aria-pressed={view === "draft"}
+              className={`rounded-md px-2.5 py-1 text-[11px] transition ${
+                view === "draft"
+                  ? "bg-white/10 text-neutral-100"
+                  : "text-neutral-500 hover:text-neutral-200"
+              }`}
+              onClick={() => {
+                setDraftMounted(true);
+                setView("draft");
+              }}
+              type="button"
+            >
+              Draft
+            </button>
+            <button
+              aria-pressed={view === "scenes"}
+              className={`rounded-md px-2.5 py-1 text-[11px] transition ${
+                view === "scenes"
+                  ? "bg-white/10 text-neutral-100"
+                  : "text-neutral-500 hover:text-neutral-200"
+              }`}
+              onClick={() => setView("scenes")}
+              type="button"
+            >
+              Scenes
+            </button>
+          </fieldset>
           {prevChapter && (
             <Link
               className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
@@ -143,7 +177,12 @@ function StudioChapter() {
           paddingLeft: drawer.open ? (drawer.collapsed ? "5rem" : "20rem") : undefined,
         }}
       >
-        <div className="mx-auto max-w-2xl">
+        {draftMounted && (
+          <div hidden={view !== "draft"}>
+            <ChapterEditorPanel chapterId={chapterId} embedded projectId={projectId} theme="dark" />
+          </div>
+        )}
+        <div className="mx-auto max-w-2xl" hidden={view !== "scenes"}>
           {chapter.data && (
             <div className="mb-8">
               <div className="text-[11px] text-neutral-500 uppercase tracking-wide">
@@ -198,7 +237,7 @@ function StudioChapter() {
       </main>
 
       {/* Right TOC pill */}
-      {scenes.length > 0 && (
+      {view === "scenes" && scenes.length > 0 && (
         <nav className="fixed right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1 rounded-2xl bg-neutral-900/90 px-3 py-3 ring-1 ring-white/5 backdrop-blur">
           <span className="mb-1 text-[9px] text-neutral-500 uppercase tracking-widest">Scenes</span>
           {scenes.map((s, i) => (
@@ -217,20 +256,22 @@ function StudioChapter() {
       )}
 
       {/* Bottom unlock button */}
-      <div className="-translate-x-1/2 fixed bottom-6 left-1/2 z-20">
-        <button
-          className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm ring-1 transition ${
-            unlocked
-              ? "bg-emerald-600/20 text-emerald-300 ring-emerald-500/30 hover:bg-emerald-600/30"
-              : "bg-neutral-900/90 text-neutral-400 ring-white/5 backdrop-blur hover:text-neutral-200"
-          }`}
-          onClick={handleUnlock}
-          type="button"
-        >
-          {unlocked ? <Unlock className="size-3.5" /> : <Lock className="size-3.5" />}
-          {unlocked ? "Lock structure" : "Unlock structure"}
-        </button>
-      </div>
+      {view === "scenes" && (
+        <div className="-translate-x-1/2 fixed bottom-6 left-1/2 z-20">
+          <button
+            className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm ring-1 transition ${
+              unlocked
+                ? "bg-emerald-600/20 text-emerald-300 ring-emerald-500/30 hover:bg-emerald-600/30"
+                : "bg-neutral-900/90 text-neutral-400 ring-white/5 backdrop-blur hover:text-neutral-200"
+            }`}
+            onClick={handleUnlock}
+            type="button"
+          >
+            {unlocked ? <Unlock className="size-3.5" /> : <Lock className="size-3.5" />}
+            {unlocked ? "Lock structure" : "Unlock structure"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

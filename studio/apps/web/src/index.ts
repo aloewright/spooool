@@ -11,6 +11,7 @@ import { adminRoute } from "./routes/admin";
 import { blogsRoute } from "./routes/blogs";
 import { chaptersRoute } from "./routes/chapters";
 import { composeRoute } from "./routes/compose";
+import { editorAiRoute } from "./routes/editor-ai";
 import { healthRoute } from "./routes/health";
 import { projectsRoute } from "./routes/projects";
 import { scoutRoute } from "./routes/scout";
@@ -127,6 +128,7 @@ app.route("/api/v1/voices", voicesRoute);
 app.route("/api/v1/account", accountRoute);
 app.route("/api/v1/scout", scoutRoute);
 app.route("/api/v1/compose", composeRoute);
+app.route("/api/v1/editor", editorAiRoute);
 app.route("/api/v1/admin", adminRoute);
 
 app.all("/agents/*", async (c) => {

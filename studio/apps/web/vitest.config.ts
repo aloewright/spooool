@@ -14,6 +14,8 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             KEYRING_MASTER_KEY: "test-keyring-master-key",
             GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+            AI_GATEWAY_BASE_URL: "",
+            AI_GATEWAY_TOKEN: "",
           },
         },
       }),

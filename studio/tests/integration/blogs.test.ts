@@ -92,7 +92,14 @@ describe("blogs", () => {
     expect(replanTooFew.status).toBe(400);
 
     const postId = postsBody.items[0].id;
+    const postDraftSessionId = crypto.randomUUID();
     const draftJson = [{ type: "paragraph", content: "Step one." }];
+    const unversionedDraft = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ draft_md: "Missing its write order." }),
+    });
+    expect(unversionedDraft.status).toBe(400);
     const patchPost = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, {
       method: "PATCH",
       headers,
@@ -100,6 +107,9 @@ describe("blogs", () => {
         title: "Ship it",
         draft_json: draftJson,
         draft_md: "Step one.",
+        draft_version: 0,
+        draft_session_id: postDraftSessionId,
+        draft_sequence: 1,
         status: "drafted",
       }),
     });
@@ -114,6 +124,7 @@ describe("blogs", () => {
     expect(postBody.title).toBe("Ship it");
     expect(postBody.draft_json).toEqual(draftJson);
     expect(postBody.draft_md).toBe("Step one.");
+    expect(postBody.draft_version).toBe(1);
     expect(postBody.status).toBe("drafted");
 
     const missingPost = await SELF.fetch(
@@ -137,10 +148,16 @@ describe("blogs", () => {
 
     // First draft content promotes a planned post to drafting server-side…
     const secondPostId = postsBody.items[1].id;
+    const secondPostDraftSessionId = crypto.randomUUID();
     await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line." }),
+      body: JSON.stringify({
+        draft_md: "Opening line.",
+        draft_version: 0,
+        draft_session_id: secondPostDraftSessionId,
+        draft_sequence: 1,
+      }),
     });
     const promoted = await SELF.fetch(
       `http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`,
@@ -160,7 +177,12 @@ describe("blogs", () => {
     await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`, {
       method: "PATCH",
       headers,
-      body: JSON.stringify({ draft_md: "Opening line, revised." }),
+      body: JSON.stringify({
+        draft_md: "Opening line, revised.",
+        draft_version: 1,
+        draft_session_id: secondPostDraftSessionId,
+        draft_sequence: 2,
+      }),
     });
     const stillDrafted = await SELF.fetch(
       `http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`,
@@ -170,6 +192,25 @@ describe("blogs", () => {
     );
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     expect(((await stillDrafted.json()) as any).status).toBe("drafted");
+
+    const staleDraft = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({
+        draft_md: "Delayed old line.",
+        draft_version: 1,
+        draft_session_id: crypto.randomUUID(),
+        draft_sequence: 99,
+      }),
+    });
+    expect(staleDraft.status).toBe(409);
+    const afterStale = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${secondPostId}`, {
+      headers,
+    });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterStaleBody = (await afterStale.json()) as any;
+    expect(afterStaleBody.draft_md).toBe("Opening line, revised.");
+    expect(afterStaleBody.draft_version).toBe(2);
 
     // Publishing requires an em_dash site + pub.fly.pm authentication first.
     const publishNoSite = await SELF.fetch(
@@ -231,6 +272,67 @@ describe("blogs", () => {
     const items3 = (await list3.json()) as any;
     // biome-ignore lint/suspicious/noExplicitAny: row shape from our own API
     expect(items3.items.find((b: any) => b.id === id)).toBeTruthy();
+  });
+
+  it("preserves an explicit status racing first-draft promotion and returns current versions", async () => {
+    const cookie = await signUp();
+    const headers = { "Content-Type": "application/json", cookie };
+    const created = await SELF.fetch("http://localhost:5173/api/v1/blogs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(blogPayload({ title: "Concurrent Notes" })),
+    });
+    expect(created.status).toBe(201);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const { id } = (await created.json()) as any;
+
+    const planned = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/plan`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ structure: "single-tutorial", planned_posts: 1 }),
+    });
+    expect(planned.status).toBe(200);
+    const posts = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const postsBody = (await posts.json()) as any;
+    const postId = postsBody.items[0].id;
+
+    const [explicitStatus, firstDraft] = await Promise.all([
+      SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({ status: "drafted" }),
+      }),
+      SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          draft_md: "A concurrently saved opening.",
+          draft_version: 0,
+          draft_session_id: crypto.randomUUID(),
+          draft_sequence: 1,
+        }),
+      }),
+    ]);
+    expect(explicitStatus.status).toBe(200);
+    expect(firstDraft.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await firstDraft.json()) as any).draft_version).toBe(1);
+
+    const afterRace = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, { headers });
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    const afterRaceBody = (await afterRace.json()) as any;
+    expect(afterRaceBody.status).toBe("drafted");
+    expect(afterRaceBody.draft_version).toBe(1);
+
+    const metadataPatch = await SELF.fetch(`http://localhost:5173/api/v1/blogs/${id}/posts/${postId}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ title: "Concurrent Notes, Revised" }),
+    });
+    expect(metadataPatch.status).toBe(200);
+    // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
+    expect(((await metadataPatch.json()) as any).draft_version).toBe(1);
   });
 
   it("requires at least one voice sample", async () => {

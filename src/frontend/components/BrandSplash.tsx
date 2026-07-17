@@ -4,8 +4,10 @@ import type { CSSProperties, KeyboardEvent } from 'react';
 type SplashPhase = 'entering' | 'holding' | 'leaving';
 
 export const BRAND_SPLASH_TIMINGS = {
-  enter: 480,
-  hold: 760,
+  enter: 240,
+  pulse: 180,
+  pulseStagger: 90,
+  hold: 1110,
   leave: 280,
   reducedHold: 140,
   reducedLeave: 100,
@@ -16,6 +18,8 @@ const SPLASH_SEEN_KEY = 'splash:seen';
 const letters = ['s', 'p', 'o', 'o', 'o', 'o', 'l'] as const;
 type SplashStyle = CSSProperties & {
   '--splash-enter-duration'?: string;
+  '--splash-pulse-duration'?: string;
+  '--splash-pulse-stagger'?: string;
   '--splash-hold-duration'?: string;
   '--splash-leave-duration'?: string;
   '--splash-reduced-hold-duration'?: string;
@@ -40,6 +44,14 @@ function markSplashSeen(): void {
     window.sessionStorage.setItem(SPLASH_SEEN_KEY, '1');
   } catch {
     // Storage can be unavailable in private browsing or embedded contexts.
+  }
+}
+
+function splashWasSeen(): boolean {
+  try {
+    return window.sessionStorage.getItem(SPLASH_SEEN_KEY) === '1';
+  } catch {
+    return false;
   }
 }
 
@@ -90,6 +102,8 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
 
   const style: SplashStyle = {
     '--splash-enter-duration': `${BRAND_SPLASH_TIMINGS.enter}ms`,
+    '--splash-pulse-duration': `${BRAND_SPLASH_TIMINGS.pulse}ms`,
+    '--splash-pulse-stagger': `${BRAND_SPLASH_TIMINGS.pulseStagger}ms`,
     '--splash-hold-duration': `${BRAND_SPLASH_TIMINGS.hold}ms`,
     '--splash-leave-duration': `${BRAND_SPLASH_TIMINGS.leave}ms`,
     '--splash-reduced-hold-duration': `${BRAND_SPLASH_TIMINGS.reducedHold}ms`,
@@ -113,7 +127,7 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
         const style: SplashStyle = letter === 'o' ? { '--splash-o-index': String(oIndex) } : {};
         return (
           <span
-            className="splash__letter"
+            className={letter === 'o' ? 'splash__letter splash__letter--o' : 'splash__letter'}
             aria-hidden="true"
             style={style}
             key={`${letter}-${index}`}
@@ -127,18 +141,29 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
 }
 
 export function useBrandSplash(pathname: string): { show: boolean; dismiss: () => void } {
+  const hasClaimedVisit = useRef(false);
   const [show, setShow] = useState(() => {
     if (pathname !== '/') return false;
-    try {
-      if (window.sessionStorage.getItem(SPLASH_SEEN_KEY) === '1') return false;
-    } catch {
-      // Continue showing the splash if storage cannot be read.
-    }
+    hasClaimedVisit.current = true;
+    if (splashWasSeen()) return false;
     markSplashSeen();
     return true;
   });
 
+  useEffect(() => {
+    if (pathname !== '/') {
+      setShow(false);
+      return;
+    }
+    if (hasClaimedVisit.current) return;
+    hasClaimedVisit.current = true;
+    if (splashWasSeen()) return;
+    markSplashSeen();
+    setShow(true);
+  }, [pathname]);
+
   const dismiss = useCallback(() => {
+    hasClaimedVisit.current = true;
     markSplashSeen();
     setShow(false);
   }, []);

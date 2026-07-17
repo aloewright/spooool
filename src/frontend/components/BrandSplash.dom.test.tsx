@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import React, { useEffect } from 'react';
+import React, { act, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
-import { act } from 'react-dom/test-utils';
 import { BrandSplash, BRAND_SPLASH_TIMINGS, useBrandSplash } from './BrandSplash';
 
 (
@@ -57,15 +56,23 @@ describe('BrandSplash', () => {
     ]);
     expect(letters.every((letter) => letter.getAttribute('aria-hidden') === 'true')).toBe(true);
     const os = letters.filter((letter) => letter.textContent === 'o');
+    expect(os.every((letter) => letter.classList.contains('splash__letter--o'))).toBe(true);
     expect(os.map((letter) => letter.style.getPropertyValue('--splash-o-index'))).toEqual([
       '0',
       '1',
       '2',
       '3',
     ]);
-    expect(button.style.getPropertyValue('--splash-enter-duration')).toBe(
-      `${BRAND_SPLASH_TIMINGS.enter}ms`,
-    );
+    expect(button.style.getPropertyValue('--splash-enter-duration')).toBe('240ms');
+    expect(button.style.getPropertyValue('--splash-pulse-duration')).toBe('180ms');
+    expect(button.style.getPropertyValue('--splash-pulse-stagger')).toBe('90ms');
+    expect(BRAND_SPLASH_TIMINGS).toMatchObject({
+      enter: 240,
+      pulse: 180,
+      pulseStagger: 90,
+      hold: 1110,
+      leave: 280,
+    });
   });
 
   it('moves through entering, holding, and leaving before completing', () => {
@@ -73,11 +80,11 @@ describe('BrandSplash', () => {
     const onDone = vi.fn();
     mount(<BrandSplash onDone={onDone} />);
     expectAttribute(splashButton(), 'data-phase', 'entering');
-    act(() => vi.advanceTimersByTime(BRAND_SPLASH_TIMINGS.enter));
+    act(() => vi.advanceTimersByTime(240));
     expectAttribute(splashButton(), 'data-phase', 'holding');
-    act(() => vi.advanceTimersByTime(BRAND_SPLASH_TIMINGS.hold));
+    act(() => vi.advanceTimersByTime(1110));
     expectAttribute(splashButton(), 'data-phase', 'leaving');
-    act(() => vi.advanceTimersByTime(BRAND_SPLASH_TIMINGS.leave));
+    act(() => vi.advanceTimersByTime(280));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
@@ -104,7 +111,7 @@ describe('BrandSplash', () => {
     mount(<BrandSplash onDone={onDone} />);
     act(() => trigger(splashButton()));
     expectAttribute(splashButton(), 'data-phase', 'leaving');
-    act(() => vi.advanceTimersByTime(BRAND_SPLASH_TIMINGS.leave));
+    act(() => vi.advanceTimersByTime(280));
     expect(onDone).toHaveBeenCalledTimes(1);
   });
 
@@ -172,5 +179,20 @@ describe('useBrandSplash', () => {
     expect(container!.textContent).toBe('false');
     getItem.mockRestore();
     setItem.mockRestore();
+  });
+
+  it('claims a first home visit after same-mount navigation and never re-shows it', () => {
+    mount(<HookHarness pathname="/feed" onChange={vi.fn()} />);
+    expect(container!.textContent).toBe('false');
+    expect(window.sessionStorage.getItem('splash:seen')).toBeNull();
+
+    act(() => root!.render(<HookHarness pathname="/" onChange={vi.fn()} />));
+    expect(container!.textContent).toBe('true');
+    expect(window.sessionStorage.getItem('splash:seen')).toBe('1');
+
+    act(() => root!.render(<HookHarness pathname="/feed" onChange={vi.fn()} />));
+    expect(container!.textContent).toBe('false');
+    act(() => root!.render(<HookHarness pathname="/" onChange={vi.fn()} />));
+    expect(container!.textContent).toBe('false');
   });
 });

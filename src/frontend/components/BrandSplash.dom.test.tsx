@@ -10,6 +10,7 @@ import { BrandSplash, BRAND_SPLASH_TIMINGS, useBrandSplash } from './BrandSplash
 
 let container: HTMLDivElement | null = null;
 let root: ReactDOM.Root | null = null;
+const splashTabMarker = Symbol.for('spooool.brand-splash.seen');
 
 function mount(element: JSX.Element): void {
   container = document.createElement('div');
@@ -28,7 +29,9 @@ function expectAttribute(element: Element, name: string, value: string): void {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
   window.sessionStorage.clear();
+  delete (window as unknown as Record<PropertyKey, unknown>)[splashTabMarker];
   if (root) {
     act(() => root!.unmount());
     root = null;
@@ -166,19 +169,47 @@ describe('useBrandSplash', () => {
     root = null;
     container!.remove();
 
-    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+    const getItem = vi.fn(() => {
       throw new Error('blocked');
     });
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItem = vi.fn(() => {
       throw new Error('blocked');
     });
+    const sessionStorage = vi
+      .spyOn(window, 'sessionStorage', 'get')
+      .mockReturnValue({ getItem, setItem } as unknown as Storage);
     const state = vi.fn();
     mount(<HookHarness pathname="/" onChange={state} />);
     expect(container!.textContent).toBe('true');
     act(() => state.mock.lastCall![1]());
     expect(container!.textContent).toBe('false');
-    getItem.mockRestore();
-    setItem.mockRestore();
+    sessionStorage.mockRestore();
+  });
+
+  it('stays hidden after remounting when session storage is denied', () => {
+    const getItem = vi.fn(() => {
+      throw new Error('blocked');
+    });
+    const setItem = vi.fn(() => {
+      throw new Error('blocked');
+    });
+    vi.spyOn(window, 'sessionStorage', 'get').mockReturnValue({
+      getItem,
+      setItem,
+    } as unknown as Storage);
+    const first = vi.fn();
+    mount(<HookHarness pathname="/" onChange={first} />);
+    expect(container!.textContent).toBe('true');
+    expect(getItem).toHaveBeenCalled();
+    expect(setItem).toHaveBeenCalled();
+    act(() => first.mock.lastCall![1]());
+    expect(container!.textContent).toBe('false');
+
+    act(() => root!.unmount());
+    root = null;
+    container!.remove();
+    mount(<HookHarness pathname="/" onChange={vi.fn()} />);
+    expect(container!.textContent).toBe('false');
   });
 
   it('claims a first home visit after same-mount navigation and never re-shows it', () => {

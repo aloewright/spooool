@@ -15,6 +15,7 @@ export const BRAND_SPLASH_TIMINGS = {
 } as const;
 
 const SPLASH_SEEN_KEY = 'splash:seen';
+const SPLASH_TAB_MARKER = Symbol.for('spooool.brand-splash.seen');
 const letters = ['s', 'p', 'o', 'o', 'o', 'o', 'l'] as const;
 type SplashStyle = CSSProperties & {
   '--splash-enter-duration'?: string;
@@ -40,6 +41,15 @@ function prefersReducedMotion(): boolean {
 }
 
 function markSplashSeen(): void {
+  const tab = window as unknown as Record<PropertyKey, unknown>;
+  try {
+    Object.defineProperty(window, SPLASH_TAB_MARKER, {
+      value: true,
+      configurable: true,
+    });
+  } catch {
+    tab[SPLASH_TAB_MARKER] = true;
+  }
   try {
     window.sessionStorage.setItem(SPLASH_SEEN_KEY, '1');
   } catch {
@@ -48,6 +58,7 @@ function markSplashSeen(): void {
 }
 
 function splashWasSeen(): boolean {
+  if ((window as unknown as Record<PropertyKey, unknown>)[SPLASH_TAB_MARKER] === true) return true;
   try {
     return window.sessionStorage.getItem(SPLASH_SEEN_KEY) === '1';
   } catch {

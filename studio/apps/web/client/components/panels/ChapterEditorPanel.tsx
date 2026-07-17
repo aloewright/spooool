@@ -15,6 +15,7 @@ import {
   queryKeys,
 } from "../../lib/api";
 import { useDarkMode } from "../../lib/use-theme-mode";
+import { BlockNoteAiCommands } from "../editor-ai/blocknote-ai-commands";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -22,9 +23,13 @@ import { Textarea } from "../ui/textarea";
 export default function ChapterEditorPanel({
   projectId,
   chapterId,
+  embedded = false,
+  theme,
 }: {
   projectId: string;
   chapterId: string;
+  embedded?: boolean;
+  theme?: "dark" | "light";
 }) {
   const chapter = useQuery({
     queryKey: queryKeys.chapter(chapterId),
@@ -37,6 +42,22 @@ export default function ChapterEditorPanel({
 
   if (chapter.isLoading || !chapter.data) {
     return <p className="px-6 py-12 text-muted-foreground">Loading chapter...</p>;
+  }
+
+  const chapterEditor = (
+    <ChapterEditor
+      chapter={chapter.data}
+      sections={sections.data?.items ?? []}
+      blockNoteTheme={theme}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div className={`mx-auto w-full max-w-4xl px-2 py-2 ${theme === "dark" ? "dark" : ""}`}>
+        {chapterEditor}
+      </div>
+    );
   }
 
   return (
@@ -67,8 +88,7 @@ export default function ChapterEditorPanel({
             <ChapterStats chapter={chapter.data} />
           </div>
         </div>
-
-        <ChapterEditor chapter={chapter.data} sections={sections.data?.items ?? []} />
+        {chapterEditor}
       </div>
     </main>
   );
@@ -86,11 +106,34 @@ function ChapterStats({ chapter }: { chapter: Chapter }) {
   );
 }
 
-function ChapterEditor({ chapter, sections }: { chapter: Chapter; sections: Section[] }) {
-  return <ChapterEditorInner key={chapter.id} chapter={chapter} sections={sections} />;
+function ChapterEditor({
+  chapter,
+  sections,
+  blockNoteTheme,
+}: {
+  chapter: Chapter;
+  sections: Section[];
+  blockNoteTheme?: "dark" | "light";
+}) {
+  return (
+    <ChapterEditorInner
+      key={chapter.id}
+      chapter={chapter}
+      sections={sections}
+      blockNoteTheme={blockNoteTheme}
+    />
+  );
 }
 
-function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections: Section[] }) {
+function ChapterEditorInner({
+  chapter,
+  sections,
+  blockNoteTheme,
+}: {
+  chapter: Chapter;
+  sections: Section[];
+  blockNoteTheme?: "dark" | "light";
+}) {
   const queryClient = useQueryClient();
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lastSavedWords, setLastSavedWords] = useState(wordCount(chapter.draft_md));
@@ -198,6 +241,7 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
     },
   });
   const darkMode = useDarkMode();
+  const resolvedBlockNoteTheme = blockNoteTheme ?? (darkMode ? "dark" : "light");
 
   useEffect(() => {
     return () => {
@@ -232,6 +276,19 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
     if (saveState === "error") return "Save failed";
     return "Ready";
   }, [saveState]);
+
+  async function saveNow() {
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    return saveMutation.mutateAsync();
+  }
+
+  function scheduleExistingChapterSave() {
+    if (pendingSave.current) window.clearTimeout(pendingSave.current);
+    pendingSave.current = window.setTimeout(() => saveMutation.mutate(), 1000);
+  }
 
   async function acceptSection(section: Section) {
     const markdown = review?.sectionId === section.id ? review.after : section.draft_md;
@@ -302,7 +359,7 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
             <span aria-hidden>·</span>
             <span>{lastSavedWords.toLocaleString()} saved words</span>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={() => saveMutation.mutate()}>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void saveNow()}>
             Save now
           </Button>
         </div>
@@ -318,12 +375,18 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
           <div ref={editorRoot}>
             <BlockNoteView
               editor={editor}
-              theme={darkMode ? "dark" : "light"}
-              onChange={() => {
-                if (pendingSave.current) window.clearTimeout(pendingSave.current);
-                pendingSave.current = window.setTimeout(() => saveMutation.mutate(), 1000);
-              }}
-            />
+              formattingToolbar={false}
+              slashMenu={false}
+              theme={resolvedBlockNoteTheme}
+              onChange={scheduleExistingChapterSave}
+            >
+              <BlockNoteAiCommands
+                editor={editor}
+                resourceId={chapter.id}
+                resourceKind="chapter"
+                saveNow={saveNow}
+              />
+            </BlockNoteView>
           </div>
         </div>
       </section>

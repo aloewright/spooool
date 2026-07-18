@@ -12,6 +12,8 @@ export const DemoCursor = ({ x, y, scale, opacity }: DemoCursorProps) => {
       viewBox="0 0 42 54"
       style={{
         position: "absolute",
+        top: 0,
+        left: 0,
         width: 42,
         height: 54,
         overflow: "visible",

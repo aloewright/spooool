@@ -43,6 +43,7 @@ export const SparkScene = ({ format, renderOffset }: SparkSceneProps) => {
     <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
+          className="stack"
           style={{
             display: "flex",
             flex: 1,
@@ -53,6 +54,7 @@ export const SparkScene = ({ format, renderOffset }: SparkSceneProps) => {
           }}
         >
           <div
+            className="stack"
             style={{
               display: "flex",
               alignItems: "baseline",
@@ -103,6 +105,7 @@ export const SparkScene = ({ format, renderOffset }: SparkSceneProps) => {
               motion={{ opacity: 1, scale: 1, translateX: 0, translateY: 0 }}
             />
             <div
+              className="stack"
               style={{
                 position: "absolute",
                 display: "flex",

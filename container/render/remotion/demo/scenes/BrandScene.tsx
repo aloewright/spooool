@@ -157,6 +157,7 @@ export const BrandScene = ({ format, renderOffset }: BrandSceneProps) => {
         </div>
 
         <div
+          className="stack"
           style={{
             position: "relative",
             display: "flex",
@@ -174,6 +175,7 @@ export const BrandScene = ({ format, renderOffset }: BrandSceneProps) => {
           />
 
           <div
+            className="stack"
             style={{
               display: "flex",
               flexDirection: "column",

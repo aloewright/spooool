@@ -39,6 +39,7 @@ export const ProductFrame = ({
       }}
     >
       <div
+        className="stack"
         style={{
           display: "flex",
           alignItems: "center",

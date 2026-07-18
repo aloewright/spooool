@@ -43,6 +43,7 @@ export const ComposeScene = ({
     <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
+          className="stack"
           style={{
             display: "flex",
             flex: 1,
@@ -53,6 +54,7 @@ export const ComposeScene = ({
           }}
         >
           <div
+            className="stack"
             style={{
               display: "flex",
               flexDirection: "column",

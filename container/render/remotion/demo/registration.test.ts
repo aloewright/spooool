@@ -1,37 +1,59 @@
 import fs from "node:fs";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-const rootSource = fs.readFileSync(new URL("../Root.tsx", import.meta.url), "utf8");
+const sourceText = fs.readFileSync(new URL("../Root.tsx", import.meta.url), "utf8");
+const sourceFile = ts.createSourceFile(
+  "Root.tsx",
+  sourceText,
+  ts.ScriptTarget.Latest,
+  true,
+  ts.ScriptKind.TSX,
+);
 
-const expectDemoComposition = (
-  id: "spooool-demo-landscape" | "spooool-demo-vertical",
-  width: number,
-  height: number,
-  duration: "LANDSCAPE_DURATION" | "VERTICAL_DURATION",
-  format: "landscape" | "vertical",
-) => {
-  expect(rootSource).toMatch(
-    new RegExp(
-      `<Composition\\s+id="${id}"\\s+component=\\{SpoooolDemo\\}\\s+width=\\{${width}\\}\\s+height=\\{${height}\\}\\s+fps=\\{DEMO_FPS\\}\\s+durationInFrames=\\{${duration}\\}\\s+defaultProps=\\{\\{\\s*format:\\s*"${format}"\\s+as\\s+const\\s*\\}\\}`,
-    ),
+const readAttributes = (element: ts.JsxSelfClosingElement) =>
+  Object.fromEntries(
+    element.attributes.properties.flatMap((property) => {
+      if (!ts.isJsxAttribute(property) || !property.initializer) return [];
+      const name = property.name.getText(sourceFile);
+      const value = ts.isStringLiteral(property.initializer)
+        ? property.initializer.text
+        : property.initializer.expression?.getText(sourceFile).replace(/\s+/g, " ");
+      return value === undefined ? [] : [[name, value]];
+    }),
   );
+
+const registrations: Record<string, string>[] = [];
+const visit = (node: ts.Node) => {
+  if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(sourceFile) === "Composition") {
+    const attributes = readAttributes(node);
+    if (attributes.id?.startsWith("spooool-demo-")) registrations.push(attributes);
+  }
+  ts.forEachChild(node, visit);
 };
+visit(sourceFile);
 
 describe("Spooool demo registrations", () => {
-  it("registers fixed landscape and vertical demo compositions", () => {
-    expectDemoComposition(
-      "spooool-demo-landscape",
-      1920,
-      1080,
-      "LANDSCAPE_DURATION",
-      "landscape",
-    );
-    expectDemoComposition(
-      "spooool-demo-vertical",
-      1080,
-      1920,
-      "VERTICAL_DURATION",
-      "vertical",
-    );
+  it("registers the active landscape and vertical compositions", () => {
+    expect(registrations).toEqual([
+      {
+        id: "spooool-demo-landscape",
+        component: "SpoooolDemo",
+        width: "1920",
+        height: "1080",
+        fps: "DEMO_FPS",
+        durationInFrames: "LANDSCAPE_DURATION",
+        defaultProps: '{ format: "landscape" as const }',
+      },
+      {
+        id: "spooool-demo-vertical",
+        component: "SpoooolDemo",
+        width: "1080",
+        height: "1920",
+        fps: "DEMO_FPS",
+        durationInFrames: "VERTICAL_DURATION",
+        defaultProps: '{ format: "vertical" as const }',
+      },
+    ]);
   });
 });

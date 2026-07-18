@@ -18,9 +18,9 @@ export type DemoSafeArea = Readonly<{
 
 export const LANDSCAPE_SAFE_AREA: DemoSafeArea = {
   top: 100,
-  right: 80,
+  right: 120,
   bottom: 100,
-  left: 80,
+  left: 120,
 };
 
 export const VERTICAL_SAFE_AREA: DemoSafeArea = {

@@ -27,6 +27,7 @@ export const DemoStage = ({ children, format }: DemoStageProps) => {
   return (
     <div style={stageStyle}>
       <div
+        className="stack"
         style={{
           position: "relative",
           display: "flex",

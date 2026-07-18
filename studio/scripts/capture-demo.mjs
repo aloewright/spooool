@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getPngCaptureNames } from "./capture-demo-utils.mjs";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const studioDir = resolve(scriptDir, "..");
@@ -17,9 +18,7 @@ const expectedCaptureNames = [
 
 await mkdir(captureDir, { recursive: true });
 await Promise.all(
-  (await readdir(captureDir))
-    .filter((name) => name.endsWith(".png"))
-    .map((name) => rm(resolve(captureDir, name))),
+  getPngCaptureNames(await readdir(captureDir)).map((name) => rm(resolve(captureDir, name))),
 );
 
 const exitCode = await new Promise((resolveExit, reject) => {
@@ -51,7 +50,7 @@ const exitCode = await new Promise((resolveExit, reject) => {
 
 if (exitCode !== 0) process.exit(exitCode);
 
-const actualCaptureNames = (await readdir(captureDir)).sort();
+const actualCaptureNames = getPngCaptureNames(await readdir(captureDir));
 if (JSON.stringify(actualCaptureNames) !== JSON.stringify(expectedCaptureNames)) {
   throw new Error(
     `Expected only ${expectedCaptureNames.join(", ")}; found ${actualCaptureNames.join(", ")}`,

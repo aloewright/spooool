@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -185,16 +185,19 @@ export const verifyDemoMedia = async (filePath, expected) => {
   return probe;
 };
 
-const ensureOutputDirectories = async (targets) => {
-  await mkdir(ARTIFACTS_DIR, { recursive: true });
+export const prepareDemoOutputDirectories = async (
+  targets,
+  artifactsDirectory = ARTIFACTS_DIR,
+) => {
+  await mkdir(artifactsDirectory, { recursive: true });
   await Promise.all(
     targets
       .filter(({ renderStills }) => renderStills)
-      .map(({ format }) =>
-        mkdir(path.join(ARTIFACTS_DIR, "stills", format), {
-          recursive: true,
-        }),
-      ),
+      .map(async ({ format }) => {
+        const outputDirectory = path.join(artifactsDirectory, "stills", format);
+        await rm(outputDirectory, { recursive: true, force: true });
+        await mkdir(outputDirectory, { recursive: true });
+      }),
   );
 };
 
@@ -254,7 +257,7 @@ const renderTarget = async ({
 
 export const renderDemo = async (mode) => {
   const targets = getRenderTargets(mode);
-  await ensureOutputDirectories(targets);
+  await prepareDemoOutputDirectories(targets);
 
   const entryPoint = path.join(RENDER_ROOT, "remotion", "index.ts");
   const publicDir = path.join(RENDER_ROOT, "remotion", "public");

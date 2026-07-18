@@ -8,6 +8,7 @@ import {
   renderJobs,
   sectionsByChapter,
 } from "./demo-fixtures";
+import { LOCAL_DEMO_BASE_URL, LOCAL_DEMO_ORIGIN, isLocalStudioApiUrl } from "./demo-request-guard";
 
 const CAPTURES = [
   ["/", "studio-home.png", /New book/],
@@ -25,12 +26,9 @@ test.use({
 });
 
 const FIXED_NOW = 1_735_689_600_000;
-const LOCAL_BASE_URL = "http://localhost:4190";
-const LOCAL_ORIGIN = new URL(LOCAL_BASE_URL).origin;
-
 test("captures deterministic Studio source screens", async ({ page }) => {
-  if (process.env.E2E_BASE_URL !== LOCAL_BASE_URL) {
-    throw new Error(`Demo capture must run against ${LOCAL_BASE_URL}`);
+  if (process.env.E2E_BASE_URL !== LOCAL_DEMO_BASE_URL) {
+    throw new Error(`Demo capture must run against ${LOCAL_DEMO_BASE_URL}`);
   }
 
   const captureDir = process.env.DEMO_CAPTURE_DIR;
@@ -47,7 +45,7 @@ test("captures deterministic Studio source screens", async ({ page }) => {
       await route.fallback();
       return;
     }
-    if (url.origin === LOCAL_ORIGIN) {
+    if (url.origin === LOCAL_DEMO_ORIGIN) {
       await route.continue();
       return;
     }
@@ -57,7 +55,13 @@ test("captures deterministic Studio source screens", async ({ page }) => {
 
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
-    const pathname = new URL(request.url()).pathname;
+    const url = new URL(request.url());
+    if (!isLocalStudioApiUrl(url.href)) {
+      blockedExternalRequests.push(`${request.method()} ${url.href}`);
+      await route.abort("blockedbyclient");
+      return;
+    }
+    const pathname = url.pathname;
     const response = knownResponse(request.method(), pathname);
     if (response === undefined) {
       const message = `Unmocked Studio API request: ${request.method()} ${pathname}`;

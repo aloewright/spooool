@@ -1,9 +1,13 @@
+import { mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import * as renderDemoModule from "./render-demo.mjs";
 import {
   getQaFrames,
   getRenderTargets,
   parseArgs,
+  prepareDemoOutputDirectories,
 } from "./render-demo.mjs";
 import {
   LANDSCAPE_SCENES,
@@ -62,6 +66,25 @@ describe("render-demo targets", () => {
         expect.objectContaining({ renderStills, renderVideo }),
       ]),
     );
+  });
+
+  it("clears obsolete stills before recreating a selected output directory", async () => {
+    const artifactsDirectory = await mkdtemp(join(tmpdir(), "spooool-demo-artifacts-"));
+    const stillDirectory = join(artifactsDirectory, "stills", "landscape");
+
+    try {
+      await mkdir(stillDirectory, { recursive: true });
+      await writeFile(join(stillDirectory, "obsolete-frame.png"), "stale");
+
+      await prepareDemoOutputDirectories(
+        [{ format: "landscape", renderStills: true }],
+        artifactsDirectory,
+      );
+
+      expect(await readdir(stillDirectory)).toEqual([]);
+    } finally {
+      await rm(artifactsDirectory, { recursive: true, force: true });
+    }
   });
 });
 

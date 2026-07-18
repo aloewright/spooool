@@ -189,7 +189,11 @@ describe("chapters", () => {
       ]),
     );
     const sortedRevisionIds = [...revisionBody.items]
-      .sort((left, right) => left.created_at - right.created_at || left.id.localeCompare(right.id))
+      .sort(
+        (left, right) =>
+          new Date(left.created_at).getTime() - new Date(right.created_at).getTime() ||
+          left.id.localeCompare(right.id),
+      )
       .map((revision) => revision.id);
     expect(revisionBody.items.map((revision: { id: string }) => revision.id)).toEqual(
       sortedRevisionIds,

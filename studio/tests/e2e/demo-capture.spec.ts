@@ -26,6 +26,7 @@ test.use({
 
 const FIXED_NOW = 1_735_689_600_000;
 const LOCAL_BASE_URL = "http://localhost:4190";
+const LOCAL_ORIGIN = new URL(LOCAL_BASE_URL).origin;
 
 test("captures deterministic Studio source screens", async ({ page }) => {
   if (process.env.E2E_BASE_URL !== LOCAL_BASE_URL) {
@@ -37,7 +38,23 @@ test("captures deterministic Studio source screens", async ({ page }) => {
     throw new Error("DEMO_CAPTURE_DIR must be an absolute path");
   }
 
+  const blockedExternalRequests: string[] = [];
   const unknownRequests: string[] = [];
+  await page.route("**/*", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname.startsWith("/api/v1/")) {
+      await route.fallback();
+      return;
+    }
+    if (url.origin === LOCAL_ORIGIN) {
+      await route.continue();
+      return;
+    }
+    blockedExternalRequests.push(`${request.method()} ${url.href}`);
+    await route.abort("blockedbyclient");
+  });
+
   await page.route("**/api/v1/**", async (route) => {
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
@@ -70,9 +87,14 @@ test("captures deterministic Studio source screens", async ({ page }) => {
 
     await expect(page.getByText(expected).first()).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
+    await expect.poll(() => page.evaluate(() => document.fonts.status)).toBe("loaded");
     await page.screenshot({ path: join(captureDir, filename), animations: "disabled" });
   }
 
+  expect(blockedExternalRequests).toHaveLength(CAPTURES.length);
+  for (const request of blockedExternalRequests) {
+    expect(request).toMatch(/^GET https:\/\/fonts\.googleapis\.com\/css2\?/);
+  }
   expect(unknownRequests).toEqual([]);
 });
 

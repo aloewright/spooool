@@ -1,13 +1,26 @@
 import { spawn } from "node:child_process";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, rm, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const studioDir = resolve(scriptDir, "..");
 const captureDir = resolve(scriptDir, "../../container/render/remotion/public/demo/screens");
+const expectedCaptureNames = [
+  "studio-home.png",
+  "studio-compose.png",
+  "studio-outline.png",
+  "studio-editor.png",
+  "studio-book.png",
+  "studio-publish.png",
+].sort();
 
 await mkdir(captureDir, { recursive: true });
+await Promise.all(
+  (await readdir(captureDir))
+    .filter((name) => name.endsWith(".png"))
+    .map((name) => rm(resolve(captureDir, name))),
+);
 
 const exitCode = await new Promise((resolveExit, reject) => {
   const child = spawn(
@@ -36,4 +49,17 @@ const exitCode = await new Promise((resolveExit, reject) => {
   child.once("exit", (code) => resolveExit(code ?? 1));
 });
 
-process.exit(exitCode);
+if (exitCode !== 0) process.exit(exitCode);
+
+const actualCaptureNames = (await readdir(captureDir)).sort();
+if (JSON.stringify(actualCaptureNames) !== JSON.stringify(expectedCaptureNames)) {
+  throw new Error(
+    `Expected only ${expectedCaptureNames.join(", ")}; found ${actualCaptureNames.join(", ")}`,
+  );
+}
+
+for (const name of actualCaptureNames) {
+  if ((await stat(resolve(captureDir, name))).size === 0) {
+    throw new Error(`Capture is empty: ${name}`);
+  }
+}

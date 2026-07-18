@@ -7,7 +7,10 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "vitest --run",
-    "generate:demo-audio": "node scripts/generate-demo-audio.mjs"
+    "generate:demo-audio": "node scripts/generate-demo-audio.mjs",
+    "render:demo": "node scripts/render-demo.mjs --all",
+    "render:demo:stills": "node scripts/render-demo.mjs --stills",
+    "render:demo:videos": "node scripts/render-demo.mjs --videos"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",

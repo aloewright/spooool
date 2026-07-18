@@ -8,6 +8,7 @@ import {
 describe("demo motion helpers", () => {
   it("clamps entry progress before, during, and after its range", () => {
     expect(enterProgress(4, 5, 10)).toBe(0);
+    expect(enterProgress(5, 5, 10)).toBe(0);
     expect(enterProgress(10, 5, 10)).toBe(0.5);
     expect(enterProgress(15, 5, 10)).toBe(1);
 
@@ -19,6 +20,7 @@ describe("demo motion helpers", () => {
 
   it("clamps exit progress before, during, and after its range", () => {
     expect(exitProgress(4, 5, 10)).toBe(1);
+    expect(exitProgress(5, 5, 10)).toBe(1);
     expect(exitProgress(10, 5, 10)).toBe(0.5);
     expect(exitProgress(15, 5, 10)).toBe(0);
 

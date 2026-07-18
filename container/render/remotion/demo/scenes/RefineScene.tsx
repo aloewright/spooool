@@ -4,13 +4,14 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress } from "../demo-motion";
+import { enterProgress, toLogicalSceneFrame } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
 type RefineSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const clamp = {
@@ -26,8 +27,51 @@ export const REFINE_EXCERPT_MIN_HEIGHT = {
   vertical: 128,
 } as const;
 
-export const RefineScene = ({ format }: RefineSceneProps) => {
-  const frame = useCurrentFrame();
+type RefineExcerptProps = Readonly<{
+  format: DemoFormat;
+  refineProgress: number;
+}>;
+
+export const RefineExcerpt = ({
+  format,
+  refineProgress,
+}: RefineExcerptProps) => {
+  const isLandscape = format === "landscape";
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        minHeight: REFINE_EXCERPT_MIN_HEIGHT[format],
+        color: DEMO_THEME.white,
+        fontFamily: "Georgia, 'Times New Roman', serif",
+        fontSize: isLandscape ? 40 : 49,
+        lineHeight: 1.22,
+      }}
+    >
+      <span
+        style={{
+          gridArea: "1 / 1",
+          clipPath: `inset(0 0 0 ${interpolate(refineProgress, [0, 1], [0, 100], clamp)}%)`,
+        }}
+      >
+        {beforeExcerpt}
+      </span>
+      <span
+        style={{
+          gridArea: "1 / 1",
+          clipPath: `inset(0 ${interpolate(refineProgress, [0, 1], [100, 0], clamp)}% 0 0)`,
+          color: DEMO_THEME.white,
+        }}
+      >
+        {afterExcerpt}
+      </span>
+    </div>
+  );
+};
+
+export const RefineScene = ({ format, renderOffset }: RefineSceneProps) => {
+  const frame = toLogicalSceneFrame(useCurrentFrame(), renderOffset);
   const isLandscape = format === "landscape";
   const surfaceProgress = enterProgress(frame, 2, 20);
   const cueProgress = enterProgress(frame, isLandscape ? 42 : 34, 18);
@@ -105,38 +149,10 @@ export const RefineScene = ({ format }: RefineSceneProps) => {
               >
                 Selected passage
               </div>
-              <div
-                style={{
-                  position: "relative",
-                  minHeight: REFINE_EXCERPT_MIN_HEIGHT[format],
-                  color: DEMO_THEME.white,
-                  fontFamily: "Georgia, 'Times New Roman', serif",
-                  fontSize: isLandscape ? 40 : 49,
-                  lineHeight: 1.22,
-                }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    overflow: "hidden",
-                    clipPath: `inset(0 0 0 ${interpolate(refineProgress, [0, 1], [0, 100], clamp)}%)`,
-                  }}
-                >
-                  {beforeExcerpt}
-                </span>
-                <span
-                  style={{
-                    position: "absolute",
-                    inset: 0,
-                    overflow: "hidden",
-                    clipPath: `inset(0 ${interpolate(refineProgress, [0, 1], [100, 0], clamp)}% 0 0)`,
-                    color: DEMO_THEME.white,
-                  }}
-                >
-                  {afterExcerpt}
-                </span>
-              </div>
+              <RefineExcerpt
+                format={format}
+                refineProgress={refineProgress}
+              />
               <div
                 style={{
                   width: `${interpolate(refineProgress, [0, 1], [0, 100], clamp)}%`,

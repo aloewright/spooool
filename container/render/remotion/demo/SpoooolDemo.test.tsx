@@ -12,7 +12,9 @@ import {
   SpoooolDemo,
 } from "./SpoooolDemo";
 import { BrandWordmarkReveal } from "./scenes/BrandScene";
+import * as RefineSceneModule from "./scenes/RefineScene";
 import { REFINE_EXCERPT_MIN_HEIGHT } from "./scenes/RefineScene";
+import { toLogicalSceneFrame } from "./demo-motion";
 
 type CompositionTree = ReactElement<{
   children: readonly [readonly ReactElement[], ReactElement];
@@ -22,23 +24,23 @@ const ASSEMBLY_CASES = [
   {
     format: "landscape",
     scenes: [
-      { from: 0, duration: 90, transitionInFrames: 0 },
-      { from: 75, duration: 165, transitionInFrames: 15 },
-      { from: 225, duration: 195, transitionInFrames: 15 },
-      { from: 405, duration: 225, transitionInFrames: 15 },
-      { from: 615, duration: 165, transitionInFrames: 15 },
-      { from: 765, duration: 135, transitionInFrames: 15 },
+      { canonicalFrom: 0, duration: 90, renderFrom: 0, renderDuration: 90, renderOffset: 0 },
+      { canonicalFrom: 90, duration: 150, renderFrom: 75, renderDuration: 165, renderOffset: 15 },
+      { canonicalFrom: 240, duration: 180, renderFrom: 225, renderDuration: 195, renderOffset: 15 },
+      { canonicalFrom: 420, duration: 210, renderFrom: 405, renderDuration: 225, renderOffset: 15 },
+      { canonicalFrom: 630, duration: 150, renderFrom: 615, renderDuration: 165, renderOffset: 15 },
+      { canonicalFrom: 780, duration: 120, renderFrom: 765, renderDuration: 135, renderOffset: 15 },
     ],
   },
   {
     format: "vertical",
     scenes: [
-      { from: 0, duration: 60, transitionInFrames: 0 },
-      { from: 45, duration: 135, transitionInFrames: 15 },
-      { from: 165, duration: 165, transitionInFrames: 15 },
-      { from: 315, duration: 165, transitionInFrames: 15 },
-      { from: 465, duration: 105, transitionInFrames: 15 },
-      { from: 555, duration: 105, transitionInFrames: 15 },
+      { canonicalFrom: 0, duration: 60, renderFrom: 0, renderDuration: 60, renderOffset: 0 },
+      { canonicalFrom: 60, duration: 120, renderFrom: 45, renderDuration: 135, renderOffset: 15 },
+      { canonicalFrom: 180, duration: 150, renderFrom: 165, renderDuration: 165, renderOffset: 15 },
+      { canonicalFrom: 330, duration: 150, renderFrom: 315, renderDuration: 165, renderOffset: 15 },
+      { canonicalFrom: 480, duration: 90, renderFrom: 465, renderDuration: 105, renderOffset: 15 },
+      { canonicalFrom: 570, duration: 90, renderFrom: 555, renderDuration: 105, renderOffset: 15 },
     ],
   },
 ] as const;
@@ -51,6 +53,28 @@ describe("SpoooolDemo", () => {
     expect(REFINE_EXCERPT_MIN_HEIGHT.vertical).toBeGreaterThanOrEqual(
       49 * 1.22 * 2,
     );
+  });
+
+  it("uses intrinsic grid measurement so neither refinement excerpt can clip", () => {
+    expect(RefineSceneModule.RefineExcerpt).toBeTypeOf("function");
+
+    const excerpt = RefineSceneModule.RefineExcerpt({
+      format: "landscape",
+      refineProgress: 0.5,
+    }) as ReactElement<{ children: readonly ReactElement[]; style: Record<string, unknown> }>;
+    const excerpts = excerpt.props.children;
+
+    expect(excerpt.props.style.display).toBe("grid");
+    expect(excerpts).toHaveLength(2);
+    expect(
+      excerpts.map(({ props }) => ({
+        gridArea: props.style.gridArea,
+        overflow: props.style.overflow,
+      })),
+    ).toEqual([
+      { gridArea: "1 / 1", overflow: undefined },
+      { gridArea: "1 / 1", overflow: undefined },
+    ]);
   });
 
   it("keeps the approved product-film copy exact", () => {
@@ -136,8 +160,8 @@ describe("SpoooolDemo", () => {
         })),
       ).toEqual(
         expectedScenes.map((scene) => ({
-          from: scene.from,
-          durationInFrames: scene.duration,
+          from: scene.renderFrom,
+          durationInFrames: scene.renderDuration,
           premountFor: 30,
         })),
       );
@@ -148,6 +172,7 @@ describe("SpoooolDemo", () => {
             children: ReactElement<{
               format: string;
               durationInFrames: number;
+              renderOffset: number;
             }>;
             transitionInFrames: number;
           }>;
@@ -157,19 +182,50 @@ describe("SpoooolDemo", () => {
             transitionInFrames: transition.props.transitionInFrames,
             format: scene.props.format,
             durationInFrames: scene.props.durationInFrames,
+            renderOffset: scene.props.renderOffset,
           };
         }),
       ).toEqual(
         expectedScenes.map((scene) => ({
-          transitionInFrames: scene.transitionInFrames,
+          transitionInFrames: scene.renderOffset,
           format,
           durationInFrames: scene.duration,
+          renderOffset: scene.renderOffset,
         })),
       );
 
       expect(audio.type).toBe(Audio);
       expect(audio.props.src).toBe(staticFile(DEMO_ASSETS.audio[format]));
       expect(audio.props.children as ReactNode).toBeUndefined();
+    },
+  );
+
+  it.each(ASSEMBLY_CASES)(
+    "maps global frames to canonical $format scene time",
+    ({ scenes }) => {
+      for (const scene of scenes) {
+        const renderLocalFrame = (globalFrame: number) =>
+          globalFrame - scene.renderFrom;
+
+        expect(
+          toLogicalSceneFrame(
+            renderLocalFrame(scene.canonicalFrom - 1),
+            scene.renderOffset,
+          ),
+        ).toBe(0);
+        expect(
+          toLogicalSceneFrame(
+            renderLocalFrame(scene.canonicalFrom),
+            scene.renderOffset,
+          ),
+        ).toBe(0);
+        expect(
+          toLogicalSceneFrame(
+            renderLocalFrame(scene.canonicalFrom + 1),
+            scene.renderOffset,
+          ),
+        ).toBe(1);
+      }
     },
   );
 });

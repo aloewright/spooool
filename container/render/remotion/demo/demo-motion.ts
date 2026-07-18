@@ -7,6 +7,11 @@ const clamp = {
 
 const finiteDuration = (duration: number): number => Math.max(duration, 1);
 
+export const toLogicalSceneFrame = (
+  renderFrame: number,
+  renderOffset: number,
+): number => Math.max(0, renderFrame - renderOffset);
+
 export const enterProgress = (
   frame: number,
   start: number,

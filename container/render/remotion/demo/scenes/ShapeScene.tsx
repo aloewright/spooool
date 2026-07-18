@@ -5,13 +5,14 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress } from "../demo-motion";
+import { enterProgress, toLogicalSceneFrame } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
 type ShapeSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const clamp = {
@@ -25,8 +26,12 @@ const chapterCards = [
   ["03", "The Last District"],
 ] as const;
 
-export const ShapeScene = ({ format, durationInFrames }: ShapeSceneProps) => {
-  const frame = useCurrentFrame();
+export const ShapeScene = ({
+  format,
+  durationInFrames,
+  renderOffset,
+}: ShapeSceneProps) => {
+  const frame = toLogicalSceneFrame(useCurrentFrame(), renderOffset);
   const isLandscape = format === "landscape";
   const surfaceProgress = enterProgress(frame, 2, 22);
   const cursorProgress = enterProgress(frame, isLandscape ? 58 : 48, 52);

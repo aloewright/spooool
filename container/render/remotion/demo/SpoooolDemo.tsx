@@ -21,6 +21,7 @@ export type SpoooolDemoProps = Readonly<{
 type DemoSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const DEMO_TRANSITION_FRAMES = 15;
@@ -55,7 +56,11 @@ export const SpoooolDemo = ({ format }: SpoooolDemoProps) => {
             premountFor={30}
           >
             <DemoSceneTransition transitionInFrames={transitionInFrames}>
-              <Scene format={format} durationInFrames={renderDuration} />
+              <Scene
+                format={format}
+                durationInFrames={scene.duration}
+                renderOffset={transitionInFrames}
+              />
             </DemoSceneTransition>
           </Sequence>
         );

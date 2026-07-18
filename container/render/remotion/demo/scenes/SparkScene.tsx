@@ -4,13 +4,14 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress } from "../demo-motion";
+import { enterProgress, toLogicalSceneFrame } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
 type SparkSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const clamp = {
@@ -20,8 +21,8 @@ const clamp = {
 
 const formatCards = ["Book", "Blog", "Script"] as const;
 
-export const SparkScene = ({ format }: SparkSceneProps) => {
-  const frame = useCurrentFrame();
+export const SparkScene = ({ format, renderOffset }: SparkSceneProps) => {
+  const frame = toLogicalSceneFrame(useCurrentFrame(), renderOffset);
   const isLandscape = format === "landscape";
   const homeStart = isLandscape ? 28 : 18;
   const homeProgress = enterProgress(frame, homeStart, isLandscape ? 24 : 18);

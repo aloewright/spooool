@@ -5,13 +5,14 @@ import {
   DEMO_BRAND_NAME,
   DEMO_SCENE_COPY,
 } from "../demo-copy";
-import { enterProgress } from "../demo-motion";
+import { enterProgress, toLogicalSceneFrame } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
 type BrandSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const clamp = {
@@ -111,8 +112,8 @@ export const BrandWordmarkReveal = ({
   );
 };
 
-export const BrandScene = ({ format }: BrandSceneProps) => {
-  const frame = useCurrentFrame();
+export const BrandScene = ({ format, renderOffset }: BrandSceneProps) => {
+  const frame = toLogicalSceneFrame(useCurrentFrame(), renderOffset);
   const isLandscape = format === "landscape";
   const recedeProgress = enterProgress(frame, 0, isLandscape ? 38 : 28);
   const threadProgress = enterProgress(

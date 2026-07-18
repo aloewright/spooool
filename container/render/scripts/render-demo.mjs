@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { bundle } from "@remotion/bundler";
 import {
@@ -11,13 +13,18 @@ import {
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RENDER_ROOT = path.resolve(SCRIPT_DIR, "..");
 const ARTIFACTS_DIR = path.join(RENDER_ROOT, "artifacts", "demo");
+const execFileAsync = promisify(execFile);
 
 const QA_FRAMES = Object.freeze({
   landscape: Object.freeze([
-    0, 45, 90, 165, 240, 330, 420, 525, 630, 705, 780, 840,
+    0, 45, 88, 89, 90, 91, 165, 238, 239, 240, 241, 330, 418, 419,
+    420, 421, 525, 628, 629, 630, 631, 705, 778, 779, 780, 781, 840,
+    898, 899,
   ]),
   vertical: Object.freeze([
-    0, 30, 60, 120, 180, 255, 330, 405, 480, 525, 570, 615,
+    0, 30, 58, 59, 60, 61, 120, 178, 179, 180, 181, 255, 328, 329,
+    330, 331, 405, 478, 479, 480, 481, 525, 568, 569, 570, 571, 615,
+    658, 659,
   ]),
 });
 
@@ -42,6 +49,9 @@ export const DEMO_VIDEO_RENDER_OPTIONS = Object.freeze({
   crf: 18,
   audioCodec: "aac",
 });
+
+export const DEMO_H264_VUI_BSF =
+  "h264_metadata=video_full_range_flag=0:colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1";
 
 const USAGE = "Usage: node scripts/render-demo.mjs [--all|--stills|--videos]";
 
@@ -92,10 +102,86 @@ export const enforceDemoDuration = ({ type, args }, durationInSeconds) => {
 
   return [
     ...args.slice(0, -1),
+    "-color_range",
+    "tv",
+    "-color_primaries",
+    "bt709",
+    "-color_trc",
+    "bt709",
+    "-colorspace",
+    "bt709",
+    "-bsf:v",
+    DEMO_H264_VUI_BSF,
     "-t",
     durationInSeconds.toFixed(6),
     output,
   ];
+};
+
+const assertEqual = (actual, expected, label) => {
+  if (actual !== expected) {
+    throw new Error(`${label}: expected ${expected}, received ${actual}`);
+  }
+};
+
+export const assertDemoMediaProbe = (probe, expected) => {
+  const video = probe.streams?.find(({ codec_type }) => codec_type === "video");
+  const audio = probe.streams?.find(({ codec_type }) => codec_type === "audio");
+  if (!video || !audio) {
+    throw new Error("Demo output must contain both video and audio streams");
+  }
+
+  assertEqual(video.codec_name, "h264", "video codec");
+  assertEqual(video.width, expected.width, "video width");
+  assertEqual(video.height, expected.height, "video height");
+  assertEqual(video.pix_fmt, "yuv420p", "pixel format");
+  assertEqual(video.color_range, "tv", "color range");
+  assertEqual(video.color_space, "bt709", "matrix coefficients");
+  assertEqual(video.color_primaries, "bt709", "color primaries");
+  assertEqual(video.color_transfer, "bt709", "transfer characteristics");
+  assertEqual(video.avg_frame_rate, `${expected.fps}/1`, "frame rate");
+  assertEqual(
+    Number(video.nb_read_frames ?? video.nb_frames),
+    expected.frameCount,
+    "video frame count",
+  );
+
+  assertEqual(audio.codec_name, "aac", "audio codec");
+  assertEqual(audio.sample_rate, "48000", "audio sample rate");
+  assertEqual(audio.channels, 2, "audio channel count");
+  assertEqual(audio.channel_layout, "stereo", "audio channel layout");
+
+  const duration = Number(probe.format?.duration);
+  const tolerance = 1 / expected.fps;
+  if (
+    !Number.isFinite(duration) ||
+    Math.abs(duration - expected.durationInSeconds) > tolerance
+  ) {
+    throw new Error(
+      `container duration: expected ${expected.durationInSeconds}s within ${tolerance}s, received ${duration}s`,
+    );
+  }
+};
+
+export const probeDemoMedia = async (filePath) => {
+  const { stdout } = await execFileAsync("ffprobe", [
+    "-v",
+    "error",
+    "-count_frames",
+    "-show_entries",
+    "stream=codec_type,codec_name,width,height,pix_fmt,color_range,color_space,color_primaries,color_transfer,avg_frame_rate,nb_frames,nb_read_frames,sample_rate,channels,channel_layout:format=duration",
+    "-of",
+    "json",
+    filePath,
+  ]);
+
+  return JSON.parse(stdout);
+};
+
+export const verifyDemoMedia = async (filePath, expected) => {
+  const probe = await probeDemoMedia(filePath);
+  assertDemoMediaProbe(probe, expected);
+  return probe;
 };
 
 const ensureOutputDirectories = async (targets) => {
@@ -153,6 +239,13 @@ const renderTarget = async ({
         ),
       overwrite: true,
       isProduction: true,
+    });
+    await verifyDemoMedia(outputLocation, {
+      width: composition.width,
+      height: composition.height,
+      fps: composition.fps,
+      frameCount: composition.durationInFrames,
+      durationInSeconds: composition.durationInFrames / composition.fps,
     });
     console.log(`Rendered ${outputLocation}`);
   }

@@ -5,13 +5,14 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress } from "../demo-motion";
+import { enterProgress, toLogicalSceneFrame } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
 type ComposeSceneProps = Readonly<{
   format: DemoFormat;
   durationInFrames: number;
+  renderOffset: number;
 }>;
 
 const clamp = {
@@ -25,8 +26,9 @@ const typedLogline =
 export const ComposeScene = ({
   format,
   durationInFrames,
+  renderOffset,
 }: ComposeSceneProps) => {
-  const frame = useCurrentFrame();
+  const frame = toLogicalSceneFrame(useCurrentFrame(), renderOffset);
   const isLandscape = format === "landscape";
   const frameProgress = enterProgress(frame, 3, 20);
   const typeProgress = enterProgress(

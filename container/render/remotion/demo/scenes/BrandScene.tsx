@@ -1,6 +1,10 @@
 import { Img, interpolate, staticFile, useCurrentFrame } from "remotion";
 import { DemoStage } from "../components/DemoStage";
 import { DEMO_ASSETS } from "../demo-assets";
+import {
+  DEMO_BRAND_NAME,
+  DEMO_SCENE_COPY,
+} from "../demo-copy";
 import { enterProgress, sceneOpacity } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
@@ -15,6 +19,98 @@ const clamp = {
   extrapolateRight: "clamp" as const,
 };
 
+type BrandWordmarkRevealProps = Readonly<{
+  format: DemoFormat;
+  drawProgress: number;
+  fillProgress: number;
+}>;
+
+export const BrandWordmarkReveal = ({
+  format,
+  drawProgress,
+  fillProgress,
+}: BrandWordmarkRevealProps) => {
+  const isLandscape = format === "landscape";
+  const revealId = `brand-wordmark-reveal-${format}`;
+  const entryProgress = interpolate(drawProgress, [0, 0.24], [0, 1], clamp);
+  const letterProgress = interpolate(drawProgress, [0.18, 1], [0, 1], clamp);
+  const entryPathLength = 240;
+
+  return (
+    <svg
+      aria-label={`${DEMO_BRAND_NAME} wordmark`}
+      role="img"
+      viewBox="0 0 1100 300"
+      style={{
+        width: isLandscape ? 1100 : 850,
+        height: isLandscape ? 300 : 232,
+        flexShrink: 0,
+        marginTop: isLandscape ? 0 : 80,
+        overflow: "visible",
+      }}
+    >
+      <defs>
+        <clipPath id={revealId}>
+          <rect
+            x={190}
+            y={18}
+            width={interpolate(letterProgress, [0, 1], [0, 780], clamp)}
+            height={248}
+          />
+        </clipPath>
+      </defs>
+      <path
+        d="M18 142 C84 70 132 216 194 163"
+        fill="none"
+        stroke={DEMO_THEME.amber}
+        strokeLinecap="round"
+        strokeWidth={isLandscape ? 8 : 10}
+        strokeDasharray={entryPathLength}
+        strokeDashoffset={interpolate(
+          entryProgress,
+          [0, 1],
+          [entryPathLength, 0],
+          clamp,
+        )}
+      />
+      <text
+        x={560}
+        y={218}
+        clipPath={`url(#${revealId})`}
+        fill="none"
+        stroke={DEMO_THEME.amber}
+        strokeLinejoin="round"
+        strokeWidth={isLandscape ? 5 : 6}
+        textAnchor="middle"
+        style={{
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          fontSize: 188,
+          fontWeight: 700,
+          letterSpacing: "-14px",
+        }}
+      >
+        {DEMO_BRAND_NAME}
+      </text>
+      <text
+        x={560}
+        y={218}
+        clipPath={`url(#${revealId})`}
+        fill={DEMO_THEME.ink}
+        opacity={fillProgress}
+        textAnchor="middle"
+        style={{
+          fontFamily: "Georgia, 'Times New Roman', serif",
+          fontSize: 188,
+          fontWeight: 700,
+          letterSpacing: "-14px",
+        }}
+      >
+        {DEMO_BRAND_NAME}
+      </text>
+    </svg>
+  );
+};
+
 export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
   const frame = useCurrentFrame();
   const isLandscape = format === "landscape";
@@ -26,15 +122,14 @@ export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
   );
   const wordmarkProgress = enterProgress(
     frame,
-    isLandscape ? 48 : 38,
-    20,
+    isLandscape ? 60 : 46,
+    isLandscape ? 18 : 16,
   );
   const copyProgress = enterProgress(
     frame,
     isLandscape ? 66 : 54,
     18,
   );
-  const pathLength = 820;
 
   return (
     <div style={{ width: "100%", height: "100%", opacity: sceneOpacity(frame, durationInFrames) }}>
@@ -71,46 +166,11 @@ export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
             gap: isLandscape ? 24 : 34,
           }}
         >
-          <svg
-            aria-hidden
-            viewBox="0 0 900 250"
-            style={{
-              position: "absolute",
-              top: isLandscape ? 210 : 460,
-              width: isLandscape ? 900 : 850,
-              height: isLandscape ? 250 : 236,
-              overflow: "visible",
-              opacity: threadProgress,
-            }}
-          >
-            <path
-              d="M38 142 C170 18 282 222 416 122 C538 31 602 33 688 118 C750 179 795 175 862 91"
-              fill="none"
-              stroke={DEMO_THEME.amber}
-              strokeLinecap="round"
-              strokeWidth={isLandscape ? 8 : 10}
-              strokeDasharray={pathLength}
-              strokeDashoffset={interpolate(threadProgress, [0, 1], [pathLength, 0], clamp)}
-            />
-          </svg>
-
-          <div
-            style={{
-              position: "relative",
-              marginTop: isLandscape ? 12 : 150,
-              color: DEMO_THEME.ink,
-              fontFamily: "Georgia, 'Times New Roman', serif",
-              fontSize: isLandscape ? 180 : 190,
-              fontWeight: 700,
-              letterSpacing: "-0.075em",
-              lineHeight: 0.9,
-              opacity: wordmarkProgress,
-              scale: interpolate(wordmarkProgress, [0, 1], [0.94, 1], clamp),
-              translate: `0 ${interpolate(wordmarkProgress, [0, 1], [24, 0], clamp)}px`,
-            }}
-          >
-            Spooool
-          </div>
+          <BrandWordmarkReveal
+            format={format}
+            drawProgress={threadProgress}
+            fillProgress={wordmarkProgress}
+          />
 
           <div
             style={{
@@ -135,7 +195,7 @@ export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
                 textAlign: "center",
               }}
             >
-              Where ideas become stories.
+              {DEMO_SCENE_COPY.brand.tagline}
             </div>
             <div
               style={{
@@ -146,7 +206,7 @@ export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
                 letterSpacing: "0.025em",
               }}
             >
-              spooool.com/studio
+              {DEMO_SCENE_COPY.brand.url}
             </div>
           </div>
         </div>

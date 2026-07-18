@@ -3,6 +3,7 @@ import { DemoStage } from "../components/DemoStage";
 import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
+import { DEMO_SCENE_COPY } from "../demo-copy";
 import { enterProgress, sceneOpacity } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
@@ -69,7 +70,7 @@ export const SparkScene = ({
               maxWidth={isLandscape ? 520 : 880}
               align={isLandscape ? "left" : "center"}
             >
-              An idea.
+              {DEMO_SCENE_COPY.spark}
             </Headline>
             <span
               style={{

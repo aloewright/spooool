@@ -3,6 +3,7 @@ import { DemoStage } from "../components/DemoStage";
 import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
+import { DEMO_SCENE_COPY } from "../demo-copy";
 import { enterProgress, sceneOpacity } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
@@ -54,7 +55,7 @@ export const RefineScene = ({
             maxWidth={isLandscape ? 1500 : 900}
             align="center"
           >
-            Make every word count.
+            {DEMO_SCENE_COPY.refine}
           </Headline>
 
           <div style={{ position: "relative", width: isLandscape ? 1600 : 920, height: isLandscape ? 700 : 1210 }}>

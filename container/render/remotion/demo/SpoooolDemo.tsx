@@ -11,15 +11,7 @@ import { RefineScene } from "./scenes/RefineScene";
 import { ShapeScene } from "./scenes/ShapeScene";
 import { SparkScene } from "./scenes/SparkScene";
 
-export const DEMO_COPY = [
-  "An idea.",
-  "Start with a spark.",
-  "Give it shape.",
-  "Make every word count.",
-  "Ready when you are.",
-  "Where ideas become stories.",
-  "spooool.com/studio",
-] as const;
+export { DEMO_BRAND_NAME, DEMO_COPY, DEMO_SCENE_COPY } from "./demo-copy";
 
 export type SpoooolDemoProps = Readonly<{
   format: DemoFormat;

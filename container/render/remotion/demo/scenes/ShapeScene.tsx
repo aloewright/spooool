@@ -4,6 +4,7 @@ import { DemoStage } from "../components/DemoStage";
 import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
+import { DEMO_SCENE_COPY } from "../demo-copy";
 import { enterProgress, sceneOpacity } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
@@ -170,7 +171,7 @@ export const ShapeScene = ({ format, durationInFrames }: ShapeSceneProps) => {
               maxWidth={isLandscape ? 460 : 900}
               align={isLandscape ? "left" : "center"}
             >
-              Give it shape.
+              {DEMO_SCENE_COPY.shape}
             </Headline>
           </div>
         </div>

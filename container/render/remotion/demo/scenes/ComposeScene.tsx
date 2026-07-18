@@ -4,6 +4,7 @@ import { DemoStage } from "../components/DemoStage";
 import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
+import { DEMO_SCENE_COPY } from "../demo-copy";
 import { enterProgress, sceneOpacity } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
@@ -66,7 +67,7 @@ export const ComposeScene = ({
               maxWidth={isLandscape ? 500 : 900}
               align={isLandscape ? "left" : "center"}
             >
-              Start with a spark.
+              {DEMO_SCENE_COPY.compose}
             </Headline>
             <div
               style={{

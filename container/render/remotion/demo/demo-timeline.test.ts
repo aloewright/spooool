@@ -24,9 +24,25 @@ describe("demo timelines", () => {
     expect(scenes.at(-1)!.from + scenes.at(-1)!.duration).toBe(duration);
   });
 
-  it("keeps the approved scene order", () => {
-    expect(LANDSCAPE_SCENES.map(({ key }) => key)).toEqual([
-      "spark", "compose", "shape", "refine", "publish", "brand",
+  it("uses the approved landscape scene map", () => {
+    expect(LANDSCAPE_SCENES).toEqual([
+      { key: "spark", from: 0, duration: 90 },
+      { key: "compose", from: 90, duration: 150 },
+      { key: "shape", from: 240, duration: 180 },
+      { key: "refine", from: 420, duration: 210 },
+      { key: "publish", from: 630, duration: 150 },
+      { key: "brand", from: 780, duration: 120 },
+    ]);
+  });
+
+  it("uses the approved vertical scene map", () => {
+    expect(VERTICAL_SCENES).toEqual([
+      { key: "spark", from: 0, duration: 60 },
+      { key: "compose", from: 60, duration: 120 },
+      { key: "shape", from: 180, duration: 150 },
+      { key: "refine", from: 330, duration: 150 },
+      { key: "publish", from: 480, duration: 90 },
+      { key: "brand", from: 570, duration: 90 },
     ]);
   });
 });

@@ -41,6 +41,7 @@ function prefersReducedMotion(): boolean {
 }
 
 function markSplashSeen(): void {
+  if (typeof window === 'undefined') return;
   const tab = window as unknown as Record<PropertyKey, unknown>;
   try {
     Object.defineProperty(window, SPLASH_TAB_MARKER, {
@@ -58,6 +59,7 @@ function markSplashSeen(): void {
 }
 
 function splashWasSeen(): boolean {
+  if (typeof window === 'undefined') return false;
   if ((window as unknown as Record<PropertyKey, unknown>)[SPLASH_TAB_MARKER] === true) return true;
   try {
     return window.sessionStorage.getItem(SPLASH_SEEN_KEY) === '1';
@@ -165,6 +167,11 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
 export function useBrandSplash(pathname: string): { show: boolean; dismiss: () => void } {
   const hasClaimedVisit = useRef(false);
   const [show, setShow] = useState(() => pathname === '/' && !splashWasSeen());
+  // A route change to the first home visit must cover the shell in the same
+  // render. Waiting for the effect would briefly expose an interactive home
+  // page before the overlay commits. The effect below persists the claim.
+  const shouldClaimVisit =
+    pathname === '/' && !hasClaimedVisit.current && !splashWasSeen();
 
   useEffect(() => {
     if (pathname !== '/') {
@@ -187,5 +194,5 @@ export function useBrandSplash(pathname: string): { show: boolean; dismiss: () =
     setShow(false);
   }, []);
 
-  return { show: pathname === '/' && show, dismiss };
+  return { show: pathname === '/' && (show || shouldClaimVisit), dismiss };
 }

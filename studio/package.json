@@ -11,7 +11,8 @@
     "format": "biome format --write .",
     "typecheck": "pnpm -r typecheck",
     "test": "vitest run && pnpm -r --if-present test",
-    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts"
+    "test:e2e": "playwright test --config tests/e2e/playwright.config.ts",
+    "capture:demo": "node scripts/capture-demo.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

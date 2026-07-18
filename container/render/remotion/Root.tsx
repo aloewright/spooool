@@ -7,6 +7,12 @@ import { SpoooolVideo, FRAMES_PER_TAKE } from "./SpoooolVideo";
 import type { SpoooolVideoProps } from "./SpoooolVideo";
 import { SpoooolExplainer, calculateExplainerDuration } from "./SpoooolExplainer";
 import { SpoooolAnimation, DEFAULT_ANIMATION_PROJECT, calculateAnimationMetadata } from "./SpoooolAnimation";
+import { SpoooolDemo } from "./demo/SpoooolDemo";
+import {
+  DEMO_FPS,
+  LANDSCAPE_DURATION,
+  VERTICAL_DURATION,
+} from "./demo/demo-timeline";
 
 const SPOOOOL_DEFAULT_PROPS: SpoooolVideoProps = {
   takes: [] as string[],
@@ -64,6 +70,25 @@ export const RemotionRoot = () => {
         calculateMetadata={({ props }) => ({
           durationInFrames: calculateExplainerDuration(props.scenes ?? []),
         })}
+      />
+      {/* spooool-demo — fixed landscape and vertical product-film compositions */}
+      <Composition
+        id="spooool-demo-landscape"
+        component={SpoooolDemo}
+        width={1920}
+        height={1080}
+        fps={DEMO_FPS}
+        durationInFrames={LANDSCAPE_DURATION}
+        defaultProps={{ format: "landscape" as const }}
+      />
+      <Composition
+        id="spooool-demo-vertical"
+        component={SpoooolDemo}
+        width={1080}
+        height={1920}
+        fps={DEMO_FPS}
+        durationInFrames={VERTICAL_DURATION}
+        defaultProps={{ format: "vertical" as const }}
       />
       {/* Upstream recorder compositions — kept intact for reference / future use */}
       <Composition

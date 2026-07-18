@@ -33,6 +33,7 @@ export function checkFiles(root = process.cwd()) {
   const targets = [
     path.join(root, 'container/render/remotion/SpoooolAnimation.tsx'),
     ...walk(path.join(root, 'container/render/remotion/animation')),
+    ...walk(path.join(root, 'container/render/remotion/demo')),
   ].filter((file) => fs.existsSync(file));
   const failures = targets.filter((file) => containsForbiddenRemotionAnimationPattern(fs.readFileSync(file, 'utf8')));
   return failures;

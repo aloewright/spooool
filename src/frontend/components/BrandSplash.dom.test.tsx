@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import React, { act, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { BrandSplash, BRAND_SPLASH_TIMINGS, useBrandSplash } from './BrandSplash';
 
 (
@@ -159,6 +160,18 @@ function HookHarness({
   return <output>{String(state.show)}</output>;
 }
 
+function RenderHookHarness({
+  pathname,
+  onRender,
+}: {
+  pathname: string;
+  onRender: (show: boolean) => void;
+}): JSX.Element {
+  const state = useBrandSplash(pathname);
+  onRender(state.show);
+  return <output>{String(state.show)}</output>;
+}
+
 describe('useBrandSplash', () => {
   it('keeps an unseen home visit visible in StrictMode and marks it seen', () => {
     mount(
@@ -246,5 +259,27 @@ describe('useBrandSplash', () => {
     expect(container!.textContent).toBe('false');
     act(() => root!.render(<HookHarness pathname="/" onChange={vi.fn()} />));
     expect(container!.textContent).toBe('false');
+  });
+
+  it('covers the first home navigation on its initial render', () => {
+    const renderedStates: boolean[] = [];
+    const onRender = (show: boolean) => renderedStates.push(show);
+    mount(<RenderHookHarness pathname="/feed" onRender={onRender} />);
+    expect(renderedStates).toEqual([false]);
+
+    const beforeHomeRender = renderedStates.length;
+    act(() => root!.render(<RenderHookHarness pathname="/" onRender={onRender} />));
+
+    expect(renderedStates.slice(beforeHomeRender)).not.toContain(false);
+    expect(container!.textContent).toBe('true');
+  });
+
+  it('is safe to render without a browser window', () => {
+    vi.stubGlobal('window', undefined);
+    try {
+      expect(() => renderToString(<HookHarness pathname="/" onChange={vi.fn()} />)).not.toThrow();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

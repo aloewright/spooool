@@ -4,7 +4,7 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress, sceneOpacity } from "../demo-motion";
+import { enterProgress } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
@@ -18,10 +18,7 @@ const clamp = {
   extrapolateRight: "clamp" as const,
 };
 
-export const PublishScene = ({
-  format,
-  durationInFrames,
-}: PublishSceneProps) => {
+export const PublishScene = ({ format }: PublishSceneProps) => {
   const frame = useCurrentFrame();
   const isLandscape = format === "landscape";
   const surfaceProgress = enterProgress(frame, 2, 18);
@@ -39,7 +36,7 @@ export const PublishScene = ({
   const surfaceHeight = isLandscape ? 760 : 1160;
 
   return (
-    <div style={{ width: "100%", height: "100%", opacity: sceneOpacity(frame, durationInFrames) }}>
+    <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
           style={{

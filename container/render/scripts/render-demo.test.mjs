@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as renderDemoModule from "./render-demo.mjs";
 import {
   getQaFrames,
   getRenderTargets,
@@ -61,6 +62,36 @@ describe("render-demo targets", () => {
         expect.objectContaining({ renderStills, renderVideo }),
       ]),
     );
+  });
+});
+
+describe("render-demo media contract", () => {
+  it("caps the stitcher at the composition duration", () => {
+    expect(renderDemoModule.enforceDemoDuration).toBeTypeOf("function");
+
+    expect(
+      renderDemoModule.enforceDemoDuration(
+        { type: "pre-stitcher", args: ["-i", "audio.wav", "audio.aac"] },
+        30,
+      ),
+    ).toEqual(["-i", "audio.wav", "audio.aac"]);
+    expect(
+      renderDemoModule.enforceDemoDuration(
+        { type: "stitcher", args: ["-i", "video", "output.mp4"] },
+        30,
+      ),
+    ).toEqual(["-i", "video", "-t", "30.000000", "output.mp4"]);
+  });
+
+  it("renders PNG frames into limited-range BT.709 yuv420p", () => {
+    expect(renderDemoModule.DEMO_VIDEO_RENDER_OPTIONS).toEqual({
+      codec: "h264",
+      imageFormat: "png",
+      pixelFormat: "yuv420p",
+      colorSpace: "bt709",
+      crf: 18,
+      audioCodec: "aac",
+    });
   });
 });
 

@@ -30,16 +30,16 @@ describe("demo motion helpers", () => {
     }
   });
 
-  it("keeps a scene fully visible through its middle", () => {
-    expect(sceneOpacity(0, 100)).toBe(0);
-    expect(sceneOpacity(15, 100)).toBe(1);
-    expect(sceneOpacity(50, 100)).toBe(1);
-    expect(sceneOpacity(85, 100)).toBe(1);
-    expect(sceneOpacity(100, 100)).toBe(0);
+  it("keeps a scene root opaque after its incoming overlap", () => {
+    expect(sceneOpacity(0, 0)).toBe(1);
+    expect(sceneOpacity(0, 15)).toBe(0);
+    expect(sceneOpacity(7.5, 15)).toBe(0.5);
+    expect(sceneOpacity(15, 15)).toBe(1);
+    expect(sceneOpacity(100, 15)).toBe(1);
 
-    for (const frame of [-100, 0, 15, 50, 85, 100, 200]) {
-      expect(sceneOpacity(frame, 100)).toBeGreaterThanOrEqual(0);
-      expect(sceneOpacity(frame, 100)).toBeLessThanOrEqual(1);
+    for (const frame of [-100, 0, 7.5, 15, 100]) {
+      expect(sceneOpacity(frame, 15)).toBeGreaterThanOrEqual(0);
+      expect(sceneOpacity(frame, 15)).toBeLessThanOrEqual(1);
     }
   });
 });

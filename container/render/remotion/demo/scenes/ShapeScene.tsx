@@ -5,7 +5,7 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress, sceneOpacity } from "../demo-motion";
+import { enterProgress } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
@@ -32,7 +32,7 @@ export const ShapeScene = ({ format, durationInFrames }: ShapeSceneProps) => {
   const cursorProgress = enterProgress(frame, isLandscape ? 58 : 48, 52);
 
   return (
-    <div style={{ width: "100%", height: "100%", opacity: sceneOpacity(frame, durationInFrames) }}>
+    <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
           style={{

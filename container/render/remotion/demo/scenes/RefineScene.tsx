@@ -4,7 +4,7 @@ import { Headline } from "../components/Headline";
 import { ProductFrame } from "../components/ProductFrame";
 import { DEMO_ASSETS } from "../demo-assets";
 import { DEMO_SCENE_COPY } from "../demo-copy";
-import { enterProgress, sceneOpacity } from "../demo-motion";
+import { enterProgress } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
@@ -21,10 +21,12 @@ const clamp = {
 const beforeExcerpt = "The Lantern Ward has vanished from the page.";
 const afterExcerpt = "The ward vanished, leaving the page bright and bare.";
 
-export const RefineScene = ({
-  format,
-  durationInFrames,
-}: RefineSceneProps) => {
+export const REFINE_EXCERPT_MIN_HEIGHT = {
+  landscape: 104,
+  vertical: 128,
+} as const;
+
+export const RefineScene = ({ format }: RefineSceneProps) => {
   const frame = useCurrentFrame();
   const isLandscape = format === "landscape";
   const surfaceProgress = enterProgress(frame, 2, 20);
@@ -36,7 +38,7 @@ export const RefineScene = ({
   );
 
   return (
-    <div style={{ width: "100%", height: "100%", opacity: sceneOpacity(frame, durationInFrames) }}>
+    <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
           style={{
@@ -106,7 +108,7 @@ export const RefineScene = ({
               <div
                 style={{
                   position: "relative",
-                  minHeight: isLandscape ? 64 : 128,
+                  minHeight: REFINE_EXCERPT_MIN_HEIGHT[format],
                   color: DEMO_THEME.white,
                   fontFamily: "Georgia, 'Times New Roman', serif",
                   fontSize: isLandscape ? 40 : 49,

@@ -31,11 +31,10 @@ export const exitProgress = (
     clamp,
   );
 
-export const sceneOpacity = (frame: number, duration: number): number => {
-  const fadeDuration = Math.min(15, finiteDuration(duration) / 2);
-
-  return Math.min(
-    enterProgress(frame, 0, fadeDuration),
-    exitProgress(frame, finiteDuration(duration) - fadeDuration, fadeDuration),
-  );
-};
+export const sceneOpacity = (
+  frame: number,
+  transitionInFrames: number,
+): number =>
+  transitionInFrames <= 0
+    ? 1
+    : enterProgress(frame, 0, transitionInFrames);

@@ -5,7 +5,7 @@ import {
   DEMO_BRAND_NAME,
   DEMO_SCENE_COPY,
 } from "../demo-copy";
-import { enterProgress, sceneOpacity } from "../demo-motion";
+import { enterProgress } from "../demo-motion";
 import { DEMO_THEME } from "../demo-theme";
 import type { DemoFormat } from "../demo-timeline";
 
@@ -111,7 +111,7 @@ export const BrandWordmarkReveal = ({
   );
 };
 
-export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
+export const BrandScene = ({ format }: BrandSceneProps) => {
   const frame = useCurrentFrame();
   const isLandscape = format === "landscape";
   const recedeProgress = enterProgress(frame, 0, isLandscape ? 38 : 28);
@@ -132,7 +132,7 @@ export const BrandScene = ({ format, durationInFrames }: BrandSceneProps) => {
   );
 
   return (
-    <div style={{ width: "100%", height: "100%", opacity: sceneOpacity(frame, durationInFrames) }}>
+    <div style={{ width: "100%", height: "100%" }}>
       <DemoStage format={format}>
         <div
           style={{

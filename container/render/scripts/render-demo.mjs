@@ -34,6 +34,15 @@ const TARGETS = Object.freeze([
   }),
 ]);
 
+export const DEMO_VIDEO_RENDER_OPTIONS = Object.freeze({
+  codec: "h264",
+  imageFormat: "png",
+  pixelFormat: "yuv420p",
+  colorSpace: "bt709",
+  crf: 18,
+  audioCodec: "aac",
+});
+
 const USAGE = "Usage: node scripts/render-demo.mjs [--all|--stills|--videos]";
 
 export const parseArgs = (argv) => {
@@ -69,6 +78,24 @@ export const getRenderTargets = (mode) => {
     renderStills: mode === "all" || mode === "stills",
     renderVideo: mode === "all" || mode === "videos",
   }));
+};
+
+export const enforceDemoDuration = ({ type, args }, durationInSeconds) => {
+  if (type !== "stitcher") {
+    return args;
+  }
+
+  const output = args.at(-1);
+  if (!output) {
+    throw new Error("FFmpeg stitcher command is missing its output path");
+  }
+
+  return [
+    ...args.slice(0, -1),
+    "-t",
+    durationInSeconds.toFixed(6),
+    output,
+  ];
 };
 
 const ensureOutputDirectories = async (targets) => {
@@ -118,10 +145,12 @@ const renderTarget = async ({
       composition,
       serveUrl,
       outputLocation,
-      codec: "h264",
-      pixelFormat: "yuv420p",
-      crf: 18,
-      audioCodec: "aac",
+      ...DEMO_VIDEO_RENDER_OPTIONS,
+      ffmpegOverride: (info) =>
+        enforceDemoDuration(
+          info,
+          composition.durationInFrames / composition.fps,
+        ),
       overwrite: true,
       isProduction: true,
     });

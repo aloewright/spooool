@@ -1,6 +1,7 @@
 import { Audio } from "@remotion/media";
 import type { ComponentType } from "react";
 import { AbsoluteFill, Sequence, staticFile } from "remotion";
+import { DemoSceneTransition } from "./components/DemoSceneTransition";
 import { DEMO_ASSETS } from "./demo-assets";
 import { getDemoTimeline } from "./demo-timeline";
 import type { DemoFormat, DemoSceneKey } from "./demo-timeline";
@@ -22,6 +23,8 @@ type DemoSceneProps = Readonly<{
   durationInFrames: number;
 }>;
 
+const DEMO_TRANSITION_FRAMES = 15;
+
 export const DEMO_SCENES: Readonly<
   Record<DemoSceneKey, ComponentType<DemoSceneProps>>
 > = {
@@ -38,17 +41,22 @@ export const SpoooolDemo = ({ format }: SpoooolDemoProps) => {
 
   return (
     <AbsoluteFill>
-      {timeline.map((scene) => {
+      {timeline.map((scene, index) => {
         const Scene = DEMO_SCENES[scene.key];
+        const transitionInFrames = index === 0 ? 0 : DEMO_TRANSITION_FRAMES;
+        const renderFrom = scene.from - transitionInFrames;
+        const renderDuration = scene.duration + transitionInFrames;
 
         return (
           <Sequence
             key={scene.key}
-            from={scene.from}
-            durationInFrames={scene.duration}
+            from={renderFrom}
+            durationInFrames={renderDuration}
             premountFor={30}
           >
-            <Scene format={format} durationInFrames={scene.duration} />
+            <DemoSceneTransition transitionInFrames={transitionInFrames}>
+              <Scene format={format} durationInFrames={renderDuration} />
+            </DemoSceneTransition>
           </Sequence>
         );
       })}

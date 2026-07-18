@@ -12,6 +12,7 @@ import {
   SpoooolDemo,
 } from "./SpoooolDemo";
 import { BrandWordmarkReveal } from "./scenes/BrandScene";
+import { REFINE_EXCERPT_MIN_HEIGHT } from "./scenes/RefineScene";
 
 type CompositionTree = ReactElement<{
   children: readonly [readonly ReactElement[], ReactElement];
@@ -21,28 +22,37 @@ const ASSEMBLY_CASES = [
   {
     format: "landscape",
     scenes: [
-      { from: 0, duration: 90 },
-      { from: 90, duration: 150 },
-      { from: 240, duration: 180 },
-      { from: 420, duration: 210 },
-      { from: 630, duration: 150 },
-      { from: 780, duration: 120 },
+      { from: 0, duration: 90, transitionInFrames: 0 },
+      { from: 75, duration: 165, transitionInFrames: 15 },
+      { from: 225, duration: 195, transitionInFrames: 15 },
+      { from: 405, duration: 225, transitionInFrames: 15 },
+      { from: 615, duration: 165, transitionInFrames: 15 },
+      { from: 765, duration: 135, transitionInFrames: 15 },
     ],
   },
   {
     format: "vertical",
     scenes: [
-      { from: 0, duration: 60 },
-      { from: 60, duration: 120 },
-      { from: 180, duration: 150 },
-      { from: 330, duration: 150 },
-      { from: 480, duration: 90 },
-      { from: 570, duration: 90 },
+      { from: 0, duration: 60, transitionInFrames: 0 },
+      { from: 45, duration: 135, transitionInFrames: 15 },
+      { from: 165, duration: 165, transitionInFrames: 15 },
+      { from: 315, duration: 165, transitionInFrames: 15 },
+      { from: 465, duration: 105, transitionInFrames: 15 },
+      { from: 555, duration: 105, transitionInFrames: 15 },
     ],
   },
 ] as const;
 
 describe("SpoooolDemo", () => {
+  it("reserves two text lines for the landscape refinement excerpt", () => {
+    expect(REFINE_EXCERPT_MIN_HEIGHT.landscape).toBeGreaterThanOrEqual(
+      40 * 1.22 * 2,
+    );
+    expect(REFINE_EXCERPT_MIN_HEIGHT.vertical).toBeGreaterThanOrEqual(
+      49 * 1.22 * 2,
+    );
+  });
+
   it("keeps the approved product-film copy exact", () => {
     expect(DEMO_COPY).toEqual([
       "An idea.",
@@ -134,18 +144,24 @@ describe("SpoooolDemo", () => {
 
       expect(
         sequences.map((sequence) => {
-          const scene = sequence.props.children as ReactElement<{
-            format: string;
-            durationInFrames: number;
+          const transition = sequence.props.children as ReactElement<{
+            children: ReactElement<{
+              format: string;
+              durationInFrames: number;
+            }>;
+            transitionInFrames: number;
           }>;
+          const scene = transition.props.children;
 
           return {
+            transitionInFrames: transition.props.transitionInFrames,
             format: scene.props.format,
             durationInFrames: scene.props.durationInFrames,
           };
         }),
       ).toEqual(
         expectedScenes.map((scene) => ({
+          transitionInFrames: scene.transitionInFrames,
           format,
           durationInFrames: scene.duration,
         })),

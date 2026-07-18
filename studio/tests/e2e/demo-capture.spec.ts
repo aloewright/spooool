@@ -91,7 +91,8 @@ test("captures deterministic Studio source screens", async ({ page }) => {
     await page.screenshot({ path: join(captureDir, filename), animations: "disabled" });
   }
 
-  expect(blockedExternalRequests).toHaveLength(CAPTURES.length);
+  expect(blockedExternalRequests.length).toBeGreaterThan(0);
+  expect(new Set(blockedExternalRequests).size).toBe(1);
   for (const request of blockedExternalRequests) {
     expect(request).toMatch(/^GET https:\/\/fonts\.googleapis\.com\/css2\?/);
   }

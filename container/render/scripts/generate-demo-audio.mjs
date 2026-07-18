@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isMainModule } from "./is-main-module.mjs";
 
 const CHANNELS = 2;
 const BITS_PER_SAMPLE = 16;
@@ -162,6 +163,6 @@ const generateDemoAudio = async () => {
   }
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule({ argvPath: process.argv[1], moduleUrl: import.meta.url })) {
   await generateDemoAudio();
 }

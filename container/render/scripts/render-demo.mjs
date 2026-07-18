@@ -2,13 +2,14 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { bundle } from "@remotion/bundler";
 import {
   renderMedia,
   renderStill,
   selectComposition,
 } from "@remotion/renderer";
+import { isMainModule } from "./is-main-module.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RENDER_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -269,11 +270,7 @@ export const renderDemo = async (mode) => {
   }
 };
 
-const isMain =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-
-if (isMain) {
+if (isMainModule({ argvPath: process.argv[1], moduleUrl: import.meta.url })) {
   try {
     await renderDemo(parseArgs(process.argv.slice(2)));
   } catch (error) {

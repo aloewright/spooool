@@ -28,10 +28,11 @@ const STATIC_TRUSTED_ORIGINS = [
 ];
 
 function normalizeHttpOrigin(value?: string): string | undefined {
-  if (!value) return undefined;
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return undefined;
 
   try {
-    const url = new URL(value);
+    const url = new URL(trimmedValue);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
     if (url.username || url.password) return undefined;
     return url.origin;

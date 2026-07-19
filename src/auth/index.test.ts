@@ -136,6 +136,24 @@ describe('createAuth', () => {
     ]);
   });
 
+  it('trims padded URLs and ignores whitespace-only origin entries', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: '  https://spooool-staging.lazee.workers.dev/api/auth  ',
+      BETTER_AUTH_TRUSTED_ORIGINS: '  ,\t, https://preview.spooool.com/path ,  ',
+    });
+
+    expect(captured.options?.baseURL).toBe('https://spooool-staging.lazee.workers.dev');
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
+      'https://preview.spooool.com',
+    ]);
+  });
+
   it('deduplicates configured origins and ignores invalid or non-http entries', () => {
     createAuth({
       DB: {} as D1Database,

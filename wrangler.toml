@@ -247,7 +247,7 @@ COBALT_URL = "https://cobalt-api.lazee.workers.dev"
 # NOTE: an [env.*] `vars` table does NOT inherit/merge top-level [vars] —
 # wrangler replaces it wholesale, so the discover/cobalt URLs must be repeated here.
 [env.staging]
-vars = { ALLOWED_ORIGINS = "", FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev", COBALT_URL = "https://cobalt-api.lazee.workers.dev" }
+vars = { ALLOWED_ORIGINS = "", BETTER_AUTH_TRUSTED_ORIGINS = "https://spooool-staging.lazee.workers.dev", FIRECRAWL_URL = "https://firecrawl-cf.lazee.workers.dev", COBALT_URL = "https://cobalt-api.lazee.workers.dev" }
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "spooool-staging"

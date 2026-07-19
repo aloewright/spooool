@@ -5,9 +5,9 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 //
 //   * Worker API responses are stubbed via `page.route` so the spec is
 //     independent of D1 / R2 / Stream state.
-//   * The `<video>` element is patched in `addInitScript` so video.js sees
-//     `loadedmetadata` + a non-zero duration without us shipping a real MP4
-//     fixture. We're testing the React/UI surface, not media decoding.
+//   * The Cloudflare Stream SDK is replaced in `addInitScript` with its public
+//     iframe API, which emits `loadedmetadata` and exposes a stable playhead.
+//     We're testing the React/UI surface, not media decoding or Stream itself.
 //
 // Coverage: page renders with the right title and channel badge, the share
 // button rewrites its label after copy, and the resume banner appears when
@@ -21,69 +21,62 @@ const CHANNEL_NAME = 'E2E Channel';
 // localStorage key used by src/frontend/lib/watch-position.ts.
 const POSITIONS_KEY = 'spooool:watch:positions:v1';
 
-async function stubVideoElement(page: Page): Promise<void> {
-  // The video.js adapter waits for `loadedmetadata` on the underlying media
-  // element before deciding whether to seek to a stored / ?t= position. We
-  // don't ship a real fixture in the repo, so we patch the prototype to make
-  // every <video> behave as if a 100s clip just finished loading.
+async function stubStreamPlayer(page: Page): Promise<void> {
+  // StreamPlayer wraps @cloudflare/stream-react, whose player is an iframe
+  // controlled through window.Stream(iframe), not a native <video>. Model the
+  // public API closely enough to drive Watch's adapter and metadata lifecycle.
   await page.addInitScript(() => {
-    const proto = HTMLVideoElement.prototype;
-    let storedTime = 0;
-    Object.defineProperty(proto, 'duration', {
-      configurable: true,
-      get: () => 100,
-    });
-    Object.defineProperty(proto, 'readyState', {
-      configurable: true,
-      get: () => 4,
-    });
-    Object.defineProperty(proto, 'currentTime', {
-      configurable: true,
-      get: () => storedTime,
-      set(v: number) {
-        storedTime = Number.isFinite(v) ? Number(v) : 0;
-      },
-    });
-    Object.defineProperty(proto, 'paused', {
-      configurable: true,
-      get: () => true,
-    });
-    // Mark playback as no-op so videojs's call into `play()` doesn't reject.
-    HTMLMediaElement.prototype.play = function play(): Promise<void> {
-      return Promise.resolve();
-    };
-    HTMLMediaElement.prototype.pause = function pause(): void {
-      // no-op
-    };
-    HTMLMediaElement.prototype.load = function load(): void {
-      // Synthesize the load events videojs listens for.
-      queueMicrotask(() => {
-        this.dispatchEvent(new Event('loadedmetadata'));
-        this.dispatchEvent(new Event('loadeddata'));
-        this.dispatchEvent(new Event('canplay'));
-      });
-    };
-    // Setting `.src` should also nudge videojs forward.
-    const origSrcDescriptor = Object.getOwnPropertyDescriptor(
-      HTMLMediaElement.prototype,
-      'src',
-    );
-    Object.defineProperty(proto, 'src', {
-      configurable: true,
-      get(): string {
-        return this.getAttribute('src') ?? '';
-      },
-      set(v: string) {
-        if (origSrcDescriptor && typeof origSrcDescriptor.set === 'function') {
-          origSrcDescriptor.set.call(this, v);
-        } else {
-          this.setAttribute('src', v ?? '');
-        }
+    Object.assign(window, {
+      Stream(iframe: HTMLIFrameElement) {
+        const listeners = new Map<string, Set<EventListener>>();
+        let currentTime = 0;
+        let paused = true;
+        const api = {
+          autoplay: false,
+          buffered: {} as TimeRanges,
+          controls: true,
+          duration: 100,
+          ended: false,
+          loop: false,
+          muted: false,
+          playbackRate: 1,
+          played: {} as TimeRanges,
+          preload: 'metadata' as const,
+          src: '',
+          videoHeight: 1080,
+          videoWidth: 1920,
+          volume: 1,
+          get currentTime() {
+            return currentTime;
+          },
+          set currentTime(value: number) {
+            currentTime = Number.isFinite(value) ? value : 0;
+          },
+          get paused() {
+            return paused;
+          },
+          async play() {
+            paused = false;
+          },
+          pause() {
+            paused = true;
+          },
+          addEventListener(event: string, handler: EventListener) {
+            const handlers = listeners.get(event) ?? new Set<EventListener>();
+            handlers.add(handler);
+            listeners.set(event, handlers);
+          },
+          removeEventListener(event: string, handler: EventListener) {
+            listeners.get(event)?.delete(handler);
+          },
+        };
+        Object.defineProperty(iframe, '__spoooolE2EStreamApi', { value: api });
         queueMicrotask(() => {
-          this.dispatchEvent(new Event('loadedmetadata'));
-          this.dispatchEvent(new Event('loadeddata'));
-          this.dispatchEvent(new Event('canplay'));
+          for (const handler of listeners.get('loadedmetadata') ?? []) {
+            handler.call(api, new Event('loadedmetadata'));
+          }
         });
+        return api;
       },
     });
   });
@@ -108,8 +101,8 @@ async function stubWatchApis(page: Page): Promise<void> {
     view_count: 42,
     channel_name: CHANNEL_NAME,
     channel_username: CHANNEL_USERNAME,
-    r2_key: `${VIDEO_ID}.mp4`,
-    status: 'uploaded',
+    stream_video_id: 'e2e-stream-uid',
+    status: 'ready',
   }));
   await page.route(`**/api/videos/${VIDEO_ID}/related**`, jsonRoute({
     videos: [
@@ -126,9 +119,8 @@ async function stubWatchApis(page: Page): Promise<void> {
     subscribed: false,
     subscriberCount: 0,
   }));
-  // Stream URL is requested by the <video>; harmless 200 keeps the network log clean.
-  await page.route(`**/api/videos/${VIDEO_ID}/stream**`, (route) =>
-    route.fulfill({ status: 200, contentType: 'video/mp4', body: '' }),
+  await page.route('https://customer-od6lvjm5bwfl1lki.cloudflarestream.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Stream</title>' }),
   );
 }
 
@@ -161,7 +153,7 @@ async function seedResumePosition(page: Page, seconds: number): Promise<void> {
 
 test.describe('/watch happy path', () => {
   test.beforeEach(async ({ page }) => {
-    await stubVideoElement(page);
+    await stubStreamPlayer(page);
     await stubWatchApis(page);
   });
 
@@ -169,12 +161,13 @@ test.describe('/watch happy path', () => {
     await page.goto(`/watch/${VIDEO_ID}`);
 
     await expect(page.getByRole('heading', { level: 1, name: VIDEO_TITLE })).toBeVisible();
-    // <video> with controls is the player surface — the engine wraps this.
-    const video = page.locator('video');
-    await expect(video).toBeVisible();
-    await expect(video).toHaveJSProperty('controls', true);
+    // Stream is an iframe player; controls live in the provider-owned iframe.
+    const player = page.locator('iframe[src*="/e2e-stream-uid/iframe"]');
+    await expect(player).toBeVisible();
+    await expect(player).toHaveAttribute('allow', /autoplay/);
+    await expect(player).toHaveAttribute('allowfullscreen', '');
     // Channel name is surfaced as a badge.
-    await expect(page.getByText(CHANNEL_NAME, { exact: false })).toBeVisible();
+    await expect(page.getByText(CHANNEL_NAME, { exact: true })).toBeVisible();
     // Up next list (mocked related endpoint).
     await expect(page.getByRole('heading', { name: /up next/i })).toBeVisible();
     await expect(page.getByText('Next clip')).toBeVisible();
@@ -193,12 +186,13 @@ test.describe('/watch happy path', () => {
   test('share button writes ?t= when current time is non-zero', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await page.goto(`/watch/${VIDEO_ID}`);
-    // Wait for the video to mount, then nudge currentTime forward via the
-    // stub so the share URL gets a `?t=` suffix.
-    await page.locator('video').waitFor();
+    // Wait for the iframe and set its mocked public Stream API playhead.
+    await page.locator('iframe[src*="/e2e-stream-uid/iframe"]').waitFor();
     await page.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video) video.currentTime = 42;
+      const iframe = document.querySelector('iframe[src*="/e2e-stream-uid/iframe"]') as
+        | (HTMLIFrameElement & { __spoooolE2EStreamApi?: { currentTime: number } })
+        | null;
+      if (iframe?.__spoooolE2EStreamApi) iframe.__spoooolE2EStreamApi.currentTime = 42;
     });
     await page.getByRole('button', { name: /share at current time/i }).click();
     await expect(page.getByRole('button', { name: /link copied/i })).toBeVisible();

@@ -12,12 +12,49 @@ export type AuthEnv = EmailEnv & {
   DB: D1Database;
   BETTER_AUTH_SECRET?: string;
   BETTER_AUTH_URL?: string;
+  BETTER_AUTH_TRUSTED_ORIGINS?: string;
   TURNSTILE_SECRET_KEY?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
 };
+
+const STATIC_TRUSTED_ORIGINS = [
+  'http://localhost:5173',
+  'https://spooool.com',
+  'https://www.spooool.com',
+  'https://auth.pdx.software',
+];
+
+function normalizeHttpOrigin(value?: string): string | undefined {
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return undefined;
+
+  try {
+    const url = new URL(trimmedValue);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+    if (url.username || url.password) return undefined;
+    return url.origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function trustedOrigins(configuredBaseOrigin?: string, configuredTrustedOrigins?: string): string[] {
+  const additionalOrigins = (configuredTrustedOrigins?.split(',') ?? [])
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeHttpOrigin)
+    .filter((origin): origin is string => origin !== undefined);
+
+  return [
+    ...new Set([
+      ...STATIC_TRUSTED_ORIGINS,
+      ...(configuredBaseOrigin ? [configuredBaseOrigin] : []),
+      ...additionalOrigins,
+    ]),
+  ];
+}
 
 // Without this, send failures (unverified domain, binding misconfigured)
 // are swallowed silently — the auth callback resolves and better-auth
@@ -33,11 +70,13 @@ function logEmailResult(result: EmailResult, kind: string, to: string): void {
 }
 
 export function createAuth(env: AuthEnv) {
+  const baseURL = normalizeHttpOrigin(env.BETTER_AUTH_URL);
+
   return betterAuth({
     appName: 'spooool',
     database: env.DB,
     secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
+    baseURL,
     plugins: [
       captcha({
         provider: 'cloudflare-turnstile',
@@ -113,11 +152,6 @@ export function createAuth(env: AuthEnv) {
     // brief window before src/workers/canonical-host.ts 301s them to the apex.
     // The previous 'https://spooool.workers.dev' entry was a bogus URL shape
     // (the real one is spooool.<account>.workers.dev) and is dropped.
-    trustedOrigins: [
-      'http://localhost:5173',
-      'https://spooool.com',
-      'https://www.spooool.com',
-      'https://auth.pdx.software',
-    ],
+    trustedOrigins: trustedOrigins(baseURL, env.BETTER_AUTH_TRUSTED_ORIGINS),
   });
 }

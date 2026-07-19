@@ -48,20 +48,20 @@ async function stubTurnstile(page: import('@playwright/test').Page): Promise<voi
   );
 }
 
-test.describe('signup → home', () => {
-  test('a new user can sign up and lands signed-in on the home page', async ({ page }) => {
+test.describe('signup → onboarding', () => {
+  test('a new user can sign up and reaches signed-in onboarding', async ({ page }) => {
     await stubTurnstile(page);
     const email = uniqueEmail();
     await page.goto('/signup');
     await page.getByLabel(/name/i).fill('E2E User');
     await page.getByLabel(/email/i).fill(email);
     await page.getByLabel(/password/i).fill(PASSWORD);
+    const signupForm = page.locator('form');
     await Promise.all([
-      page.waitForURL('**/'),
-      page.getByRole('button', { name: /sign up|create account/i }).click(),
+      page.waitForURL('**/onboarding'),
+      signupForm.getByRole('button', { name: 'Create account', exact: true }).click(),
     ]);
-    // Signed-in surface should expose an upload entry point.
-    await expect(page.getByRole('link', { name: /upload/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /get set up in a minute/i })).toBeVisible();
   });
 
   test('signing in with bad credentials surfaces an error and stays on /login', async ({
@@ -70,7 +70,7 @@ test.describe('signup → home', () => {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('does-not-exist@spooool-e2e.test');
     await page.getByLabel(/password/i).fill('wrong-password');
-    await page.getByRole('button', { name: /sign in|log in/i }).click();
+    await page.locator('form').getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByRole('alert').or(page.getByText(/invalid|incorrect|wrong/i))).toBeVisible();
   });

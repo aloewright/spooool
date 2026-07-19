@@ -11,6 +11,8 @@ type CallbackArgs = {
 
 type CapturedOptions = {
   appName?: string;
+  baseURL?: string;
+  trustedOrigins?: string[];
   emailAndPassword?: {
     enabled?: boolean;
     minPasswordLength?: number;
@@ -78,11 +80,132 @@ describe('createAuth', () => {
     });
     expect(betterAuthSpy).toHaveBeenCalledTimes(1);
     expect(captured.options?.appName).toBe('spooool');
+    expect(captured.options?.baseURL).toBe('https://example.com');
     expect(captured.options?.emailAndPassword?.enabled).toBe(true);
     expect(captured.options?.emailAndPassword?.minPasswordLength).toBe(8);
     expect(captured.options?.emailAndPassword?.autoSignIn).toBe(true);
     expect(typeof captured.options?.emailAndPassword?.sendResetPassword).toBe('function');
     expect(typeof captured.options?.emailAndPassword?.onPasswordReset).toBe('function');
+  });
+
+  it('trusts the normalized origin configured by BETTER_AUTH_URL', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://spooool-staging.lazee.workers.dev/api/auth?source=worker',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
+    ]);
+    expect(captured.options?.baseURL).toBe('https://spooool-staging.lazee.workers.dev');
+  });
+
+  it('deduplicates BETTER_AUTH_URL when its origin is already trusted', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://spooool.com/api/auth',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+    ]);
+  });
+
+  it('trusts normalized origins from BETTER_AUTH_TRUSTED_ORIGINS', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://auth.pdx.software/api/auth',
+      BETTER_AUTH_TRUSTED_ORIGINS:
+        ' https://spooool-staging.lazee.workers.dev/path,https://preview.spooool.com/other ',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
+      'https://preview.spooool.com',
+    ]);
+  });
+
+  it('trims padded URLs and ignores whitespace-only origin entries', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: '  https://spooool-staging.lazee.workers.dev/api/auth  ',
+      BETTER_AUTH_TRUSTED_ORIGINS: '  ,\t, https://preview.spooool.com/path ,  ',
+    });
+
+    expect(captured.options?.baseURL).toBe('https://spooool-staging.lazee.workers.dev');
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
+      'https://preview.spooool.com',
+    ]);
+  });
+
+  it('deduplicates configured origins and ignores invalid or non-http entries', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://spooool-staging.lazee.workers.dev/api/auth',
+      BETTER_AUTH_TRUSTED_ORIGINS:
+        'not a url,javascript:alert(1),https://spooool-staging.lazee.workers.dev,https://spooool.com',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+      'https://spooool-staging.lazee.workers.dev',
+    ]);
+  });
+
+  it('rejects credential-bearing URLs from every configured origin source', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://user:password@spooool-staging.lazee.workers.dev/api/auth',
+      BETTER_AUTH_TRUSTED_ORIGINS:
+        'https://user@preview.spooool.com,https://:password@another-preview.spooool.com',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+    ]);
+    expect(captured.options?.baseURL).toBeUndefined();
+  });
+
+  it.each(['', 'not a url', 'javascript:alert(1)', 'https://user:password@example.com'])(
+    'does not pass an invalid BETTER_AUTH_URL to better-auth: %s',
+    (url) => {
+      createAuth({ DB: {} as D1Database, BETTER_AUTH_URL: url });
+
+      expect(captured.options?.baseURL).toBeUndefined();
+    },
+  );
+
+  it.each([undefined, '', 'not a url'])('does not trust an absent or invalid BETTER_AUTH_URL: %s', (url) => {
+    createAuth({ DB: {} as D1Database, BETTER_AUTH_URL: url });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+    ]);
   });
 
   it('sendResetPassword forwards to the email module with the reset url', async () => {

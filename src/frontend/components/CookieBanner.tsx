@@ -44,7 +44,6 @@ export function CookieBanner(): JSX.Element | null {
   const handleDecline = (): void => {
     setStoredConsent('declined');
     setVisible(false);
-    signalAnalyticsConsentChange();
     void import('../lib/analytics')
       .then(({ withdrawAnalyticsConsent }) => withdrawAnalyticsConsent())
       .catch(() => undefined);

@@ -53,7 +53,7 @@ describe('CookieBanner', () => {
 
     expect(window.localStorage.getItem('cookie-consent:v1')).toBe('declined');
     expect(withdrawAnalyticsConsent).toHaveBeenCalledOnce();
-    expect(signalAnalyticsConsentChange).toHaveBeenCalledOnce();
+    expect(signalAnalyticsConsentChange).not.toHaveBeenCalled();
     act(() => root.unmount());
   });
 

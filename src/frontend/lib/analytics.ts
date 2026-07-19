@@ -60,7 +60,7 @@ function flushPendingIdentity(): void {
 }
 
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
-  if (started || !config.enabled || !config.apiKey) return;
+  if (started || !import.meta.env.PROD || !config.enabled || !config.apiKey) return;
   // Gate on explicit consent. On first visit there is no stored choice yet;
   // the CookieBanner component calls initAnalytics() again on Accept.
   if (!hasAnalyticsConsent()) return;

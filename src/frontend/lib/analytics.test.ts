@@ -25,9 +25,14 @@ function acceptAnalyticsConsent(): void {
   window.localStorage.setItem('cookie-consent:v1', 'accepted');
 }
 
+function stubProductionBuild(): void {
+  vi.stubEnv('PROD', true);
+}
+
 afterEach(() => {
   __resetForTests();
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
   window.localStorage.clear();
 });
 
@@ -64,7 +69,15 @@ describe('initAnalytics', () => {
     expect(posthog.init).not.toHaveBeenCalled();
   });
 
+  it('is a no-op outside production even when explicitly enabled with consent', () => {
+    vi.stubEnv('PROD', false);
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+    expect(posthog.init).not.toHaveBeenCalled();
+  });
+
   it('initialises posthog when enabled with a key', () => {
+    stubProductionBuild();
     acceptAnalyticsConsent();
     initAnalytics({
       apiKey: 'phc_test',
@@ -87,6 +100,7 @@ describe('initAnalytics', () => {
   });
 
   it('is idempotent — second call does not re-init', () => {
+    stubProductionBuild();
     acceptAnalyticsConsent();
     const cfg = { apiKey: 'phc_test', host: 'https://x', enabled: true };
     initAnalytics(cfg);
@@ -104,6 +118,7 @@ describe('track / identify / reset', () => {
   it('flushes the latest pending identity after consented initialization', () => {
     identify('user-1', { plan: 'free' });
     identify('user-2');
+    stubProductionBuild();
     acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.identify).toHaveBeenCalledTimes(1);
@@ -113,6 +128,7 @@ describe('track / identify / reset', () => {
   it('clears a pending identity when reset happens before initialization', () => {
     identify('user-1');
     reset();
+    stubProductionBuild();
     acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.identify).not.toHaveBeenCalled();
@@ -120,6 +136,7 @@ describe('track / identify / reset', () => {
   });
 
   it('proxies through to posthog after init', () => {
+    stubProductionBuild();
     acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     track('signup', { source: 'invite' });

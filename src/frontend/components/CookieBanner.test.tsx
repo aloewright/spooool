@@ -1,15 +1,16 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import ReactDOM from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-const { signalAnalyticsConsentChange, withdrawAnalyticsConsent } = vi.hoisted(() => ({
+const { loadAnalytics, signalAnalyticsConsentChange, withdrawAnalyticsConsent } = vi.hoisted(() => ({
+  loadAnalytics: vi.fn(),
   signalAnalyticsConsentChange: vi.fn(),
   withdrawAnalyticsConsent: vi.fn(),
 }));
 
-vi.mock('../lib/analytics', () => ({ withdrawAnalyticsConsent }));
+vi.mock('../lib/analytics-loader', () => ({ loadAnalytics }));
 vi.mock('../lib/analytics-consent', () => ({ signalAnalyticsConsentChange }));
 
 import { CookieBanner } from './CookieBanner';
@@ -20,6 +21,10 @@ function click(button: Element | null): void {
 }
 
 describe('CookieBanner', () => {
+  beforeEach(() => {
+    loadAnalytics.mockResolvedValue({ withdrawAnalyticsConsent });
+  });
+
   afterEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
@@ -36,6 +41,7 @@ describe('CookieBanner', () => {
     await act(async () => click(container.querySelector('button[aria-label="Cookie preferences"]')));
 
     expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(container.querySelector('button[aria-label="Cookie preferences"]')).toBeNull();
     act(() => root.unmount());
   });
 
@@ -52,6 +58,7 @@ describe('CookieBanner', () => {
     );
 
     expect(window.localStorage.getItem('cookie-consent:v1')).toBe('declined');
+    expect(loadAnalytics).toHaveBeenCalledOnce();
     expect(withdrawAnalyticsConsent).toHaveBeenCalledOnce();
     expect(signalAnalyticsConsentChange).not.toHaveBeenCalled();
     act(() => root.unmount());
@@ -71,6 +78,7 @@ describe('CookieBanner', () => {
 
     expect(window.localStorage.getItem('cookie-consent:v1')).toBe('accepted');
     expect(signalAnalyticsConsentChange).toHaveBeenCalledOnce();
+    expect(loadAnalytics).not.toHaveBeenCalled();
     expect(withdrawAnalyticsConsent).not.toHaveBeenCalled();
     act(() => root.unmount());
   });

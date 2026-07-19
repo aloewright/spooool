@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { signalAnalyticsConsentChange } from '../lib/analytics-consent';
+import { loadAnalytics } from '../lib/analytics-loader';
 
 const CONSENT_KEY = 'cookie-consent:v1';
 
@@ -44,22 +45,24 @@ export function CookieBanner(): JSX.Element | null {
   const handleDecline = (): void => {
     setStoredConsent('declined');
     setVisible(false);
-    void import('../lib/analytics')
+    void loadAnalytics()
       .then(({ withdrawAnalyticsConsent }) => withdrawAnalyticsConsent())
       .catch(() => undefined);
   };
 
   return (
     <>
-      <button
-        type="button"
-        className="btn btn--ghost btn--sm"
-        aria-label="Cookie preferences"
-        onClick={() => setVisible(true)}
-        style={{ position: 'fixed', bottom: 'var(--space-4)', right: 'var(--space-4)', zIndex: 9998 }}
-      >
-        Cookie preferences
-      </button>
+      {!visible && (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          aria-label="Cookie preferences"
+          onClick={() => setVisible(true)}
+          style={{ position: 'fixed', bottom: 'var(--space-4)', right: 'var(--space-4)', zIndex: 9998 }}
+        >
+          Cookie preferences
+        </button>
+      )}
       {visible && <div
         role="dialog"
         aria-label="Cookie preferences"

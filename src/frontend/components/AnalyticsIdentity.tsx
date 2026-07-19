@@ -18,28 +18,23 @@ export function AnalyticsIdentity(): null {
   useEffect(() => {
     if (isPending) return;
     let cancelled = false;
+    const shouldFullyReset = !userId && hadAuthenticatedSession.current;
 
     if (userId) {
       hadAuthenticatedSession.current = true;
-      void loadAnalytics()
-        .then(({ identify, initAnalytics }) => {
-          if (cancelled) return;
-          identify(userId);
-          if (!cancelled) initAnalytics();
-        })
-        .catch(() => undefined);
     } else {
-      const shouldFullyReset = hadAuthenticatedSession.current;
       hadAuthenticatedSession.current = false;
-      void loadAnalytics()
-        .then(({ initAnalytics, reset, resetPersistedIdentityIfIdentified }) => {
-          if (cancelled) return;
-          if (shouldFullyReset) reset();
-          else resetPersistedIdentityIfIdentified();
-          if (!cancelled) initAnalytics();
-        })
-        .catch(() => undefined);
     }
+
+    void loadAnalytics()
+      .then(({ identify, initAnalytics, reset, resetPersistedIdentityIfIdentified }) => {
+        if (cancelled) return;
+        if (userId) identify(userId);
+        else if (shouldFullyReset) reset();
+        else resetPersistedIdentityIfIdentified();
+        if (!cancelled) initAnalytics();
+      })
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;

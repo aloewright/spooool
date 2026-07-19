@@ -16,6 +16,7 @@ vi.mock('../lib/analytics-loader', () => ({ loadAnalytics }));
 vi.mock('../lib/auth-client', () => ({ useSession }));
 
 import { AnalyticsIdentity } from './AnalyticsIdentity';
+import { ANALYTICS_CONSENT_CHANGE_EVENT } from '../lib/analytics-consent';
 
 describe('AnalyticsIdentity', () => {
   afterEach(() => {
@@ -106,7 +107,7 @@ describe('AnalyticsIdentity', () => {
     await act(async () => root.render(<AnalyticsIdentity />));
     vi.clearAllMocks();
 
-    await act(async () => window.dispatchEvent(new Event('spooool:analytics-consent-changed')));
+    await act(async () => window.dispatchEvent(new Event(ANALYTICS_CONSENT_CHANGE_EVENT)));
 
     expect(identify).toHaveBeenCalledWith('user-42');
     expect(initAnalytics).toHaveBeenCalledOnce();

@@ -480,7 +480,7 @@ readonly VITE_POSTHOG_HOST?: string;
 
 Create `docs/posthog.md` documenting:
 
-```markdown
+````markdown
 # PostHog
 
 Spooool uses the US PostHog Cloud project. The frontend integration is inert unless a production build receives `VITE_POSTHOG_KEY`, and it starts only after explicit cookie consent.
@@ -509,7 +509,7 @@ The command updates both preview and production triggers without replacing unrel
 3. Open Spooool in a clean browser profile, accept analytics cookies, and navigate between two SPA routes.
 4. Confirm `$pageview` events and the stable Better Auth user ID appear in PostHog Live Events.
 5. Confirm declining analytics cookies produces no PostHog ingestion requests.
-```
+````
 
 - [ ] **Step 5: Verify GREEN, types, lint, and build**
 

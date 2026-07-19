@@ -23,6 +23,8 @@ describe('CSP_HEADER_VALUE', () => {
     const connectSrc = CSP_HEADER_VALUE.split('; ').find((directive) =>
       directive.startsWith('connect-src '),
     );
+    expect(connectSrc).toBeDefined();
+    if (!connectSrc) throw new Error('connect-src directive missing');
     expect(connectSrc).toContain('https://*.posthog.com');
     expect(connectSrc).not.toContain('https://us.i.posthog.com');
     expect(CSP_HEADER_VALUE).toContain("worker-src 'self' blob: data:");

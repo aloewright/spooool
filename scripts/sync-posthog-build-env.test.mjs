@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPosthogVariables,
   cloudflareAuthHeaders,
+  isDirectInvocation,
   syncPosthogBuildEnv,
 } from './sync-posthog-build-env.mjs';
 
@@ -12,6 +17,16 @@ const configuredEnv = {
   CLOUDFLARE_API_TOKEN: 'cf-token',
 };
 
+const syncScriptPath = fileURLToPath(new URL('./sync-posthog-build-env.mjs', import.meta.url));
+const syncScriptUrl = pathToFileURL(syncScriptPath).href;
+const temporaryDirectories = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 function successfulFetch({ triggers = [{ trigger_uuid: 'production', trigger_name: 'Production' }] } = {}) {
   return vi.fn()
     .mockResolvedValueOnce(Response.json({
@@ -21,6 +36,30 @@ function successfulFetch({ triggers = [{ trigger_uuid: 'production', trigger_nam
     .mockResolvedValueOnce(Response.json({ success: true, result: triggers }))
     .mockImplementation(() => Promise.resolve(Response.json({ success: true, result: {} })));
 }
+
+describe('isDirectInvocation', () => {
+  it('returns false when argv has no entry-point path', () => {
+    expect(isDirectInvocation(syncScriptUrl, undefined)).toBe(false);
+  });
+
+  it('returns false when either path cannot be resolved', () => {
+    expect(isDirectInvocation(syncScriptUrl, join(tmpdir(), 'missing-posthog-entry.mjs'))).toBe(false);
+  });
+
+  it('compares canonical module and entry-point paths', () => {
+    expect(isDirectInvocation(syncScriptUrl, syncScriptPath)).toBe(true);
+    expect(isDirectInvocation(syncScriptUrl, fileURLToPath(import.meta.url))).toBe(false);
+  });
+
+  it('recognizes a symlinked entry point', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'spooool-posthog-entry-'));
+    temporaryDirectories.push(directory);
+    const symlinkPath = join(directory, 'sync-posthog-build-env.mjs');
+    symlinkSync(syncScriptPath, symlinkPath);
+
+    expect(isDirectInvocation(syncScriptUrl, symlinkPath)).toBe(true);
+  });
+});
 
 describe('buildPosthogVariables', () => {
   it('builds only the two PostHog Workers Builds variables', () => {

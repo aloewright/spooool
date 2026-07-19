@@ -1,7 +1,28 @@
 #!/usr/bin/env node
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 const CLOUDFLARE_API_BASE = 'https://api.cloudflare.com/client/v4';
 const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
+
+/**
+ * Determine whether this module was directly invoked, including through a
+ * symlink. Importing modules have no entry-point path and resolution failures
+ * are intentionally treated as not-direct invocations.
+ *
+ * @param {string} moduleUrl
+ * @param {string | undefined} argvEntryPath
+ */
+export function isDirectInvocation(moduleUrl, argvEntryPath) {
+  if (!argvEntryPath) return false;
+
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(argvEntryPath);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Build the narrow PATCH payload used by the Workers Builds API. PATCH merges
@@ -154,7 +175,7 @@ export async function syncPosthogBuildEnv({ env, fetchImpl = fetch, workerName }
   return configured;
 }
 
-const invokedDirectly = import.meta.url === `file://${process.argv[1]}`;
+const invokedDirectly = isDirectInvocation(import.meta.url, process.argv[1]);
 if (invokedDirectly) {
   syncPosthogBuildEnv({ env: process.env, fetchImpl: fetch, workerName: 'spooool' })
     .then((triggerNames) => {

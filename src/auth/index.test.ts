@@ -150,6 +150,22 @@ describe('createAuth', () => {
     ]);
   });
 
+  it('rejects credential-bearing URLs from every configured origin source', () => {
+    createAuth({
+      DB: {} as D1Database,
+      BETTER_AUTH_URL: 'https://user:password@spooool-staging.lazee.workers.dev/api/auth',
+      BETTER_AUTH_TRUSTED_ORIGINS:
+        'https://user@preview.spooool.com,https://:password@another-preview.spooool.com',
+    });
+
+    expect(captured.options?.trustedOrigins).toEqual([
+      'http://localhost:5173',
+      'https://spooool.com',
+      'https://www.spooool.com',
+      'https://auth.pdx.software',
+    ]);
+  });
+
   it.each([undefined, '', 'not a url'])('does not trust an absent or invalid BETTER_AUTH_URL: %s', (url) => {
     createAuth({ DB: {} as D1Database, BETTER_AUTH_URL: url });
 

@@ -20,8 +20,11 @@ describe('CSP_HEADER_VALUE', () => {
     expect(CSP_HEADER_VALUE).toContain(
       "script-src 'self' https://challenges.cloudflare.com https://*.posthog.com",
     );
-    expect(CSP_HEADER_VALUE).toContain('connect-src');
-    expect(CSP_HEADER_VALUE).toContain('https://*.posthog.com');
+    const connectSrc = CSP_HEADER_VALUE.split('; ').find((directive) =>
+      directive.startsWith('connect-src '),
+    );
+    expect(connectSrc).toContain('https://*.posthog.com');
+    expect(connectSrc).not.toContain('https://us.i.posthog.com');
     expect(CSP_HEADER_VALUE).toContain("worker-src 'self' blob: data:");
   });
 

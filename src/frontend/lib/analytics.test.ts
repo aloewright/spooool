@@ -137,14 +137,14 @@ describe('track / identify / reset', () => {
     expect(posthog.identify).toHaveBeenCalledWith('user-2', undefined);
   });
 
-  it('clears a pending identity when reset happens before initialization', () => {
+  it('clears a pending identity and applies a reset when reset happens before initialization', () => {
     identify('user-1');
     reset();
     stubProductionBuild();
     acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.identify).not.toHaveBeenCalled();
-    expect(posthog.reset).not.toHaveBeenCalled();
+    expect(posthog.reset).toHaveBeenCalledOnce();
   });
 
   it('proxies through to posthog after init', () => {
@@ -169,6 +169,9 @@ describe('track / identify / reset', () => {
 
     expect(posthog.opt_out_capturing).toHaveBeenCalledOnce();
     expect(posthog.reset).toHaveBeenCalledOnce();
+    expect(vi.mocked(posthog.reset).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(posthog.opt_out_capturing).mock.invocationCallOrder[0],
+    );
     expect(posthog.capture).not.toHaveBeenCalled();
   });
 
@@ -181,6 +184,6 @@ describe('track / identify / reset', () => {
     initAnalytics(config);
 
     expect(posthog.init).toHaveBeenCalledTimes(2);
-    expect(posthog.opt_in_capturing).toHaveBeenCalledOnce();
+    expect(posthog.opt_in_capturing).toHaveBeenCalledWith({ captureEventName: false });
   });
 });

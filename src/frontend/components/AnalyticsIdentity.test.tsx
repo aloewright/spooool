@@ -38,7 +38,7 @@ describe('AnalyticsIdentity', () => {
     act(() => root.unmount());
   });
 
-  it('does not identify an anonymous session', async () => {
+  it('clears persisted analytics identity on the first settled anonymous session', async () => {
     useSession.mockReturnValue({ data: null, isPending: false });
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -47,6 +47,7 @@ describe('AnalyticsIdentity', () => {
     await act(async () => root.render(<AnalyticsIdentity />));
 
     expect(identify).not.toHaveBeenCalled();
+    expect(reset).toHaveBeenCalledOnce();
     act(() => root.unmount());
   });
 

@@ -18,7 +18,7 @@ export function AnalyticsIdentity(): null {
           if (!cancelled) identify(userId);
         })
         .catch(() => undefined);
-    } else if (identifiedUserId.current !== null) {
+    } else {
       identifiedUserId.current = null;
       void loadAnalytics()
         .then(({ reset }) => {

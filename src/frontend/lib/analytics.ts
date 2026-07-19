@@ -17,6 +17,7 @@ interface PendingIdentity {
 }
 
 let pendingIdentity: PendingIdentity | null = null;
+let pendingReset = false;
 let withdrawnByConsent = false;
 
 export interface AnalyticsConfig {
@@ -60,6 +61,12 @@ function flushPendingIdentity(): void {
   client.identify(userId, properties);
 }
 
+function flushPendingReset(): void {
+  if (!client || !pendingReset) return;
+  pendingReset = false;
+  client.reset();
+}
+
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
   if (
     started ||
@@ -92,8 +99,9 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   });
   client = posthog;
   started = true;
+  flushPendingReset();
   if (withdrawnByConsent) {
-    client.opt_in_capturing();
+    client.opt_in_capturing({ captureEventName: false });
     withdrawnByConsent = false;
   }
   flushPendingIdentity();
@@ -111,16 +119,22 @@ export function identify(userId: string, properties?: Record<string, unknown>): 
 
 export function reset(): void {
   pendingIdentity = null;
-  if (!client) return;
+  if (!client) {
+    pendingReset = true;
+    return;
+  }
   client.reset();
 }
 
 export function withdrawAnalyticsConsent(): void {
   pendingIdentity = null;
   withdrawnByConsent = true;
-  if (!client) return;
-  client.opt_out_capturing();
+  if (!client) {
+    pendingReset = true;
+    return;
+  }
   client.reset();
+  client.opt_out_capturing();
   client = null;
   started = false;
 }
@@ -136,5 +150,6 @@ export function __resetForTests(): void {
   started = false;
   client = null;
   pendingIdentity = null;
+  pendingReset = false;
   withdrawnByConsent = false;
 }

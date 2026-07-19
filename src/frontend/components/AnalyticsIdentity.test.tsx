@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import ReactDOM from 'react-dom/client';
 
-const { identify, loadAnalytics, reset, useSession } = vi.hoisted(() => ({
+const { identify, initAnalytics, loadAnalytics, reset, useSession } = vi.hoisted(() => ({
   identify: vi.fn(),
+  initAnalytics: vi.fn(),
   loadAnalytics: vi.fn(),
   reset: vi.fn(),
   useSession: vi.fn(),
@@ -22,7 +23,7 @@ describe('AnalyticsIdentity', () => {
   });
 
   beforeEach(() => {
-    loadAnalytics.mockResolvedValue({ identify, reset });
+    loadAnalytics.mockResolvedValue({ identify, initAnalytics, reset });
   });
 
   it('identifies an authenticated session with the stable user id', async () => {
@@ -35,6 +36,8 @@ describe('AnalyticsIdentity', () => {
 
     expect(identify).toHaveBeenCalledOnce();
     expect(identify).toHaveBeenCalledWith('user-42');
+    expect(initAnalytics).toHaveBeenCalledOnce();
+    expect(identify.mock.invocationCallOrder[0]).toBeLessThan(initAnalytics.mock.invocationCallOrder[0]);
     act(() => root.unmount());
   });
 
@@ -48,6 +51,42 @@ describe('AnalyticsIdentity', () => {
 
     expect(identify).not.toHaveBeenCalled();
     expect(reset).toHaveBeenCalledOnce();
+    expect(initAnalytics).toHaveBeenCalledOnce();
+    expect(reset.mock.invocationCallOrder[0]).toBeLessThan(initAnalytics.mock.invocationCallOrder[0]);
+    act(() => root.unmount());
+  });
+
+  it('does not initialize while a prior identity is awaiting session resolution', async () => {
+    useSession.mockReturnValue({ data: null, isPending: true });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = ReactDOM.createRoot(container);
+
+    await act(async () => root.render(<AnalyticsIdentity />));
+    expect(loadAnalytics).not.toHaveBeenCalled();
+    expect(initAnalytics).not.toHaveBeenCalled();
+
+    useSession.mockReturnValue({ data: { user: { id: 'user-42' } }, isPending: false });
+    await act(async () => root.render(<AnalyticsIdentity />));
+
+    expect(identify).toHaveBeenCalledWith('user-42');
+    expect(identify.mock.invocationCallOrder[0]).toBeLessThan(initAnalytics.mock.invocationCallOrder[0]);
+    act(() => root.unmount());
+  });
+
+  it('reapplies the unchanged authenticated identity when consent is accepted', async () => {
+    useSession.mockReturnValue({ data: { user: { id: 'user-42' } }, isPending: false });
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = ReactDOM.createRoot(container);
+
+    await act(async () => root.render(<AnalyticsIdentity />));
+    vi.clearAllMocks();
+
+    await act(async () => window.dispatchEvent(new Event('spooool:analytics-consent-changed')));
+
+    expect(identify).toHaveBeenCalledWith('user-42');
+    expect(initAnalytics).toHaveBeenCalledOnce();
     act(() => root.unmount());
   });
 
@@ -71,10 +110,14 @@ describe('AnalyticsIdentity', () => {
   });
 
   it('cancels a pending identity import when the session expires', async () => {
-    let resolveAnalytics: ((value: { identify: typeof identify; reset: typeof reset }) => void) | undefined;
+    let resolveAnalytics: ((value: {
+      identify: typeof identify;
+      initAnalytics: typeof initAnalytics;
+      reset: typeof reset;
+    }) => void) | undefined;
     loadAnalytics
       .mockImplementationOnce(() => new Promise((resolve) => { resolveAnalytics = resolve; }))
-      .mockResolvedValueOnce({ identify, reset });
+      .mockResolvedValueOnce({ identify, initAnalytics, reset });
     useSession.mockReturnValue({ data: { user: { id: 'user-42' } }, isPending: false });
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -88,7 +131,7 @@ describe('AnalyticsIdentity', () => {
     expect(identify).not.toHaveBeenCalled();
     expect(reset).toHaveBeenCalledOnce();
 
-    resolveAnalytics?.({ identify, reset });
+    resolveAnalytics?.({ identify, initAnalytics, reset });
     await act(async () => undefined);
     expect(identify).not.toHaveBeenCalled();
     act(() => root.unmount());

@@ -99,12 +99,13 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   });
   client = posthog;
   started = true;
+  const shouldOptIn = withdrawnByConsent || client.has_opted_out_capturing();
   flushPendingReset();
-  if (withdrawnByConsent) {
-    client.opt_in_capturing({ captureEventName: false });
-    withdrawnByConsent = false;
-  }
   flushPendingIdentity();
+  if (shouldOptIn) {
+    client.opt_in_capturing({ captureEventName: false });
+  }
+  withdrawnByConsent = false;
 }
 
 // Tag the current visitor as a known user. Safe to call repeatedly with

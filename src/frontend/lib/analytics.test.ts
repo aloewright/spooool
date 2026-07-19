@@ -18,6 +18,7 @@ vi.mock('posthog-js', () => {
     reset: vi.fn(),
     opt_out_capturing: vi.fn(),
     opt_in_capturing: vi.fn(),
+    has_opted_out_capturing: vi.fn(() => false),
   };
   return { default: mock };
 });
@@ -185,5 +186,36 @@ describe('track / identify / reset', () => {
 
     expect(posthog.init).toHaveBeenCalledTimes(2);
     expect(posthog.opt_in_capturing).toHaveBeenCalledWith({ captureEventName: false });
+  });
+
+  it('restores the same-page authenticated identity before opting in after withdrawal', () => {
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    const config = { apiKey: 'phc_test', host: 'https://x', enabled: true };
+    initAnalytics(config);
+    withdrawAnalyticsConsent();
+
+    identify('user-42');
+    initAnalytics(config);
+
+    expect(posthog.identify).toHaveBeenCalledWith('user-42', undefined);
+    expect(vi.mocked(posthog.identify).mock.invocationCallOrder.at(-1)).toBeLessThan(
+      vi.mocked(posthog.opt_in_capturing).mock.invocationCallOrder[0],
+    );
+  });
+
+  it('restores an authenticated identity before opting in from persisted SDK opt-out', () => {
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    vi.mocked(posthog.has_opted_out_capturing).mockReturnValue(true);
+
+    identify('user-42');
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+
+    expect(posthog.identify).toHaveBeenCalledWith('user-42', undefined);
+    expect(posthog.opt_in_capturing).toHaveBeenCalledWith({ captureEventName: false });
+    expect(vi.mocked(posthog.identify).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(posthog.opt_in_capturing).mock.invocationCallOrder[0],
+    );
   });
 });

@@ -4,12 +4,13 @@ import React, { act } from 'react';
 import ReactDOM from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 
-const { initAnalytics, withdrawAnalyticsConsent } = vi.hoisted(() => ({
-  initAnalytics: vi.fn(),
+const { signalAnalyticsConsentChange, withdrawAnalyticsConsent } = vi.hoisted(() => ({
+  signalAnalyticsConsentChange: vi.fn(),
   withdrawAnalyticsConsent: vi.fn(),
 }));
 
-vi.mock('../lib/analytics', () => ({ initAnalytics, withdrawAnalyticsConsent }));
+vi.mock('../lib/analytics', () => ({ withdrawAnalyticsConsent }));
+vi.mock('../lib/analytics-consent', () => ({ signalAnalyticsConsentChange }));
 
 import { CookieBanner } from './CookieBanner';
 
@@ -52,7 +53,7 @@ describe('CookieBanner', () => {
 
     expect(window.localStorage.getItem('cookie-consent:v1')).toBe('declined');
     expect(withdrawAnalyticsConsent).toHaveBeenCalledOnce();
-    expect(initAnalytics).not.toHaveBeenCalled();
+    expect(signalAnalyticsConsentChange).toHaveBeenCalledOnce();
     act(() => root.unmount());
   });
 
@@ -69,7 +70,8 @@ describe('CookieBanner', () => {
     );
 
     expect(window.localStorage.getItem('cookie-consent:v1')).toBe('accepted');
-    expect(initAnalytics).toHaveBeenCalledOnce();
+    expect(signalAnalyticsConsentChange).toHaveBeenCalledOnce();
+    expect(withdrawAnalyticsConsent).not.toHaveBeenCalled();
     act(() => root.unmount());
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { signalAnalyticsConsentChange } from '../lib/analytics-consent';
 
 const CONSENT_KEY = 'cookie-consent:v1';
 
@@ -37,13 +38,13 @@ export function CookieBanner(): JSX.Element | null {
   const handleAccept = (): void => {
     setStoredConsent('accepted');
     setVisible(false);
-    // Fire analytics init now that we have consent.
-    void import('../lib/analytics').then(({ initAnalytics }) => initAnalytics()).catch(() => undefined);
+    signalAnalyticsConsentChange();
   };
 
   const handleDecline = (): void => {
     setStoredConsent('declined');
     setVisible(false);
+    signalAnalyticsConsentChange();
     void import('../lib/analytics')
       .then(({ withdrawAnalyticsConsent }) => withdrawAnalyticsConsent())
       .catch(() => undefined);

@@ -3,3 +3,4 @@ dist/
 coverage/
 .wrangler/
 .env*
+.superpowers/

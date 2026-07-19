@@ -27,6 +27,7 @@ function acceptAnalyticsConsent(): void {
 
 function stubProductionBuild(): void {
   vi.stubEnv('PROD', true);
+  vi.stubEnv('VITE_POSTHOG_KEY', 'phc_test');
 }
 
 afterEach(() => {
@@ -71,6 +72,14 @@ describe('initAnalytics', () => {
 
   it('is a no-op outside production even when explicitly enabled with consent', () => {
     vi.stubEnv('PROD', false);
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+    expect(posthog.init).not.toHaveBeenCalled();
+  });
+
+  it('is a no-op when the build-time key is absent despite supplied configuration', () => {
+    vi.stubEnv('PROD', true);
+    vi.stubEnv('VITE_POSTHOG_KEY', '');
     acceptAnalyticsConsent();
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.init).not.toHaveBeenCalled();

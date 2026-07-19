@@ -13,10 +13,7 @@ test.describe('home page', () => {
 
   test('shows a sign-in entry point for anonymous users', async ({ page }) => {
     await page.goto('/');
-    // Either a Sign in link or the wordmark + Get started copy must be present.
-    const signIn = page.getByRole('link', { name: /sign in/i });
-    const getStarted = page.getByRole('heading', { name: /start here/i });
-    await expect(signIn.or(getStarted)).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible();
   });
 
   test('does not 5xx on a deep link to a non-existent video', async ({ page }) => {

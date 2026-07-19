@@ -34,8 +34,6 @@ export function CookieBanner(): JSX.Element | null {
     }
   }, []);
 
-  if (!visible) return null;
-
   const handleAccept = (): void => {
     setStoredConsent('accepted');
     setVisible(false);
@@ -46,40 +44,53 @@ export function CookieBanner(): JSX.Element | null {
   const handleDecline = (): void => {
     setStoredConsent('declined');
     setVisible(false);
+    void import('../lib/analytics')
+      .then(({ withdrawAnalyticsConsent }) => withdrawAnalyticsConsent())
+      .catch(() => undefined);
   };
 
   return (
-    <div
-      role="dialog"
-      aria-label="Cookie preferences"
-      style={{
-        position: 'fixed',
-        bottom: 'var(--space-4)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        width: 'min(560px, calc(100vw - var(--space-8)))',
-        zIndex: 9999,
-        background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-lg)',
-        boxShadow: 'var(--shadow-float)',
-        padding: 'var(--space-4)',
-        display: 'flex',
-        gap: 'var(--space-3)',
-        alignItems: 'flex-start',
-      }}
-    >
-      <div style={{ flex: 1 }}>
-        <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
-          We use analytics cookies to understand how spooool is used and improve the experience.
-          See our{' '}
-          <Link to="/legal/privacy" style={{ textDecoration: 'underline' }}>
-            Privacy Policy
-          </Link>{' '}
-          for details.
-        </p>
-      </div>
-      <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
+    <>
+      <button
+        type="button"
+        className="btn btn--ghost btn--sm"
+        aria-label="Cookie preferences"
+        onClick={() => setVisible(true)}
+        style={{ position: 'fixed', bottom: 'var(--space-4)', right: 'var(--space-4)', zIndex: 9998 }}
+      >
+        Cookie preferences
+      </button>
+      {visible && <div
+        role="dialog"
+        aria-label="Cookie preferences"
+        style={{
+          position: 'fixed',
+          bottom: 'var(--space-4)',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 'min(560px, calc(100vw - var(--space-8)))',
+          zIndex: 9999,
+          background: 'var(--surface)',
+          border: '1px solid var(--border)',
+          borderRadius: 'var(--radius-lg)',
+          boxShadow: 'var(--shadow-float)',
+          padding: 'var(--space-4)',
+          display: 'flex',
+          gap: 'var(--space-3)',
+          alignItems: 'flex-start',
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)' }}>
+            We use analytics cookies to understand how spooool is used and improve the experience.
+            See our{' '}
+            <Link to="/legal/privacy" style={{ textDecoration: 'underline' }}>
+              Privacy Policy
+            </Link>{' '}
+            for details.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', flexShrink: 0 }}>
         <button
           type="button"
           className="btn btn--ghost btn--sm"
@@ -95,6 +106,7 @@ export function CookieBanner(): JSX.Element | null {
           Accept
         </button>
       </div>
-    </div>
+      </div>}
+    </>
   );
 }

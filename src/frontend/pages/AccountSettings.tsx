@@ -1,6 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { resendVerificationEmail, signOut, useSession } from '../lib/auth-client';
+import { resendVerificationEmail, useSession } from '../lib/auth-client';
+import { signOutWithAnalyticsReset } from '../lib/auth-signout';
 import { ActiveSessions } from '../components/ActiveSessions';
 
 interface AccountInfo {
@@ -876,7 +877,7 @@ export function AccountSettings(): JSX.Element {
                 className="btn btn--secondary btn--sm"
                 disabled={busy}
                 onClick={() =>
-                  void requestDelete().then(() => signOut().then(() => navigate('/', { replace: true })))
+                  void requestDelete().then(() => signOutWithAnalyticsReset().then(() => navigate('/', { replace: true })))
                 }
               >
                 Confirm — schedule deletion

@@ -17,6 +17,7 @@ interface PendingIdentity {
 }
 
 let pendingIdentity: PendingIdentity | null = null;
+let withdrawnByConsent = false;
 
 export interface AnalyticsConfig {
   /** Project API key from app.posthog.com → Project Settings. */
@@ -91,6 +92,10 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   });
   client = posthog;
   started = true;
+  if (withdrawnByConsent) {
+    client.opt_in_capturing();
+    withdrawnByConsent = false;
+  }
   flushPendingIdentity();
 }
 
@@ -110,6 +115,16 @@ export function reset(): void {
   client.reset();
 }
 
+export function withdrawAnalyticsConsent(): void {
+  pendingIdentity = null;
+  withdrawnByConsent = true;
+  if (!client) return;
+  client.opt_out_capturing();
+  client.reset();
+  client = null;
+  started = false;
+}
+
 export function track(event: string, properties?: Record<string, unknown>): void {
   if (!client) return;
   client.capture(event, properties);
@@ -121,4 +136,5 @@ export function __resetForTests(): void {
   started = false;
   client = null;
   pendingIdentity = null;
+  withdrawnByConsent = false;
 }

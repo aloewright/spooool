@@ -7,6 +7,7 @@ import {
   readAnalyticsConfig,
   reset,
   track,
+  withdrawAnalyticsConsent,
 } from './analytics';
 
 vi.mock('posthog-js', () => {
@@ -15,6 +16,8 @@ vi.mock('posthog-js', () => {
     capture: vi.fn(),
     identify: vi.fn(),
     reset: vi.fn(),
+    opt_out_capturing: vi.fn(),
+    opt_in_capturing: vi.fn(),
   };
   return { default: mock };
 });
@@ -154,5 +157,30 @@ describe('track / identify / reset', () => {
     expect(posthog.capture).toHaveBeenCalledWith('signup', { source: 'invite' });
     expect(posthog.identify).toHaveBeenCalledWith('user-1', { plan: 'free' });
     expect(posthog.reset).toHaveBeenCalled();
+  });
+
+  it('opts out, resets, and stops capture when consent is withdrawn', () => {
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+
+    withdrawAnalyticsConsent();
+    track('must_not_send');
+
+    expect(posthog.opt_out_capturing).toHaveBeenCalledOnce();
+    expect(posthog.reset).toHaveBeenCalledOnce();
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it('can initialize again after consent is reaccepted', () => {
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    const config = { apiKey: 'phc_test', host: 'https://x', enabled: true };
+    initAnalytics(config);
+    withdrawAnalyticsConsent();
+    initAnalytics(config);
+
+    expect(posthog.init).toHaveBeenCalledTimes(2);
+    expect(posthog.opt_in_capturing).toHaveBeenCalledOnce();
   });
 });

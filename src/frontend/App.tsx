@@ -2,9 +2,11 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
+import { AnalyticsIdentity } from './components/AnalyticsIdentity';
 import { CookieBanner } from './components/CookieBanner';
 import '@mantine/core/styles.css';
-import { signOut, useSession } from './lib/auth-client';
+import { useSession } from './lib/auth-client';
+import { signOutWithAnalyticsReset } from './lib/auth-signout';
 import { ChannelIcon, PlayIcon, UploadIcon, VideoPlaceholderIcon } from './components/Icons';
 import { NotificationBell } from './components/NotificationBell';
 import './styles/strand.css';
@@ -267,8 +269,7 @@ function HeaderNav(): JSX.Element {
         onClick={() => {
           // ALO-166: tear down the PostHog identity before navigating so
           // the next visitor on a shared device starts a fresh session.
-          void import('./lib/analytics').then(({ reset }) => reset());
-          void signOut().then(() => navigate('/', { replace: true }));
+          void signOutWithAnalyticsReset().then(() => navigate('/', { replace: true }));
         }}
       >
         <LogOut aria-hidden="true" width={20} height={20} strokeWidth={1.5} />
@@ -961,6 +962,7 @@ export default function App(): JSX.Element {
         </Routes>
       </Suspense>
       <SiteFooter />
+      <AnalyticsIdentity />
       <CookieBanner />
     </div>
     </MantineProvider>

@@ -11,6 +11,16 @@ import posthog, { type PostHog } from 'posthog-js';
 let started = false;
 let client: PostHog | null = null;
 
+interface PendingIdentity {
+  userId: string;
+  properties?: Record<string, unknown>;
+}
+
+let pendingIdentity: PendingIdentity | null = null;
+let pendingReset = false;
+let pendingPersistedIdentityReset = false;
+let withdrawnByConsent = false;
+
 export interface AnalyticsConfig {
   /** Project API key from app.posthog.com → Project Settings. */
   apiKey: string | undefined;
@@ -45,18 +55,49 @@ function hasAnalyticsConsent(): boolean {
   }
 }
 
+function flushPendingIdentity(): void {
+  if (!client || !pendingIdentity) return;
+  const { userId, properties } = pendingIdentity;
+  pendingIdentity = null;
+  client.identify(userId, properties);
+}
+
+function flushPendingReset(): void {
+  if (!client || !pendingReset) return;
+  pendingReset = false;
+  client.reset();
+}
+
+function flushPendingPersistedIdentityReset(): void {
+  if (!client || !pendingPersistedIdentityReset) return;
+  pendingPersistedIdentityReset = false;
+  if (client.get_property('$user_state') === 'identified') {
+    client.reset();
+  }
+}
+
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
-  if (started || !config.enabled || !config.apiKey) return;
+  if (
+    started ||
+    !import.meta.env.PROD ||
+    !import.meta.env.VITE_POSTHOG_KEY ||
+    !config.enabled ||
+    !config.apiKey
+  ) {
+    return;
+  }
   // Gate on explicit consent. On first visit there is no stored choice yet;
   // the CookieBanner component calls initAnalytics() again on Accept.
   if (!hasAnalyticsConsent()) return;
   posthog.init(config.apiKey, {
     api_host: config.host,
+    defaults: '2026-05-30',
     // Capture the standard set automatically; we layer custom events on top
     // via track() below.
-    capture_pageview: true,
+    capture_pageview: 'history_change',
     capture_pageleave: true,
     autocapture: true,
+    person_profiles: 'identified_only',
     // Mask all input values in session recordings — we do video stuff,
     // people will type private things on the comments/upload pages.
     session_recording: {
@@ -67,18 +108,58 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   });
   client = posthog;
   started = true;
+  const shouldOptIn = withdrawnByConsent || client.has_opted_out_capturing();
+  flushPendingReset();
+  flushPendingPersistedIdentityReset();
+  flushPendingIdentity();
+  if (shouldOptIn) {
+    client.opt_in_capturing({ captureEventName: false });
+  }
+  withdrawnByConsent = false;
 }
 
 // Tag the current visitor as a known user. Safe to call repeatedly with
 // the same id (posthog dedupes).
 export function identify(userId: string, properties?: Record<string, unknown>): void {
-  if (!client) return;
+  if (!client) {
+    pendingIdentity = { userId, properties };
+    return;
+  }
   client.identify(userId, properties);
 }
 
 export function reset(): void {
-  if (!client) return;
+  pendingIdentity = null;
+  if (!client) {
+    pendingReset = true;
+    return;
+  }
   client.reset();
+}
+
+// A cold anonymous session must preserve its existing anonymous distinct ID,
+// while an expired authenticated session must discard its prior identity.
+export function resetPersistedIdentityIfIdentified(): void {
+  if (!client) {
+    pendingPersistedIdentityReset = true;
+    return;
+  }
+  if (client.get_property('$user_state') === 'identified') {
+    client.reset();
+  }
+}
+
+export function withdrawAnalyticsConsent(): void {
+  pendingIdentity = null;
+  withdrawnByConsent = true;
+  if (!client) {
+    pendingReset = true;
+    return;
+  }
+  client.reset();
+  client.opt_out_capturing();
+  client = null;
+  started = false;
 }
 
 export function track(event: string, properties?: Record<string, unknown>): void {
@@ -91,4 +172,8 @@ export function track(event: string, properties?: Record<string, unknown>): void
 export function __resetForTests(): void {
   started = false;
   client = null;
+  pendingIdentity = null;
+  pendingReset = false;
+  pendingPersistedIdentityReset = false;
+  withdrawnByConsent = false;
 }

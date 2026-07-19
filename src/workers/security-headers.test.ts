@@ -16,6 +16,20 @@ describe('CSP_HEADER_VALUE', () => {
     expect(CSP_HEADER_VALUE).toContain('https://*.cloudflarestream.com');
   });
 
+  it('allows PostHog ingestion and lazy session replay assets', () => {
+    expect(CSP_HEADER_VALUE).toContain(
+      "script-src 'self' https://challenges.cloudflare.com https://*.posthog.com",
+    );
+    const connectSrc = CSP_HEADER_VALUE.split('; ').find((directive) =>
+      directive.startsWith('connect-src '),
+    );
+    expect(connectSrc).toBeDefined();
+    if (!connectSrc) throw new Error('connect-src directive missing');
+    expect(connectSrc).toContain('https://*.posthog.com');
+    expect(connectSrc).not.toContain('https://us.i.posthog.com');
+    expect(CSP_HEADER_VALUE).toContain("worker-src 'self' blob: data:");
+  });
+
   it('allows the YouTube nocookie embed frame and nothing else by default', () => {
     expect(CSP_HEADER_VALUE).toContain('frame-src https://www.youtube-nocookie.com');
   });

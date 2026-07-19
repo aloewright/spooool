@@ -119,8 +119,8 @@ export function Privacy(): JSX.Element {
           view counts aggregated across all users) may be retained.
         </p>
         <p>
-          <strong>Opt out of analytics.</strong> Use the cookie banner that appears on first visit,
-          or enable Do Not Track in your browser settings.
+          <strong>Opt out of analytics.</strong> Use the Cookie preferences control available at all
+          times to change or withdraw your choice, or enable Do Not Track in your browser settings.
         </p>
         <p>
           If you are located in the European Economic Area, UK, or Switzerland, you have additional

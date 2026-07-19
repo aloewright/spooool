@@ -1,6 +1,12 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useSession } from '../lib/auth-client';
+import {
+  subscribeToggledProperties,
+  videoLikeToggledProperties,
+  videoShareProperties,
+  videoViewProperties,
+} from '../lib/watch-analytics';
 // ALO-283: keep Comments (459 LoC) + ReportButton + VideoTags out of the
 // initial Watch chunk. They render below the player (and Comments is below
 // the fold for most viewports), so the network cost only fires once the
@@ -279,7 +285,7 @@ export function Watch(): JSX.Element {
         // never raises an unhandled promise rejection on telemetry alone.
         void import('../lib/analytics')
           .then(({ track }) =>
-            track('video_view', { video_id: data.id, channel: data.channel_username ?? null }),
+            track('video_view', videoViewProperties(data.id)),
           )
           .catch(() => undefined);
       })
@@ -421,10 +427,7 @@ export function Watch(): JSX.Element {
       }));
       void import('../lib/analytics')
         .then(({ track }) =>
-          track('subscribe_toggled', {
-            channel: channelUsername,
-            subscribed: !wasSubscribed,
-          }),
+          track('subscribe_toggled', subscribeToggledProperties(!wasSubscribed)),
         )
         .catch(() => undefined);
     } catch (err: unknown) {
@@ -451,7 +454,7 @@ export function Watch(): JSX.Element {
       const data = (await r.json()) as { likes: number; liked: boolean };
       setLikes({ count: data.likes, liked: data.liked });
       void import('../lib/analytics')
-        .then(({ track }) => track('video_like_toggled', { video_id: id, liked: data.liked }))
+        .then(({ track }) => track('video_like_toggled', videoLikeToggledProperties(id, data.liked)))
         .catch(() => undefined);
     } catch (err: unknown) {
       setLikeError(err instanceof Error ? err.message : 'Failed to update like');
@@ -671,7 +674,7 @@ export function Watch(): JSX.Element {
       window.setTimeout(() => setShareCopied(false), 2000);
     }
     void import('../lib/analytics')
-      .then(({ track }) => track('video_share', { video_id: id ?? '', platform: 'copy_link' }))
+      .then(({ track }) => track('video_share', videoShareProperties(id ?? '', 'copy_link')))
       .catch(() => undefined);
   }, [id]);
 
@@ -883,10 +886,7 @@ export function Watch(): JSX.Element {
               onClick={() => {
                 void import('../lib/analytics')
                   .then(({ track }) =>
-                    track('video_share', {
-                      video_id: id ?? '',
-                      platform: l.label.toLowerCase(),
-                    }),
+                    track('video_share', videoShareProperties(id ?? '', l.label.toLowerCase())),
                   )
                   .catch(() => undefined);
               }}

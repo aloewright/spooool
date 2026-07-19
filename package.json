@@ -30,7 +30,8 @@
     "db:migrate:staging": "wrangler d1 migrations apply spooool-staging --env staging --remote",
     "db:seed": "node scripts/seed-db.js",
     "worker:tail": "wrangler tail",
-    "worker:logs": "wrangler tail --format json | jq ."
+    "worker:logs": "wrangler tail --format json | jq .",
+    "posthog:sync-build-env": "node scripts/sync-posthog-build-env.mjs"
   },
   "dependencies": {
     "@cloudflare/ai-utils": "^1.0.1",

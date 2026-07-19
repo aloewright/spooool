@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { LogOut, Moon, Settings, Sun, Upload as UploadIconLucide, UserCircle2 } from 'lucide-react';
 import { MantineProvider } from '@mantine/core';
+import { AnalyticsIdentity } from './components/AnalyticsIdentity';
 import { CookieBanner } from './components/CookieBanner';
 import '@mantine/core/styles.css';
 import { signOut, useSession } from './lib/auth-client';
@@ -961,6 +962,7 @@ export default function App(): JSX.Element {
         </Routes>
       </Suspense>
       <SiteFooter />
+      <AnalyticsIdentity />
       <CookieBanner />
     </div>
     </MantineProvider>

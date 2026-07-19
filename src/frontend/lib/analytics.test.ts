@@ -74,7 +74,15 @@ describe('initAnalytics', () => {
     expect(posthog.init).toHaveBeenCalledTimes(1);
     expect(posthog.init).toHaveBeenCalledWith(
       'phc_test',
-      expect.objectContaining({ api_host: 'https://us.i.posthog.com' }),
+      expect.objectContaining({
+        api_host: 'https://us.i.posthog.com',
+        defaults: '2026-05-30',
+        capture_pageview: 'history_change',
+        capture_pageleave: true,
+        autocapture: true,
+        person_profiles: 'identified_only',
+        session_recording: { maskAllInputs: true },
+      }),
     );
   });
 
@@ -88,11 +96,25 @@ describe('initAnalytics', () => {
 });
 
 describe('track / identify / reset', () => {
-  it('do nothing before init (no posthog calls)', () => {
+  it('does not emit custom events before initialization', () => {
     track('demo', { x: 1 });
+    expect(posthog.capture).not.toHaveBeenCalled();
+  });
+
+  it('flushes the latest pending identity after consented initialization', () => {
+    identify('user-1', { plan: 'free' });
+    identify('user-2');
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+    expect(posthog.identify).toHaveBeenCalledTimes(1);
+    expect(posthog.identify).toHaveBeenCalledWith('user-2', undefined);
+  });
+
+  it('clears a pending identity when reset happens before initialization', () => {
     identify('user-1');
     reset();
-    expect(posthog.capture).not.toHaveBeenCalled();
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.identify).not.toHaveBeenCalled();
     expect(posthog.reset).not.toHaveBeenCalled();
   });

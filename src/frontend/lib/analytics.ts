@@ -11,6 +11,13 @@ import posthog, { type PostHog } from 'posthog-js';
 let started = false;
 let client: PostHog | null = null;
 
+interface PendingIdentity {
+  userId: string;
+  properties?: Record<string, unknown>;
+}
+
+let pendingIdentity: PendingIdentity | null = null;
+
 export interface AnalyticsConfig {
   /** Project API key from app.posthog.com → Project Settings. */
   apiKey: string | undefined;
@@ -45,6 +52,13 @@ function hasAnalyticsConsent(): boolean {
   }
 }
 
+function flushPendingIdentity(): void {
+  if (!client || !pendingIdentity) return;
+  const { userId, properties } = pendingIdentity;
+  pendingIdentity = null;
+  client.identify(userId, properties);
+}
+
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
   if (started || !config.enabled || !config.apiKey) return;
   // Gate on explicit consent. On first visit there is no stored choice yet;
@@ -52,11 +66,13 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   if (!hasAnalyticsConsent()) return;
   posthog.init(config.apiKey, {
     api_host: config.host,
+    defaults: '2026-05-30',
     // Capture the standard set automatically; we layer custom events on top
     // via track() below.
-    capture_pageview: true,
+    capture_pageview: 'history_change',
     capture_pageleave: true,
     autocapture: true,
+    person_profiles: 'identified_only',
     // Mask all input values in session recordings — we do video stuff,
     // people will type private things on the comments/upload pages.
     session_recording: {
@@ -67,16 +83,21 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   });
   client = posthog;
   started = true;
+  flushPendingIdentity();
 }
 
 // Tag the current visitor as a known user. Safe to call repeatedly with
 // the same id (posthog dedupes).
 export function identify(userId: string, properties?: Record<string, unknown>): void {
-  if (!client) return;
+  if (!client) {
+    pendingIdentity = { userId, properties };
+    return;
+  }
   client.identify(userId, properties);
 }
 
 export function reset(): void {
+  pendingIdentity = null;
   if (!client) return;
   client.reset();
 }
@@ -91,4 +112,5 @@ export function track(event: string, properties?: Record<string, unknown>): void
 export function __resetForTests(): void {
   started = false;
   client = null;
+  pendingIdentity = null;
 }

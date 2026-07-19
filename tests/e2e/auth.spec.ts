@@ -67,6 +67,7 @@ test.describe('signup → onboarding', () => {
   test('signing in with bad credentials surfaces an error and stays on /login', async ({
     page,
   }) => {
+    await stubTurnstile(page);
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('does-not-exist@spooool-e2e.test');
     await page.getByLabel(/password/i).fill('wrong-password');

@@ -11,6 +11,7 @@ type CallbackArgs = {
 
 type CapturedOptions = {
   appName?: string;
+  baseURL?: string;
   trustedOrigins?: string[];
   emailAndPassword?: {
     enabled?: boolean;
@@ -79,6 +80,7 @@ describe('createAuth', () => {
     });
     expect(betterAuthSpy).toHaveBeenCalledTimes(1);
     expect(captured.options?.appName).toBe('spooool');
+    expect(captured.options?.baseURL).toBe('https://example.com');
     expect(captured.options?.emailAndPassword?.enabled).toBe(true);
     expect(captured.options?.emailAndPassword?.minPasswordLength).toBe(8);
     expect(captured.options?.emailAndPassword?.autoSignIn).toBe(true);
@@ -99,6 +101,7 @@ describe('createAuth', () => {
       'https://auth.pdx.software',
       'https://spooool-staging.lazee.workers.dev',
     ]);
+    expect(captured.options?.baseURL).toBe('https://spooool-staging.lazee.workers.dev');
   });
 
   it('deduplicates BETTER_AUTH_URL when its origin is already trusted', () => {
@@ -164,7 +167,17 @@ describe('createAuth', () => {
       'https://www.spooool.com',
       'https://auth.pdx.software',
     ]);
+    expect(captured.options?.baseURL).toBeUndefined();
   });
+
+  it.each(['', 'not a url', 'javascript:alert(1)', 'https://user:password@example.com'])(
+    'does not pass an invalid BETTER_AUTH_URL to better-auth: %s',
+    (url) => {
+      createAuth({ DB: {} as D1Database, BETTER_AUTH_URL: url });
+
+      expect(captured.options?.baseURL).toBeUndefined();
+    },
+  );
 
   it.each([undefined, '', 'not a url'])('does not trust an absent or invalid BETTER_AUTH_URL: %s', (url) => {
     createAuth({ DB: {} as D1Database, BETTER_AUTH_URL: url });

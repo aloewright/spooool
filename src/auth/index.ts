@@ -27,7 +27,9 @@ const STATIC_TRUSTED_ORIGINS = [
   'https://auth.pdx.software',
 ];
 
-function normalizeHttpOrigin(value: string): string | undefined {
+function normalizeHttpOrigin(value?: string): string | undefined {
+  if (!value) return undefined;
+
   try {
     const url = new URL(value);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
@@ -38,13 +40,19 @@ function normalizeHttpOrigin(value: string): string | undefined {
   }
 }
 
-function trustedOrigins(configuredBaseURL?: string, configuredTrustedOrigins?: string): string[] {
-  const configured = [configuredBaseURL, ...(configuredTrustedOrigins?.split(',') ?? [])]
+function trustedOrigins(configuredBaseOrigin?: string, configuredTrustedOrigins?: string): string[] {
+  const additionalOrigins = (configuredTrustedOrigins?.split(',') ?? [])
     .filter((value): value is string => Boolean(value))
     .map(normalizeHttpOrigin)
     .filter((origin): origin is string => origin !== undefined);
 
-  return [...new Set([...STATIC_TRUSTED_ORIGINS, ...configured])];
+  return [
+    ...new Set([
+      ...STATIC_TRUSTED_ORIGINS,
+      ...(configuredBaseOrigin ? [configuredBaseOrigin] : []),
+      ...additionalOrigins,
+    ]),
+  ];
 }
 
 // Without this, send failures (unverified domain, binding misconfigured)
@@ -61,11 +69,13 @@ function logEmailResult(result: EmailResult, kind: string, to: string): void {
 }
 
 export function createAuth(env: AuthEnv) {
+  const baseURL = normalizeHttpOrigin(env.BETTER_AUTH_URL);
+
   return betterAuth({
     appName: 'spooool',
     database: env.DB,
     secret: env.BETTER_AUTH_SECRET,
-    baseURL: env.BETTER_AUTH_URL,
+    baseURL,
     plugins: [
       captcha({
         provider: 'cloudflare-turnstile',
@@ -141,6 +151,6 @@ export function createAuth(env: AuthEnv) {
     // brief window before src/workers/canonical-host.ts 301s them to the apex.
     // The previous 'https://spooool.workers.dev' entry was a bogus URL shape
     // (the real one is spooool.<account>.workers.dev) and is dropped.
-    trustedOrigins: trustedOrigins(env.BETTER_AUTH_URL, env.BETTER_AUTH_TRUSTED_ORIGINS),
+    trustedOrigins: trustedOrigins(baseURL, env.BETTER_AUTH_TRUSTED_ORIGINS),
   });
 }

@@ -16,6 +16,15 @@ describe('CSP_HEADER_VALUE', () => {
     expect(CSP_HEADER_VALUE).toContain('https://*.cloudflarestream.com');
   });
 
+  it('allows PostHog ingestion and lazy session replay assets', () => {
+    expect(CSP_HEADER_VALUE).toContain(
+      "script-src 'self' https://challenges.cloudflare.com https://*.posthog.com",
+    );
+    expect(CSP_HEADER_VALUE).toContain('connect-src');
+    expect(CSP_HEADER_VALUE).toContain('https://*.posthog.com');
+    expect(CSP_HEADER_VALUE).toContain("worker-src 'self' blob: data:");
+  });
+
   it('allows the YouTube nocookie embed frame and nothing else by default', () => {
     expect(CSP_HEADER_VALUE).toContain('frame-src https://www.youtube-nocookie.com');
   });

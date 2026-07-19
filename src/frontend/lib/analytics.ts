@@ -18,6 +18,7 @@ interface PendingIdentity {
 
 let pendingIdentity: PendingIdentity | null = null;
 let pendingReset = false;
+let pendingPersistedIdentityReset = false;
 let withdrawnByConsent = false;
 
 export interface AnalyticsConfig {
@@ -67,6 +68,14 @@ function flushPendingReset(): void {
   client.reset();
 }
 
+function flushPendingPersistedIdentityReset(): void {
+  if (!client || !pendingPersistedIdentityReset) return;
+  pendingPersistedIdentityReset = false;
+  if (client.get_property('$user_state') === 'identified') {
+    client.reset();
+  }
+}
+
 export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): void {
   if (
     started ||
@@ -101,6 +110,7 @@ export function initAnalytics(config: AnalyticsConfig = readAnalyticsConfig()): 
   started = true;
   const shouldOptIn = withdrawnByConsent || client.has_opted_out_capturing();
   flushPendingReset();
+  flushPendingPersistedIdentityReset();
   flushPendingIdentity();
   if (shouldOptIn) {
     client.opt_in_capturing({ captureEventName: false });
@@ -125,6 +135,18 @@ export function reset(): void {
     return;
   }
   client.reset();
+}
+
+// A cold anonymous session must preserve its existing anonymous distinct ID,
+// while an expired authenticated session must discard its prior identity.
+export function resetPersistedIdentityIfIdentified(): void {
+  if (!client) {
+    pendingPersistedIdentityReset = true;
+    return;
+  }
+  if (client.get_property('$user_state') === 'identified') {
+    client.reset();
+  }
 }
 
 export function withdrawAnalyticsConsent(): void {
@@ -152,5 +174,6 @@ export function __resetForTests(): void {
   client = null;
   pendingIdentity = null;
   pendingReset = false;
+  pendingPersistedIdentityReset = false;
   withdrawnByConsent = false;
 }

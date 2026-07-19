@@ -6,6 +6,7 @@ import {
   initAnalytics,
   readAnalyticsConfig,
   reset,
+  resetPersistedIdentityIfIdentified,
   track,
   withdrawAnalyticsConsent,
 } from './analytics';
@@ -19,6 +20,7 @@ vi.mock('posthog-js', () => {
     opt_out_capturing: vi.fn(),
     opt_in_capturing: vi.fn(),
     has_opted_out_capturing: vi.fn(() => false),
+    get_property: vi.fn(() => 'anonymous'),
   };
   return { default: mock };
 });
@@ -146,6 +148,29 @@ describe('track / identify / reset', () => {
     initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
     expect(posthog.identify).not.toHaveBeenCalled();
     expect(posthog.reset).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a returning anonymous identity when the selective check flushes after initialization', () => {
+    resetPersistedIdentityIfIdentified();
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+
+    expect(posthog.get_property).toHaveBeenCalledWith('$user_state');
+    expect(posthog.reset).not.toHaveBeenCalled();
+  });
+
+  it('resets a persisted identified identity during the selective pre-capture check', () => {
+    vi.mocked(posthog.get_property).mockReturnValue('identified');
+    resetPersistedIdentityIfIdentified();
+    stubProductionBuild();
+    acceptAnalyticsConsent();
+    initAnalytics({ apiKey: 'phc_test', host: 'https://x', enabled: true });
+
+    expect(posthog.reset).toHaveBeenCalledOnce();
+    expect(vi.mocked(posthog.init).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(posthog.reset).mock.invocationCallOrder[0],
+    );
   });
 
   it('proxies through to posthog after init', () => {

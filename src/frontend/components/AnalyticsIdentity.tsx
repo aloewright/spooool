@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSession } from '../lib/auth-client';
 import { ANALYTICS_CONSENT_CHANGE_EVENT } from '../lib/analytics-consent';
 import { loadAnalytics } from '../lib/analytics-loader';
@@ -6,6 +6,7 @@ import { loadAnalytics } from '../lib/analytics-loader';
 export function AnalyticsIdentity(): null {
   const { data: session, isPending } = useSession();
   const userId = session?.user?.id;
+  const hadAuthenticatedSession = useRef(false);
   const [consentVersion, setConsentVersion] = useState(0);
 
   useEffect(() => {
@@ -19,6 +20,7 @@ export function AnalyticsIdentity(): null {
     let cancelled = false;
 
     if (userId) {
+      hadAuthenticatedSession.current = true;
       void loadAnalytics()
         .then(({ identify, initAnalytics }) => {
           if (cancelled) return;
@@ -27,10 +29,13 @@ export function AnalyticsIdentity(): null {
         })
         .catch(() => undefined);
     } else {
+      const shouldFullyReset = hadAuthenticatedSession.current;
+      hadAuthenticatedSession.current = false;
       void loadAnalytics()
-        .then(({ initAnalytics, reset }) => {
+        .then(({ initAnalytics, reset, resetPersistedIdentityIfIdentified }) => {
           if (cancelled) return;
-          reset();
+          if (shouldFullyReset) reset();
+          else resetPersistedIdentityIfIdentified();
           if (!cancelled) initAnalytics();
         })
         .catch(() => undefined);

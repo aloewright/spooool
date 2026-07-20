@@ -19,8 +19,8 @@ export function SocialAuthButtons({ callbackURL, onError }: Props): JSX.Element 
   }
 
   return (
-    <div className="stack-sm">
-      <div className="card stack-sm">
+    <div className="stack stack-sm">
+      <div className="card stack stack-sm">
         <button
           type="button"
           className="btn btn--secondary"

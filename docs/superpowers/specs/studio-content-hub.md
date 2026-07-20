@@ -19,7 +19,7 @@ chat) are absorbed into it as the "jump right into a project" path.
   Workflows/container bindings.
 - Mounted at `spooool.com/studio` via a zone route (`spooool.com/studio*` →
   `editor`). The studio worker strips the `/studio` prefix before routing;
-  one build also serves book-cook.com at the root mount during deprecation.
+  the retired standalone domain is no longer routed to the worker.
 - Same-origin superpower: on the spooool apex the hub calls **both** backends
   with the shared session cookie — its own API under `/studio/api/*` and
   spooool's under `/api/*` (different workers, one origin).
@@ -59,4 +59,5 @@ chat) are absorbed into it as the "jump right into a project" path.
 
 - Merging user tables (sessions federate by email; two `user` tables remain).
 - One worker / one framework. Coexistence via routes is the architecture.
-- book-cook.com domain decisions (still serves the root mount).
+- Renaming legacy persisted resource, cookie, and theme identifiers inherited
+  from the standalone writing app.

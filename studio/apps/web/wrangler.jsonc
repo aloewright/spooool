@@ -33,7 +33,6 @@
     "AI_GATEWAY_ID": "x",
     "R2_BUCKET": "bookgenerators",
     "POSTPILOT_BASE_URL": "https://postpilot.cc",
-    "BETTER_AUTH_URL": "https://book-cook.com",
     "GOOGLE_CLIENT_ID": "887895427361-3joav8mmi30g9ebeek6qtnbf69j5cl64.apps.googleusercontent.com"
   },
 

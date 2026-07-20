@@ -13,6 +13,7 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             KEYRING_MASTER_KEY: "test-keyring-master-key",
+            GOOGLE_CLIENT_SECRET: "test-google-client-secret",
           },
         },
       }),

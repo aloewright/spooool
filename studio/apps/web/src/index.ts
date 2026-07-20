@@ -1,7 +1,7 @@
 import * as Sentry from "@sentry/cloudflare";
 import { routeAgentRequest } from "agents";
 import { Hono } from "hono";
-import { createAuth } from "./auth";
+import { authBaseFromRequest, createAuth } from "./auth";
 import { RenderWorkerContainer } from "./containers/render-worker";
 import type { Env } from "./env";
 import { resolveSessionUser } from "./middleware/auth";
@@ -63,11 +63,11 @@ app.get("/api/auth/error", (c) => {
 app.on(["GET", "POST"], "/api/auth/*", async (c) => {
   const url = new URL(c.req.url);
   // When serving via spooool.com/studio, OAuth redirect URIs and callback
-  // links must carry that origin + prefix; otherwise the configured
-  // BETTER_AUTH_URL (book-cook.com) applies. Better Auth routes against the
+  // links must carry that origin + prefix. Better Auth routes against the
   // path in its baseURL, so hand it the original (unstripped) URL too.
-  const base = c.req.header("x-app-base");
-  const auth = createAuth(c.env, base ? { origin: url.origin, prefix: base } : undefined);
+  const authBase = authBaseFromRequest(c.req.raw);
+  const auth = createAuth(c.env, authBase);
+  const base = authBase.prefix;
   const authRequest = base
     ? new Request(new URL(`${base}${url.pathname}${url.search}`, url.origin), c.req.raw)
     : c.req.raw;
@@ -106,7 +106,7 @@ app.on(["GET", "POST"], "/api/auth/*", async (c) => {
 });
 
 app.get("/api/v1/debug-session", async (c) => {
-  const auth = createAuth(c.env);
+  const auth = createAuth(c.env, authBaseFromRequest(c.req.raw));
   const session = await auth.api.getSession({ headers: c.req.raw.headers });
   const cookies = c.req.header("cookie") ?? "(none)";
   return c.json({ session, cookieHeader: cookies.slice(0, 300) });

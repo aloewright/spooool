@@ -2,8 +2,8 @@
 
 The writing studio (books, blogs, scripts), formerly the standalone
 [`book-cook`](https://github.com/aloewright/book-cook) repo (now archived).
-Serves as the content hub at **spooool.com/studio** and, during deprecation,
-at book-cook.com (root mount). See
+Serves as the content hub at **spooool.com/studio**; the former standalone
+domain has been retired. See
 `docs/superpowers/specs/studio-content-hub.md` for the architecture and the
 Phase 2 plan (AI Studio absorption).
 
@@ -37,8 +37,8 @@ CI: `.github/workflows/studio-ci.yml` (checks on `studio/**`),
 
 ## Mount architecture (the short version)
 
-One build serves two bases: "/" (book-cook.com) and "/studio"
-(spooool.com via zone route). The worker strips the prefix
+The build serves at "/studio" in production (spooool.com via zone route) and
+at "/" for local development. The worker strips the production prefix
 (`apps/web/src/shared/app-base.ts`), rebases HTML asset URLs, and the client
 detects its base at runtime. On the spooool mount, spooool's Better Auth
 session is accepted directly (`SPOOOOL_DB` token lookup, email-mapped

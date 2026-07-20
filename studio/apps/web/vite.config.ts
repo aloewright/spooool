@@ -16,8 +16,8 @@ export default defineConfig({
   ],
   build: { outDir: "dist/client", emptyOutDir: true },
   experimental: {
-    // The same build serves at "/" (book-cook.com) and "/studio"
-    // (spooool.com/studio), so asset URLs embedded in JS resolve at runtime
+    // The same build serves at "/" in local development and at "/studio"
+    // on spooool.com, so asset URLs embedded in JS resolve at runtime
     // against globalThis.__appBase (set inline in index.html). HTML and CSS
     // keep Vite's defaults: the worker rebases HTML attribute URLs
     // (rewriteHtmlBase) and CSS asset refs are relative to the CSS file.

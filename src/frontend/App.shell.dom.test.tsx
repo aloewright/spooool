@@ -46,6 +46,7 @@ afterEach(() => {
   // Pages add document-level side effects (e.g. <meta robots> on NotFound).
   // Strip them between tests so assertions stay independent.
   document.head.querySelectorAll('meta[name="robots"]').forEach((m) => m.remove());
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 

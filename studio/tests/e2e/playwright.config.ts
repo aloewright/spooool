@@ -1,6 +1,6 @@
 import { defineConfig } from "@playwright/test";
 
-const baseURL = process.env.E2E_BASE_URL ?? "https://bookgenerators-web.lazee.workers.dev";
+const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 const localPort = baseURL.startsWith("http://localhost") ? new URL(baseURL).port : undefined;
 
 export default defineConfig({

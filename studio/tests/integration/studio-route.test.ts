@@ -99,20 +99,20 @@ describe("spooool.com/studio base path", () => {
   });
 
   it("keeps unprefixed OAuth callbacks on the request host", async () => {
-    const res = await SELF.fetch(
-      "https://bookgenerators-web.lazee.workers.dev/api/auth/sign-in/social",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    const res = await SELF.fetch("https://editor.example/api/auth/sign-in/social", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://editor.example",
       },
-    );
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as { url: string };
     const providerURL = new URL(body.url);
     expect(providerURL.searchParams.get("redirect_uri")).toBe(
-      "https://bookgenerators-web.lazee.workers.dev/api/auth/callback/google",
+      "https://editor.example/api/auth/callback/google",
     );
   });
 });

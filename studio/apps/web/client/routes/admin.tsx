@@ -112,7 +112,7 @@ function AdminDashboard() {
             <ExternalTile
               label="Cloudflare Workers"
               icon={<CloudCog className="size-4" />}
-              href="https://dash.cloudflare.com/?to=/:account/workers/services/view/bookgenerators-web/production"
+              href="https://dash.cloudflare.com/?to=/:account/workers/services/view/editor/production"
             />
             <ExternalTile
               label="AI Gateway"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/bootstrap.sh
-# Idempotently provisions Cloudflare resources for bookgenerators-web
+# Idempotently provisions Cloudflare resources for the editor Worker
 # and mirrors Doppler secrets to Wrangler.
 #
 # Usage:

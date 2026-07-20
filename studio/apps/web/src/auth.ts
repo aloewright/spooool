@@ -54,7 +54,6 @@ export function createAuth(env: Env, authBase: AuthBase) {
       "https://spooool.com",
       "https://www.spooool.com",
       "https://bookgenerators.com",
-      "https://bookgenerators-web.lazee.workers.dev",
       ...Array.from({ length: 20 }, (_, i) => `http://localhost:${5173 + i}`),
     ],
     emailAndPassword: { enabled: true, autoSignIn: true },

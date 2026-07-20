@@ -46,6 +46,7 @@ afterEach(() => {
   // Pages add document-level side effects (e.g. <meta robots> on NotFound).
   // Strip them between tests so assertions stay independent.
   document.head.querySelectorAll('meta[name="robots"]').forEach((m) => m.remove());
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -118,5 +119,13 @@ describe('App shell', () => {
     const headings = Array.from(container!.querySelectorAll('h1, h2')).map((h) => h.textContent ?? '');
     expect(headings).not.toContain('Trending this week');
     expect(headings).toContain('Page not found');
+  });
+
+  it('hands the Studio route to the content-hub worker', async () => {
+    const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => undefined);
+
+    await mountAt('/studio');
+
+    expect(replace).toHaveBeenCalledWith('/studio');
   });
 });

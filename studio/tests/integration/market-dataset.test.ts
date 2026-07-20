@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 describe("market dataset refresh", () => {
   it("writes a weekly JSONL snapshot to R2 and exposes latest health", async () => {
-    const refresh = await SELF.fetch("http://x/api/v1/health/market-dataset/refresh", {
+    const refresh = await SELF.fetch("http://localhost:5173/api/v1/health/market-dataset/refresh", {
       method: "POST",
     });
     expect(refresh.status).toBe(201);
@@ -17,7 +17,7 @@ describe("market dataset refresh", () => {
     expect(object).not.toBeNull();
     expect((await object?.text())?.trim().split("\n").length).toBe(body.records);
 
-    const latest = await SELF.fetch("http://x/api/v1/health/market-dataset");
+    const latest = await SELF.fetch("http://localhost:5173/api/v1/health/market-dataset");
     expect(latest.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const latestBody = (await latest.json()) as any;

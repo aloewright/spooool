@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 async function signUp() {
-  const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -19,7 +19,7 @@ describe("projects", () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };
 
-    const created = await SELF.fetch("http://x/api/v1/projects", {
+    const created = await SELF.fetch("http://localhost:5173/api/v1/projects", {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -35,7 +35,7 @@ describe("projects", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const { id } = (await created.json()) as any;
 
-    const list = await SELF.fetch("http://x/api/v1/projects", { headers });
+    const list = await SELF.fetch("http://localhost:5173/api/v1/projects", { headers });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const items = (await list.json()) as any;
     expect(
@@ -43,7 +43,7 @@ describe("projects", () => {
       items.items.find((p: any) => p.id === id),
     ).toBeTruthy();
 
-    const got = await SELF.fetch(`http://x/api/v1/projects/${id}`, { headers });
+    const got = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}`, { headers });
     expect(got.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const gotBody = (await got.json()) as any;
@@ -52,7 +52,7 @@ describe("projects", () => {
     expect(gotBody.audience_json).toEqual(["Business readers"]);
     expect(gotBody.voice_styles_json).toEqual(["Conversational", "Witty & sharp"]);
 
-    const outline = await SELF.fetch(`http://x/api/v1/projects/${id}/outlines`, {
+    const outline = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}/outlines`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -62,18 +62,23 @@ describe("projects", () => {
     });
     expect(outline.status).toBe(201);
 
-    const regeneratedOutline = await SELF.fetch(`http://x/api/v1/projects/${id}/outlines`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        framework: "reader-transformation",
-        questionnaire:
-          "Reader needs a clear operating model for focused work. The book should move them from reactive work to calm weekly planning.",
-      }),
-    });
+    const regeneratedOutline = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${id}/outlines`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          framework: "reader-transformation",
+          questionnaire:
+            "Reader needs a clear operating model for focused work. The book should move them from reactive work to calm weekly planning.",
+        }),
+      },
+    );
     expect(regeneratedOutline.status).toBe(201);
 
-    const outlineRes = await SELF.fetch(`http://x/api/v1/projects/${id}/outline`, { headers });
+    const outlineRes = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}/outline`, {
+      headers,
+    });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const outlineBody = (await outlineRes.json()) as any;
     expect(outlineBody.chapters).toHaveLength(12);
@@ -82,14 +87,14 @@ describe("projects", () => {
       "Use the book premise as source material",
     );
     const chapterId = outlineBody.chapters[0].id;
-    const patchChapter = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+    const patchChapter = await SELF.fetch(`http://localhost:5173/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify({ draft_md: "Finished chapter draft.", status: "drafted" }),
     });
     expect(patchChapter.status).toBe(200);
 
-    const book = await SELF.fetch(`http://x/api/v1/projects/${id}/book`, { headers });
+    const book = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}/book`, { headers });
     expect(book.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const bookBody = (await book.json()) as any;
@@ -98,13 +103,13 @@ describe("projects", () => {
     expect(bookBody.book.chapters[0].body_md).toBe("Finished chapter draft.");
     expect(bookBody.export_formats).toEqual(["epub", "pdf"]);
 
-    const del = await SELF.fetch(`http://x/api/v1/projects/${id}`, {
+    const del = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}`, {
       method: "DELETE",
       headers,
     });
     expect(del.status).toBe(204);
 
-    const list2 = await SELF.fetch("http://x/api/v1/projects", { headers });
+    const list2 = await SELF.fetch("http://localhost:5173/api/v1/projects", { headers });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const items2 = (await list2.json()) as any;
     expect(
@@ -112,7 +117,9 @@ describe("projects", () => {
       items2.items.find((p: any) => p.id === id),
     ).toBeFalsy();
 
-    const deleted = await SELF.fetch("http://x/api/v1/projects/deleted/recent", { headers });
+    const deleted = await SELF.fetch("http://localhost:5173/api/v1/projects/deleted/recent", {
+      headers,
+    });
     expect(deleted.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const deletedBody = (await deleted.json()) as any;
@@ -122,13 +129,13 @@ describe("projects", () => {
       deletedBody.items.find((p: any) => p.id === id),
     ).toBeTruthy();
 
-    const restore = await SELF.fetch(`http://x/api/v1/projects/${id}/restore`, {
+    const restore = await SELF.fetch(`http://localhost:5173/api/v1/projects/${id}/restore`, {
       method: "POST",
       headers,
     });
     expect(restore.status).toBe(200);
 
-    const list3 = await SELF.fetch("http://x/api/v1/projects", { headers });
+    const list3 = await SELF.fetch("http://localhost:5173/api/v1/projects", { headers });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const items3 = (await list3.json()) as any;
     expect(

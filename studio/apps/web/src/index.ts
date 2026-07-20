@@ -32,7 +32,14 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.onError((err, c) => {
   const e = err as Error;
-  const code = e.name === "BudgetExceeded" ? 402 : e.name === "Unauthorized" ? 401 : 500;
+  const code =
+    e.name === "BudgetExceeded"
+      ? 402
+      : e.name === "Unauthorized"
+        ? 401
+        : e.name === "Forbidden"
+          ? 403
+          : 500;
   console.error("error", e.name, e.message);
   if (e.name !== "Unauthorized" && e.name !== "BudgetExceeded") {
     Sentry.captureException(e);

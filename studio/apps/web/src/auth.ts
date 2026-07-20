@@ -6,13 +6,38 @@ import type { Env } from "./env";
 
 export type AuthBase = { origin: string; prefix: string };
 
+const STATIC_AUTH_ORIGINS = [
+  "https://spooool.com",
+  "https://www.spooool.com",
+  "https://bookgenerators.com",
+] as const;
+const LOCAL_AUTH_ORIGINS = Array.from({ length: 20 }, (_, i) => `http://localhost:${5173 + i}`);
+const EDITOR_WORKER_HOST = "editor.lazee.workers.dev";
+const EDITOR_PREVIEW_HOST_SUFFIX = `-${EDITOR_WORKER_HOST}`;
+
+function isTrustedRequestOrigin(url: URL): boolean {
+  if ((STATIC_AUTH_ORIGINS as readonly string[]).includes(url.origin)) return true;
+  if (LOCAL_AUTH_ORIGINS.includes(url.origin)) return true;
+  return (
+    url.protocol === "https:" &&
+    url.port === "" &&
+    (url.hostname === EDITOR_WORKER_HOST || url.hostname.endsWith(EDITOR_PREVIEW_HOST_SUFFIX))
+  );
+}
+
 // Derives the auth origin and mount from the request after stripAppBasePrefix
 // has sanitized the prefix marker. An empty prefix is the local/direct Worker
 // root mount; every caller passes this so redirects and cookies stay on the
 // host that received the request.
 export function authBaseFromRequest(req: Request): AuthBase {
+  const url = new URL(req.url);
+  if (!isTrustedRequestOrigin(url)) {
+    const error = new Error(`Auth is not available on ${url.origin}`);
+    error.name = "Forbidden";
+    throw error;
+  }
   return {
-    origin: new URL(req.url).origin,
+    origin: url.origin,
     prefix: req.headers.get("x-app-base") ?? "",
   };
 }
@@ -51,10 +76,8 @@ export function createAuth(env: Env, authBase: AuthBase) {
     trustedOrigins: [
       // The spooool.com/studio vanity route lands here; trust its origin so
       // auth requests initiated from that entry point pass the CSRF check.
-      "https://spooool.com",
-      "https://www.spooool.com",
-      "https://bookgenerators.com",
-      ...Array.from({ length: 20 }, (_, i) => `http://localhost:${5173 + i}`),
+      ...STATIC_AUTH_ORIGINS,
+      ...LOCAL_AUTH_ORIGINS,
     ],
     emailAndPassword: { enabled: true, autoSignIn: true },
     socialProviders: {

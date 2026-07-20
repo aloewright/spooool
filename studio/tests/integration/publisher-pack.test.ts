@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 async function signUp() {
-  const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -19,7 +19,7 @@ describe("publisher pack", () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };
 
-    const projectRes = await SELF.fetch("http://x/api/v1/projects", {
+    const projectRes = await SELF.fetch("http://localhost:5173/api/v1/projects", {
       method: "POST",
       headers,
       body: JSON.stringify({ title: "Quiet Operator", type: "nonfiction" }),
@@ -28,12 +28,12 @@ describe("publisher pack", () => {
     const project = (await projectRes.json()) as any;
 
     const emptyGenerate = await SELF.fetch(
-      `http://x/api/v1/projects/${project.id}/publisher-pack/seo`,
+      `http://localhost:5173/api/v1/projects/${project.id}/publisher-pack/seo`,
       { method: "POST", headers },
     );
     expect(emptyGenerate.status).toBe(409);
 
-    await SELF.fetch(`http://x/api/v1/projects/${project.id}/outlines`, {
+    await SELF.fetch(`http://localhost:5173/api/v1/projects/${project.id}/outlines`, {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -42,10 +42,13 @@ describe("publisher pack", () => {
       }),
     });
 
-    const generate = await SELF.fetch(`http://x/api/v1/projects/${project.id}/publisher-pack/seo`, {
-      method: "POST",
-      headers,
-    });
+    const generate = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/publisher-pack/seo`,
+      {
+        method: "POST",
+        headers,
+      },
+    );
     expect(generate.status).toBe(201);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const generated = (await generate.json()) as any;
@@ -54,22 +57,25 @@ describe("publisher pack", () => {
     expect(generated.pack.bisac).toHaveLength(2);
 
     const edited = { ...generated.pack, subtitle: "A calmer system for focused work" };
-    const patch = await SELF.fetch(`http://x/api/v1/projects/${project.id}/publisher-pack`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({
-        title: edited.title,
-        subtitle: edited.subtitle,
-        series_name: edited.series_name,
-        description_html: edited.description_html,
-        keywords: edited.keywords,
-        bisac: edited.bisac,
-      }),
-    });
+    const patch = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/publisher-pack`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          title: edited.title,
+          subtitle: edited.subtitle,
+          series_name: edited.series_name,
+          description_html: edited.description_html,
+          keywords: edited.keywords,
+          bisac: edited.bisac,
+        }),
+      },
+    );
     expect(patch.status).toBe(200);
 
     const approve = await SELF.fetch(
-      `http://x/api/v1/projects/${project.id}/publisher-pack/approve`,
+      `http://localhost:5173/api/v1/projects/${project.id}/publisher-pack/approve`,
       { method: "POST", headers },
     );
     expect(approve.status).toBe(200);
@@ -77,14 +83,17 @@ describe("publisher pack", () => {
     const approved = (await approve.json()) as any;
     expect(approved.pack.status).toBe("approved");
 
-    const lockedPatch = await SELF.fetch(`http://x/api/v1/projects/${project.id}/publisher-pack`, {
-      method: "PATCH",
-      headers,
-      body: JSON.stringify({
-        ...edited,
-        subtitle: "Should not save",
-      }),
-    });
+    const lockedPatch = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/publisher-pack`,
+      {
+        method: "PATCH",
+        headers,
+        body: JSON.stringify({
+          ...edited,
+          subtitle: "Should not save",
+        }),
+      },
+    );
     expect(lockedPatch.status).toBe(409);
   });
 });

@@ -90,7 +90,7 @@ describe("spooool.com/studio base path", () => {
   });
 
   it("ignores a client-supplied base marker on unprefixed requests", async () => {
-    const res = await SELF.fetch("https://editor.example/api/auth/error?error=spoofed", {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/auth/error?error=spoofed", {
       headers: { "x-app-base": "/studio" },
       redirect: "manual",
     });
@@ -99,11 +99,11 @@ describe("spooool.com/studio base path", () => {
   });
 
   it("keeps unprefixed OAuth callbacks on the request host", async () => {
-    const res = await SELF.fetch("https://editor.example/api/auth/sign-in/social", {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/auth/sign-in/social", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: "https://editor.example",
+        Origin: "https://editor.lazee.workers.dev",
       },
       body: JSON.stringify({ provider: "google", callbackURL: "/" }),
     });
@@ -112,8 +112,36 @@ describe("spooool.com/studio base path", () => {
     const body = (await res.json()) as { url: string };
     const providerURL = new URL(body.url);
     expect(providerURL.searchParams.get("redirect_uri")).toBe(
-      "https://editor.example/api/auth/callback/google",
+      "https://editor.lazee.workers.dev/api/auth/callback/google",
     );
+  });
+
+  it("supports version preview hosts for the editor Worker", async () => {
+    const origin = "https://abc123-editor.lazee.workers.dev";
+    const res = await SELF.fetch(`${origin}/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    expect(new URL(body.url).searchParams.get("redirect_uri")).toBe(
+      `${origin}/api/auth/callback/google`,
+    );
+  });
+
+  it("rejects auth requests on untrusted hosts", async () => {
+    const res = await SELF.fetch("https://book-cook.com/api/auth/sign-in/social", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://book-cook.com",
+      },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 
@@ -157,7 +185,7 @@ describe("shared spooool.com session", () => {
 
   it("rejects spooool sessions off the /studio mount", async () => {
     const { cookie } = await seedSpoooolSession();
-    const res = await SELF.fetch("https://editor.example/api/v1/projects", {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/v1/projects", {
       headers: { cookie },
     });
     expect(res.status).toBe(401);

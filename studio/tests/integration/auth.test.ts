@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 describe("auth", () => {
   it("sign-up creates a user and returns a session", async () => {
-    const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+    const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

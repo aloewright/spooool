@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 async function signUp() {
-  const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -19,7 +19,7 @@ describe("chapters", () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };
 
-    const projectRes = await SELF.fetch("http://x/api/v1/projects", {
+    const projectRes = await SELF.fetch("http://localhost:5173/api/v1/projects", {
       method: "POST",
       headers,
       body: JSON.stringify({ title: "Chapter Book", type: "nonfiction" }),
@@ -27,34 +27,43 @@ describe("chapters", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const project = (await projectRes.json()) as any;
 
-    const outlineRes = await SELF.fetch(`http://x/api/v1/projects/${project.id}/outlines`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        framework: "paas",
-        questionnaire: "Readers need a calmer operating model for focused work.",
-      }),
-    });
+    const outlineRes = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/outlines`,
+      {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          framework: "paas",
+          questionnaire: "Readers need a calmer operating model for focused work.",
+        }),
+      },
+    );
     expect(outlineRes.status).toBe(201);
 
-    const outlineDetail = await SELF.fetch(`http://x/api/v1/projects/${project.id}/outline`, {
-      headers,
-    });
+    const outlineDetail = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/outline`,
+      {
+        headers,
+      },
+    );
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const outline = (await outlineDetail.json()) as any;
     expect(outline.chapters.length).toBeGreaterThan(0);
 
     const chapterId = outline.chapters[0].id;
-    const sectionRes = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}/sections`, {
-      headers,
-    });
+    const sectionRes = await SELF.fetch(
+      `http://localhost:5173/api/v1/chapters/${chapterId}/sections`,
+      {
+        headers,
+      },
+    );
     expect(sectionRes.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const sections = (await sectionRes.json()) as any;
     expect(sections.items.length).toBeGreaterThan(0);
 
     const draftSection = await SELF.fetch(
-      `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[0].id}/draft`,
+      `http://localhost:5173/api/v1/chapters/${chapterId}/sections/${sections.items[0].id}/draft`,
       { method: "POST", headers },
     );
     expect(draftSection.status).toBe(200);
@@ -63,7 +72,7 @@ describe("chapters", () => {
     expect(sectionDraft.section.draft_md).toContain("concrete moment");
     expect(sectionDraft.revision.after_md).toContain("concrete moment");
 
-    const patch = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, {
+    const patch = await SELF.fetch(`http://localhost:5173/api/v1/chapters/${chapterId}`, {
       method: "PATCH",
       headers,
       body: JSON.stringify({
@@ -74,14 +83,14 @@ describe("chapters", () => {
     });
     expect(patch.status).toBe(200);
 
-    const get = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}`, { headers });
+    const get = await SELF.fetch(`http://localhost:5173/api/v1/chapters/${chapterId}`, { headers });
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const chapter = (await get.json()) as any;
     expect(chapter.draft_md).toContain("saved chapter");
     expect(chapter.status).toBe("drafting");
 
     const additiveDraft = await SELF.fetch(
-      `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,
+      `http://localhost:5173/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,
       { method: "POST", headers },
     );
     expect(additiveDraft.status).toBe(200);
@@ -91,7 +100,7 @@ describe("chapters", () => {
     expect(additiveSection.section.draft_md).toContain("without replaying its opening");
 
     const directedRedraft = await SELF.fetch(
-      `http://x/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,
+      `http://localhost:5173/api/v1/chapters/${chapterId}/sections/${sections.items[1].id}/draft`,
       {
         method: "POST",
         headers,
@@ -105,7 +114,7 @@ describe("chapters", () => {
       "Apply this redraft direction: Make the continuation more tense.",
     );
 
-    const revise = await SELF.fetch(`http://x/api/v1/chapters/${chapterId}/revise`, {
+    const revise = await SELF.fetch(`http://localhost:5173/api/v1/chapters/${chapterId}/revise`, {
       method: "POST",
       headers,
       body: JSON.stringify({

@@ -666,6 +666,42 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
     expect(queueSends).toHaveLength(1);
     expect((queueSends[0] as { videoId: string }).videoId).toBe(videoId);
   });
+
+  it('done sentinel is written before session keys are deleted', async () => {
+    const { env, kv } = multiChunkEnv();
+    const fetcher = mountWithUser(env, { id: USER_ID, email: 'u@t.com', name: 'U', emailVerified: true });
+
+    // chunk 0
+    const fd0 = new FormData();
+    fd0.set('title', 'vid');
+    fd0.set('description', '');
+    fd0.set('file', new Blob([MP4_MAGIC], { type: 'video/mp4' }), 'v.mp4');
+    fd0.set('chunkIndex', '0');
+    fd0.set('chunkCount', '2');
+    const res0 = await fetcher('/api/videos/upload', { method: 'POST', body: fd0 });
+    const { videoId, uploadId } = (await res0.json()) as { videoId: string; uploadId: string };
+
+    // chunk 1 (final)
+    const fd1 = new FormData();
+    fd1.set('title', 'vid');
+    fd1.set('description', '');
+    fd1.set('file', new Blob([new Uint8Array(512)], { type: 'video/mp4' }), 'v.mp4');
+    fd1.set('chunkIndex', '1');
+    fd1.set('chunkCount', '2');
+    fd1.set('uploadId', uploadId);
+    await fetcher('/api/videos/upload', { method: 'POST', body: fd1 });
+
+    // After completion: sentinel must be present AND session keys must be gone.
+    const doneKey = `upload-done:${USER_ID}:${uploadId}`;
+    expect(kv[doneKey]).toBeDefined();
+    const sentinelBody = JSON.parse(kv[doneKey]!) as { videoId: string };
+    expect(sentinelBody.videoId).toBe(videoId);
+
+    // Session keys cleaned up
+    expect(kv[`upload:${USER_ID}:${uploadId}:mpid`]).toBeUndefined();
+    expect(kv[`upload:${USER_ID}:${uploadId}:meta`]).toBeUndefined();
+    expect(kv[`upload:${USER_ID}:${uploadId}:parts`]).toBeUndefined();
+  });
 });
 
 describe('DELETE /api/videos/:id cache invalidation (ALO-431)', () => {

@@ -797,16 +797,17 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   await bumpTrendingCacheVersion(env.CACHE);
   purgeTrendingEdgeCache(c);
 
-  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
-
-  // Write a short-lived sentinel so a retry of the final chunk (e.g. when
-  // the 201 response was dropped in transit) gets the same 201 rather than
-  // a 400 "Missing upload session". 300 s is well within any retry window.
+  // Write the sentinel BEFORE deleting session keys. If the Worker is killed
+  // between here and the deletes below, the sentinel ensures a client retry
+  // of the final chunk gets a 201 rather than a 400 "Missing upload session".
+  // The 300s TTL keeps KV pollution bounded.
   await env.SESSIONS.put(
     `upload-done:${user.id}:${resolvedUploadId}`,
     JSON.stringify({ videoId: uploadMeta.videoId }),
     { expirationTtl: 300 },
   );
+
+  await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });

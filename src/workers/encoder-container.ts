@@ -1,8 +1,8 @@
 // Cloudflare Container DO for the R2+FFmpeg HLS encoding path (ALO-136).
 // Uses the same image as RenderContainer (both run server.ts), but keyed
-// on a small pool so encode jobs distribute across ≤POOL_SIZE instances
-// rather than one per user. Separate DO class keeps encode queue slots
-// independent of render queue slots.
+// on a pool so encode jobs distribute across POOL_SIZE instances rather
+// than one per user. Separate DO class keeps encode queue slots independent
+// of render queue slots.
 
 import { Container } from '@cloudflare/containers';
 

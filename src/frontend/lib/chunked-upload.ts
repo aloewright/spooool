@@ -84,9 +84,9 @@ function resumeKey(file: Blob): string {
   return `chunk-upload:${name}:${size}:${mtime}`;
 }
 
-type StoredProgress = { uploadId: string; nextChunk: number; chunkCount: number };
+type StoredProgress = { uploadId: string; nextChunk: number; chunkCount: number; videoId?: string };
 
-function loadProgress(key: string, chunkCount: number): { uploadId: string; nextChunk: number } | null {
+function loadProgress(key: string, chunkCount: number): { uploadId: string; nextChunk: number; videoId?: string } | null {
   try {
     const raw = sessionStorage.getItem(key);
     if (!raw) return null;
@@ -94,15 +94,15 @@ function loadProgress(key: string, chunkCount: number): { uploadId: string; next
     if (stored.chunkCount !== chunkCount || stored.nextChunk <= 0 || stored.nextChunk >= chunkCount) {
       return null;
     }
-    return { uploadId: stored.uploadId, nextChunk: stored.nextChunk };
+    return { uploadId: stored.uploadId, nextChunk: stored.nextChunk, videoId: stored.videoId };
   } catch {
     return null;
   }
 }
 
-function saveProgress(key: string, uploadId: string, nextChunk: number, chunkCount: number): void {
+function saveProgress(key: string, uploadId: string, nextChunk: number, chunkCount: number, videoId?: string): void {
   try {
-    sessionStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount } satisfies StoredProgress));
+    sessionStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount, videoId } satisfies StoredProgress));
   } catch { /* QuotaExceededError or SSR env — ignore */ }
 }
 
@@ -119,6 +119,7 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
   const key = resumeKey(file);
 
   let uploadId: string | null = null;
+  let videoId: string | null = null;
   let startChunk = 0;
 
   // Attempt to resume a prior upload session for multi-chunk uploads.
@@ -127,6 +128,7 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
     if (stored) {
       uploadId = stored.uploadId;
       startChunk = stored.nextChunk;
+      videoId = stored.videoId ?? null;
       onProgress(startChunk / chunkCount);
     }
   }
@@ -162,27 +164,23 @@ export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult>
       throw new Error(`chunk ${i} failed: ${res.status} ${text}`);
     }
 
-    if (uploadId === null) {
-      try {
-        const body = (await res.clone().json()) as { uploadId?: string };
-        if (body.uploadId) uploadId = body.uploadId;
-      } catch { /* server omits uploadId on single-chunk uploads */ }
-    }
+    try {
+      const body = (await res.clone().json()) as { uploadId?: string; videoId?: string; id?: string };
+      if (!uploadId && body.uploadId) uploadId = body.uploadId;
+      // Chunk-0 (202) carries videoId so we can show status even before the
+      // upload completes. Final chunk (201) carries it as `id`.
+      if (!videoId && body.videoId) videoId = body.videoId;
+      if (!videoId && body.id) videoId = body.id;
+    } catch { /* server omits these fields on single-chunk uploads */ }
 
-    // Persist progress after each successful chunk so a reload can resume.
+    // Persist progress (and videoId) after each successful chunk so a reload
+    // can resume without losing the ability to show encoding status.
     if (chunkCount > 1 && uploadId) {
-      saveProgress(key, uploadId, i + 1, chunkCount);
+      saveProgress(key, uploadId, i + 1, chunkCount, videoId ?? undefined);
     }
 
     onProgress((i + 1) / chunkCount);
   }
-
-  // Extract videoId from the final 201 response.
-  let videoId: string | null = null;
-  try {
-    const body = (await lastResponse!.clone().json()) as { id?: string };
-    if (body.id) videoId = body.id;
-  } catch { /* ignore */ }
 
   removeProgress(key);
   return { ok: true, uploadId, videoId, lastResponse: lastResponse! };

@@ -177,7 +177,7 @@ export function validateChunkShape(params: {
 }
 
 const chunkMetadataSchema = z.object({
-  uploadId: z.string().optional(),
+  uploadId: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/).optional(),
   chunkIndex: z.coerce.number().int().min(0).default(0),
   chunkCount: z.coerce.number().int().positive().default(1),
 });

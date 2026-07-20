@@ -120,12 +120,11 @@ describe('App shell', () => {
     expect(headings).toContain('Page not found');
   });
 
-  it('renders the Studio route without replacing the current location', async () => {
+  it('hands the Studio route to the content-hub worker', async () => {
     const replace = vi.spyOn(window.location, 'replace').mockImplementation(() => undefined);
 
     await mountAt('/studio');
 
-    expect(replace).not.toHaveBeenCalled();
-    expect(container!.querySelector('h1')?.textContent).toBe('Sign in');
+    expect(replace).toHaveBeenCalledWith('/studio');
   });
 });

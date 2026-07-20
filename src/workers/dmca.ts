@@ -6,6 +6,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { type EmailEnv, sendDmcaUploaderNotifyEmail } from './email';
+import { restrictStreamVideo, unrestrictStreamVideo } from './stream-token';
 
 // Counter-notice waiting period per 17 U.S.C. § 512(g)(2)(C). We use 14
 // business days converted to a flat 14 calendar days for cron simplicity;
@@ -18,6 +19,8 @@ export const DMCA_NOTICE_EMAIL = 'dmca@spooool.com';
 export interface DmcaEnv extends EmailEnv {
   DB: D1Database;
   CACHE: KVNamespace;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CF_STREAM_API_TOKEN?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string } | null;
@@ -191,14 +194,20 @@ dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
     return c.json({ error: 'Invalid decision', details: parsed.error.flatten() }, 400);
   }
   const claim = await c.env.DB.prepare(
-    `SELECT c.id, c.video_id, c.status, u.email AS uploader_email
+    `SELECT c.id, c.video_id, c.status, u.email AS uploader_email, v.stream_video_id
      FROM dmca_claims c
      JOIN videos v ON v.id = c.video_id
      JOIN user u ON u.id = v.user_id
      WHERE c.id = ?`,
   )
     .bind(claimId)
-    .first<{ id: string; video_id: string; status: string; uploader_email: string }>();
+    .first<{
+      id: string;
+      video_id: string;
+      status: string;
+      uploader_email: string;
+      stream_video_id: string | null;
+    }>();
   if (!claim) return c.json({ error: 'Claim not found' }, 404);
 
   const now = Date.now();
@@ -214,6 +223,17 @@ dmcaRoutes.post('/api/admin/dmca/:claimId/decision', async (c) => {
       .bind(claim.video_id)
       .run();
     await c.env.CACHE.delete(`video:v1:${claim.video_id}`);
+
+    // Propagate to Stream CDN so cached stream_video_ids stop playing
+    // immediately — without this a viewer who already loaded the page
+    // could keep watching a DMCA-disabled video until their tab refreshes.
+    if (claim.stream_video_id) {
+      await restrictStreamVideo(
+        c.env.CLOUDFLARE_ACCOUNT_ID,
+        c.env.CF_STREAM_API_TOKEN,
+        claim.stream_video_id,
+      );
+    }
 
     // LEGAL-REVIEW: email copy is a placeholder (ALO-170) — counsel must
     // approve before launch. Fail-open: a flaky EMAIL binding must not block
@@ -247,13 +267,15 @@ dmcaRoutes.get('/api/admin/dmca', async (c) => {
 export interface DmcaSweepEnv {
   DB: D1Database;
   CACHE: KVNamespace;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CF_STREAM_API_TOKEN?: string;
 }
 
 // Daily sweep: any video whose counter-notice waiting period has elapsed
 // (and has no court-order block) is auto-restored per § 512(g)(2)(C).
 export async function runDmcaRestoreSweep(env: DmcaSweepEnv, nowMs = Date.now()): Promise<string[]> {
   const due = await env.DB.prepare(
-    `SELECT v.id AS video_id, c.id AS claim_id
+    `SELECT v.id AS video_id, c.id AS claim_id, v.stream_video_id
      FROM videos v
      JOIN dmca_claims c ON c.video_id = v.id
      WHERE v.dmca_status = 'disabled'
@@ -262,7 +284,7 @@ export async function runDmcaRestoreSweep(env: DmcaSweepEnv, nowMs = Date.now())
        AND c.status = 'counter_pending'`,
   )
     .bind(nowMs)
-    .all<{ video_id: string; claim_id: string }>();
+    .all<{ video_id: string; claim_id: string; stream_video_id: string | null }>();
 
   const restored: string[] = [];
   for (const row of due.results ?? []) {
@@ -277,6 +299,17 @@ export async function runDmcaRestoreSweep(env: DmcaSweepEnv, nowMs = Date.now())
       .bind(nowMs, row.claim_id)
       .run();
     await env.CACHE.delete(`video:v1:${row.video_id}`);
+
+    // Lift the signed-URL restriction set during DMCA disable so the
+    // restored video plays without requiring a token again.
+    if (row.stream_video_id) {
+      await unrestrictStreamVideo(
+        env.CLOUDFLARE_ACCOUNT_ID,
+        env.CF_STREAM_API_TOKEN,
+        row.stream_video_id,
+      );
+    }
+
     restored.push(row.video_id);
   }
   return restored;

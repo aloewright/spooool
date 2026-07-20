@@ -15,6 +15,7 @@ type VideoResponse = {
 export function Embed(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const [video, setVideo] = useState<VideoResponse | null>(null);
+  const [streamToken, setStreamToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const playerRef = useRef<Player | null>(null);
 
@@ -46,6 +47,20 @@ export function Embed(): JSX.Element {
   const handlePlayerTeardown = useCallback((): void => {
     playerRef.current = null;
   }, []);
+
+  // ALO-E7: signed Stream token — same pattern as Watch.tsx.
+  useEffect(() => {
+    if (!id || !video?.stream_video_id || video.status !== 'ready') return;
+    let ignore = false;
+    void fetch(`/api/videos/${id}/stream-token`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error('unavailable');
+        return (await r.json()) as { token: string };
+      })
+      .then(({ token }) => { if (!ignore) setStreamToken(token); })
+      .catch(() => { if (!ignore) setStreamToken(video.stream_video_id ?? null); });
+    return () => { ignore = true; };
+  }, [id, video?.stream_video_id, video?.status]);
 
   if (error) {
     return (
@@ -88,9 +103,9 @@ export function Embed(): JSX.Element {
       }}
     >
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {video.stream_video_id && video.status === 'ready' ? (
+        {video.stream_video_id && video.status === 'ready' && streamToken ? (
           <StreamPlayer
-            videoId={video.stream_video_id}
+            videoId={streamToken}
             onReady={handlePlayerReady}
             onTeardown={handlePlayerTeardown}
           />

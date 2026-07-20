@@ -228,6 +228,7 @@ export function Watch(): JSX.Element {
   const upNextRef = useRef<UpNextVideo[]>([]);
   const autoAdvanceRef = useRef<boolean>(false);
   const [video, setVideo] = useState<VideoResponse | null>(null);
+  const [streamToken, setStreamToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [likes, setLikes] = useState<{ count: number; liked: boolean } | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
@@ -306,6 +307,27 @@ export function Watch(): JSX.Element {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [id, video?.status]);
+
+  // ALO-E7: fetch a short-lived signed token when the video uses Cloudflare
+  // Stream, so the player never sends the bare stream_video_id to the CDN.
+  // A DMCA-disabled video returns 451 here, keeping a cached UID from bypassing
+  // our takedown. Fails open (falls back to the raw ID) so a Stream API hiccup
+  // or a non-Stream deploy doesn't break playback.
+  useEffect(() => {
+    if (!id || !video?.stream_video_id || video.status !== 'ready') return;
+    let ignore = false;
+    void fetch(`/api/videos/${id}/stream-token`, { credentials: 'same-origin' })
+      .then(async (r) => {
+        if (!r.ok) throw new Error('token unavailable');
+        return (await r.json()) as { token: string };
+      })
+      .then(({ token }) => { if (!ignore) setStreamToken(token); })
+      .catch(() => {
+        // Fail open: use bare stream_video_id if token endpoint is unavailable.
+        if (!ignore) setStreamToken(video.stream_video_id ?? null);
+      });
+    return () => { ignore = true; };
+  }, [id, video?.stream_video_id, video?.status]);
 
   // ALO-145: record this watch in the signed-in user's history. Fire-and-forget;
   // failures are silent so a hiccup against /api/users/me/history can't disrupt
@@ -707,9 +729,9 @@ export function Watch(): JSX.Element {
           boxShadow: 'var(--shadow-card)',
         }}
       >
-        {video.stream_video_id && video.status === 'ready' ? (
+        {video.stream_video_id && video.status === 'ready' && streamToken ? (
           <StreamPlayer
-            videoId={video.stream_video_id}
+            videoId={streamToken}
             startTime={startAt ?? undefined}
             onReady={handlePlayerReady}
             onTeardown={handlePlayerTeardown}

@@ -12,10 +12,7 @@ workers_dev = true
 enabled = true
 # Sample successful traffic so high-QPS routes don't dominate quota.
 # Errors / non-2xx responses always log regardless of sample rate.
-# Temporarily 1.0 while we debug the prompt-to-video toolchain — the
-# create-cma stage logs were getting sampled out, making the worker look
-# silent on every poll. Dial back to ~0.2 once /create is stable.
-head_sampling_rate = 1.0
+head_sampling_rate = 0.2
 
 # Static Frontend Assets (built by Vite → dist/)
 #

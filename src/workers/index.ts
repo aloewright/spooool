@@ -23,6 +23,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { ogImageRoutes } from './og-image';
 import { embedPageRoutes } from './embed-page';
 import {
   AUTH_WRITE_BUCKET,
@@ -312,6 +313,7 @@ app.route('/', waitlistRoutes);
 // /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
 // relaxed framing headers. Both mounted last so /api/* always wins.
 app.route('/', ogMetaRoutes);
+app.route('/', ogImageRoutes);
 app.route('/', embedPageRoutes);
 
 export { ChannelSubscriberDO, RateLimiterDO };

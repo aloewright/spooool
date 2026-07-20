@@ -55,7 +55,10 @@ export function buildOgMetaTags(args: {
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // Use the dynamic OG card image (see og-image.ts) so social scrapers get a
+  // branded 1200×630 PNG with title + channel overlay rather than a bare
+  // thumbnail. The route falls back to the raw thumbnail on generation errors.
+  const image = `${origin}/api/og/${encodeURIComponent(video.id)}.png`;
 
   const escape = (v: string): string =>
     v

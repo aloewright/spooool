@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
 import ReactDOM from 'react-dom/client';
-import { act } from 'react-dom/test-utils';
 import { SocialAuthButtons } from './SocialAuthButtons';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

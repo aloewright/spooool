@@ -109,7 +109,6 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
   useEffect(() => {
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
-      event.preventDefault();
       leave();
     };
     window.addEventListener('keydown', handleEscape);
@@ -117,7 +116,7 @@ export function BrandSplash({ onDone }: { onDone: () => void }): JSX.Element {
   }, [leave]);
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Escape') {
+    if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       leave();
     }

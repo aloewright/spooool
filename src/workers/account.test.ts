@@ -344,3 +344,114 @@ describe('account delete + cancel window', () => {
     expect(args.cancelUrl).toBe('http://t/settings');
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/account/earnings
+// ---------------------------------------------------------------------------
+
+interface EarningsFakeDBOpts {
+  polarOrgId?: string | null;
+  polarStatus?: string;
+  earningsCents?: number;
+  payoutsCents?: number;
+}
+
+function earningsFakeDB(opts: EarningsFakeDBOpts = {}): D1Database {
+  const {
+    polarOrgId = null,
+    polarStatus = 'not_connected',
+    earningsCents = 0,
+    payoutsCents = 0,
+  } = opts;
+
+  const db = {
+    prepare(sql: string) {
+      const stmt = {
+        bind() { return stmt; },
+        async first() {
+          if (sql.includes('polar_organization_id') && sql.includes('polar_account_status')) {
+            return { polar_organization_id: polarOrgId, polar_account_status: polarStatus };
+          }
+          if (sql.includes('FROM creator_earnings')) {
+            return { total: earningsCents };
+          }
+          if (sql.includes('FROM creator_payouts')) {
+            return { total: payoutsCents };
+          }
+          return null;
+        },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+  } as unknown as D1Database;
+  return db;
+}
+
+function earningsApp(db: D1Database, userId: string | null) {
+  const app = new Hono<AccountCtx>();
+  app.use('*', async (c, next) => {
+    c.set('user', userId ? { id: userId, email: 'a@b.com', name: 'A' } : null);
+    await next();
+  });
+  app.route('/', accountRoutes);
+  return (path: string) =>
+    app.fetch(new Request(`http://t${path}`), { DB: db } as never);
+}
+
+describe('GET /api/account/earnings', () => {
+  it('returns 401 when not signed in', async () => {
+    const req = earningsApp(earningsFakeDB(), null);
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns zero earnings when creator has no transactions', async () => {
+    const req = earningsApp(earningsFakeDB({ polarStatus: 'active' }), 'u1');
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      grossEarningsUsd: number;
+      netPayoutsUsd: number;
+      year: number;
+      polar: { accountStatus: string; needsOnboarding: boolean };
+    };
+    expect(body.grossEarningsUsd).toBe(0);
+    expect(body.netPayoutsUsd).toBe(0);
+    expect(body.year).toBe(new Date().getUTCFullYear());
+    expect(body.polar.accountStatus).toBe('active');
+    expect(body.polar.needsOnboarding).toBe(false);
+  });
+
+  it('converts cents to dollars correctly', async () => {
+    const req = earningsApp(
+      earningsFakeDB({ polarStatus: 'active', earningsCents: 10050, payoutsCents: 9000 }),
+      'u1',
+    );
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(body.grossEarningsUsd).toBeCloseTo(100.50, 2);
+    expect(body.netPayoutsUsd).toBeCloseTo(90.00, 2);
+  });
+
+  it('reflects polar account status in the response', async () => {
+    const req = earningsApp(
+      earningsFakeDB({ polarStatus: 'pending', polarOrgId: 'org_abc' }),
+      'u1',
+    );
+    const res = await req('/api/account/earnings');
+    const body = await res.json() as {
+      polar: { accountStatus: string; organizationId: string | null; needsOnboarding: boolean };
+    };
+    expect(body.polar.accountStatus).toBe('pending');
+    expect(body.polar.organizationId).toBe('org_abc');
+    expect(body.polar.needsOnboarding).toBe(true);
+  });
+
+  it('returns taxDocStatus of polar-pending', async () => {
+    const req = earningsApp(earningsFakeDB(), 'u1');
+    const res = await req('/api/account/earnings');
+    const body = await res.json() as { taxDocStatus: string };
+    expect(body.taxDocStatus).toBe('polar-pending');
+  });
+});

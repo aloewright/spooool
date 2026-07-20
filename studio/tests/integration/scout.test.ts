@@ -2,7 +2,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 async function signUp() {
-  const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -19,7 +19,7 @@ describe("scout", () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };
 
-    const projectRes = await SELF.fetch("http://x/api/v1/projects", {
+    const projectRes = await SELF.fetch("http://localhost:5173/api/v1/projects", {
       method: "POST",
       headers,
       body: JSON.stringify({ title: "Cozy Systems", type: "nonfiction" }),
@@ -28,7 +28,7 @@ describe("scout", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const project = (await projectRes.json()) as any;
 
-    const created = await SELF.fetch("http://x/api/v1/scout/queries", {
+    const created = await SELF.fetch("http://localhost:5173/api/v1/scout/queries", {
       method: "POST",
       headers,
       body: JSON.stringify({
@@ -60,14 +60,14 @@ describe("scout", () => {
     expect(body.finding.evidence_json.validation_steps).toHaveLength(3);
     expect(body.finding.evidence_json.next_questions).toHaveLength(3);
 
-    const list = await SELF.fetch("http://x/api/v1/scout/queries", { headers });
+    const list = await SELF.fetch("http://localhost:5173/api/v1/scout/queries", { headers });
     expect(list.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const listBody = (await list.json()) as any;
     expect(listBody.items[0].query.id).toBe(body.query.id);
 
     const projectFindings = await SELF.fetch(
-      `http://x/api/v1/scout/projects/${project.id}/findings`,
+      `http://localhost:5173/api/v1/scout/projects/${project.id}/findings`,
       { headers },
     );
     expect(projectFindings.status).toBe(200);

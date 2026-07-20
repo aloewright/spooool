@@ -30,8 +30,6 @@ export type Env = Omit<CloudflareBindings, "ENV"> &
     // R2 S3-compatible settings forwarded to render containers when available.
     S3_ENDPOINT?: string;
     R2_BUCKET?: string;
-    // Auth base URL — set per environment in wrangler.jsonc vars or .dev.vars.
-    BETTER_AUTH_URL?: string;
     // Google OAuth — injected as Wrangler secrets.
     GOOGLE_CLIENT_ID?: string;
     GOOGLE_CLIENT_SECRET?: string;

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 describe("Book Cook editorial assistant DO", () => {
   it("WebSocket connects and handles the AI chat protocol", async () => {
     const id = crypto.randomUUID();
-    const res = await SELF.fetch(`http://x/agents/aloysius/${id}`, {
+    const res = await SELF.fetch(`http://localhost:5173/agents/aloysius/${id}`, {
       headers: { Upgrade: "websocket" },
     });
     expect(res.status).toBe(101);

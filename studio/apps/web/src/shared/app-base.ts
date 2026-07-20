@@ -1,10 +1,10 @@
-// The app serves from "/" on book-cook.com and from "/studio" on spooool.com
-// (zone route spooool.com/studio* — see wrangler.jsonc). These helpers keep a
-// single build working at both bases: the worker strips the prefix before
-// routing (src/index.ts), built HTML gets its root-absolute asset URLs
-// rebased on the way out, and everything inside the JS bundle resolves
-// through globalThis.__appBase (set inline in index.html, consumed by
-// vite.config.ts renderBuiltUrl and client/lib/app-base.ts).
+// The app serves from "/" in local development and from "/studio" on
+// spooool.com (zone route spooool.com/studio* — see wrangler.jsonc). These
+// helpers keep a single build working at both bases: the worker strips the
+// prefix before routing (src/index.ts), built HTML gets its root-absolute
+// asset URLs rebased on the way out, and everything inside the JS bundle
+// resolves through globalThis.__appBase (set inline in index.html, consumed
+// by vite.config.ts renderBuiltUrl and client/lib/app-base.ts).
 export const APP_BASE_PREFIX = "/studio";
 
 export function detectAppBase(pathname: string): "" | typeof APP_BASE_PREFIX {

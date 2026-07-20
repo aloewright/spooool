@@ -4,19 +4,45 @@ import { drizzle } from "drizzle-orm/d1";
 import * as schema from "./db/schema";
 import type { Env } from "./env";
 
-// Derives the auth mount from the prefix marker set by stripAppBasePrefix
-// (src/index.ts). Every createAuth caller must pass this so cookie names and
-// paths agree across handlers.
-export function authBaseFromRequest(req: Request): { origin: string; prefix: string } | undefined {
-  const prefix = req.headers.get("x-app-base");
-  if (!prefix) return undefined;
-  return { origin: new URL(req.url).origin, prefix };
+export type AuthBase = { origin: string; prefix: string };
+
+const STATIC_AUTH_ORIGINS = [
+  "https://spooool.com",
+  "https://www.spooool.com",
+  "https://bookgenerators.com",
+] as const;
+const LOCAL_AUTH_ORIGINS = Array.from({ length: 20 }, (_, i) => `http://localhost:${5173 + i}`);
+const EDITOR_WORKER_HOST = "editor.lazee.workers.dev";
+const EDITOR_PREVIEW_HOST_SUFFIX = `-${EDITOR_WORKER_HOST}`;
+
+function isTrustedRequestOrigin(url: URL): boolean {
+  if ((STATIC_AUTH_ORIGINS as readonly string[]).includes(url.origin)) return true;
+  if (LOCAL_AUTH_ORIGINS.includes(url.origin)) return true;
+  return (
+    url.protocol === "https:" &&
+    url.port === "" &&
+    (url.hostname === EDITOR_WORKER_HOST || url.hostname.endsWith(EDITOR_PREVIEW_HOST_SUFFIX))
+  );
 }
 
-// authBase override: the worker passes the request's origin + base prefix
-// when the app is served via spooool.com/studio, so OAuth redirect URIs and
-// callback links stay on the origin (and path prefix) the user is on.
-export function createAuth(env: Env, authBase?: { origin: string; prefix: string }) {
+// Derives the auth origin and mount from the request after stripAppBasePrefix
+// has sanitized the prefix marker. An empty prefix is the local/direct Worker
+// root mount; every caller passes this so redirects and cookies stay on the
+// host that received the request.
+export function authBaseFromRequest(req: Request): AuthBase {
+  const url = new URL(req.url);
+  if (!isTrustedRequestOrigin(url)) {
+    const error = new Error(`Auth is not available on ${url.origin}`);
+    error.name = "Forbidden";
+    throw error;
+  }
+  return {
+    origin: url.origin,
+    prefix: req.headers.get("x-app-base") ?? "",
+  };
+}
+
+export function createAuth(env: Env, authBase: AuthBase) {
   const db = drizzle(env.DB, { schema });
   return betterAuth({
     database: drizzleAdapter(db, {
@@ -35,37 +61,28 @@ export function createAuth(env: Env, authBase?: { origin: string; prefix: string
       delete: async (key) => env.KV.delete(key),
     },
     secret: env.BETTER_AUTH_SECRET,
-    baseURL:
-      authBase?.origin ??
-      (env as { BETTER_AUTH_URL?: string }).BETTER_AUTH_URL ??
-      (env.ENV === "prod" ? "https://bookgenerators.com" : "http://localhost:5173"),
-    basePath: authBase ? `${authBase.prefix}/api/auth` : "/api/auth",
+    baseURL: authBase.origin,
+    basePath: `${authBase.prefix}/api/auth`,
     // On the /studio mount the host (spooool.com) runs its own Better Auth
     // with the default cookie names at Path=/. Prefix and path-scope our
     // cookies there so the two apps' sessions can't collide or leak into
     // each other's routes.
-    advanced: authBase
+    advanced: authBase.prefix
       ? {
           cookiePrefix: "book-cook",
           defaultCookieAttributes: { path: authBase.prefix },
         }
       : undefined,
     trustedOrigins: [
-      "https://book-cook.com",
-      "https://www.book-cook.com",
       // The spooool.com/studio vanity route lands here; trust its origin so
       // auth requests initiated from that entry point pass the CSRF check.
-      "https://spooool.com",
-      "https://www.spooool.com",
-      "https://bookgenerators.com",
-      "https://bookgenerators-web.lazee.workers.dev",
-      ...Array.from({ length: 20 }, (_, i) => `http://localhost:${5173 + i}`),
+      ...STATIC_AUTH_ORIGINS,
+      ...LOCAL_AUTH_ORIGINS,
     ],
     emailAndPassword: { enabled: true, autoSignIn: true },
     socialProviders: {
-      // Each serving origin needs its callback registered on the Google
-      // OAuth client: https://book-cook.com/api/auth/callback/google and
-      // https://spooool.com/studio/api/auth/callback/google.
+      // Register https://spooool.com/studio/api/auth/callback/google on the
+      // Google OAuth client.
       google: {
         clientId: (env as { GOOGLE_CLIENT_ID?: string }).GOOGLE_CLIENT_ID ?? "",
         clientSecret: (env as { GOOGLE_CLIENT_SECRET?: string }).GOOGLE_CLIENT_SECRET ?? "",

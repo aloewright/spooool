@@ -67,6 +67,20 @@ describe("spooool.com/studio base path", () => {
     expect(projects.status).toBe(200);
   });
 
+  it("rejects auth redirects to the retired Book Cook origin", async () => {
+    const res = await SELF.fetch("https://spooool.com/studio/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: "retired-origin@x.test",
+        password: "correct-horse-battery-staple",
+        callbackURL: "https://book-cook.com/studio",
+      }),
+    });
+
+    expect(res.status).toBe(403);
+  });
+
   it("keeps auth error redirects on the prefix", async () => {
     const res = await SELF.fetch("https://spooool.com/studio/api/auth/error?error=test_error", {
       redirect: "manual",
@@ -76,12 +90,58 @@ describe("spooool.com/studio base path", () => {
   });
 
   it("ignores a client-supplied base marker on unprefixed requests", async () => {
-    const res = await SELF.fetch("https://book-cook.com/api/auth/error?error=spoofed", {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/auth/error?error=spoofed", {
       headers: { "x-app-base": "/studio" },
       redirect: "manual",
     });
     expect([301, 302]).toContain(res.status);
     expect(res.headers.get("location")).toBe("/sign-in?error=spoofed");
+  });
+
+  it("keeps unprefixed OAuth callbacks on the request host", async () => {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/auth/sign-in/social", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://editor.lazee.workers.dev",
+      },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    const providerURL = new URL(body.url);
+    expect(providerURL.searchParams.get("redirect_uri")).toBe(
+      "https://editor.lazee.workers.dev/api/auth/callback/google",
+    );
+  });
+
+  it("supports version preview hosts for the editor Worker", async () => {
+    const origin = "https://abc123-editor.lazee.workers.dev";
+    const res = await SELF.fetch(`${origin}/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { url: string };
+    expect(new URL(body.url).searchParams.get("redirect_uri")).toBe(
+      `${origin}/api/auth/callback/google`,
+    );
+  });
+
+  it("rejects auth requests on untrusted hosts", async () => {
+    const res = await SELF.fetch("https://book-cook.com/api/auth/sign-in/social", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://book-cook.com",
+      },
+      body: JSON.stringify({ provider: "google", callbackURL: "/" }),
+    });
+
+    expect(res.status).toBe(403);
   });
 });
 
@@ -125,7 +185,7 @@ describe("shared spooool.com session", () => {
 
   it("rejects spooool sessions off the /studio mount", async () => {
     const { cookie } = await seedSpoooolSession();
-    const res = await SELF.fetch("https://book-cook.com/api/v1/projects", {
+    const res = await SELF.fetch("https://editor.lazee.workers.dev/api/v1/projects", {
       headers: { cookie },
     });
     expect(res.status).toBe(401);

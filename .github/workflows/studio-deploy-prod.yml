@@ -1,7 +1,7 @@
 name: Studio · Deploy production
 
-# Deploys the `editor` worker (the content hub at spooool.com/studio, also
-# serving book-cook.com during deprecation) from studio/. Mirrors
+# Deploys the `editor` worker (the content hub at spooool.com/studio) from
+# studio/. Mirrors
 # deploy-prod.yml: manual dispatch, Doppler-sourced Cloudflare credentials.
 # Existing worker secrets (BETTER_AUTH_SECRET, GOOGLE_CLIENT_SECRET, …) carry
 # across deploys; this workflow does not manage them.

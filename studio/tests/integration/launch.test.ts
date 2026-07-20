@@ -2,7 +2,7 @@ import { SELF, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 
 async function signUp() {
-  const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -19,7 +19,7 @@ describe("launch handoff", () => {
     const cookie = await signUp();
     const headers = { "Content-Type": "application/json", cookie };
 
-    const projectRes = await SELF.fetch("http://x/api/v1/projects", {
+    const projectRes = await SELF.fetch("http://localhost:5173/api/v1/projects", {
       method: "POST",
       headers,
       body: JSON.stringify({ title: "Quiet Operator", type: "nonfiction" }),
@@ -27,10 +27,13 @@ describe("launch handoff", () => {
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const project = (await projectRes.json()) as any;
 
-    const blocked = await SELF.fetch(`http://x/api/v1/projects/${project.id}/launch/brief`, {
-      method: "POST",
-      headers,
-    });
+    const blocked = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/launch/brief`,
+      {
+        method: "POST",
+        headers,
+      },
+    );
     expect(blocked.status).toBe(409);
 
     await env.R2.put(`launch/${project.id}/brief.zip`, new Uint8Array([80, 75, 3, 4]), {
@@ -59,9 +62,12 @@ describe("launch handoff", () => {
       )
       .run();
 
-    const latest = await SELF.fetch(`http://x/api/v1/projects/${project.id}/launch/brief`, {
-      headers,
-    });
+    const latest = await SELF.fetch(
+      `http://localhost:5173/api/v1/projects/${project.id}/launch/brief`,
+      {
+        headers,
+      },
+    );
     expect(latest.status).toBe(200);
     // biome-ignore lint/suspicious/noExplicitAny: response shape from our own API
     const latestBody = (await latest.json()) as any;
@@ -69,7 +75,7 @@ describe("launch handoff", () => {
     expect(latestBody.brief.download_url).toContain("/launch/brief/download");
 
     const download = await SELF.fetch(
-      `http://x/api/v1/projects/${project.id}/launch/brief/download`,
+      `http://localhost:5173/api/v1/projects/${project.id}/launch/brief/download`,
       { headers },
     );
     expect(download.status).toBe(200);

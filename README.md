@@ -60,6 +60,25 @@ For cost-conscious deployment:
 - Serve pre-encoded video tiers from R2
 - **Est. Cost**: $0.015-0.05/GB/month (no transcoding fees)
 
+### Remote MCP
+
+The Worker exposes a Streamable HTTP MCP server at `https://spooool.com/mcp`.
+It provides owner-scoped, read-only tools for account totals, private video
+metadata, public video search, and generated Studio assets. Configure both
+values as Doppler-synced Worker secrets:
+
+- `MCP_SERVER_TOKEN` — a dedicated random bearer credential shared only with
+  trusted MCP clients.
+- `MCP_OWNER_EMAIL` — the Spooool account whose private data the credential can
+  read. The Worker resolves this to an internal user ID before every MCP
+  request; tool callers cannot supply or override the owner.
+
+Browser-origin requests are limited to `https://alex.chat` and
+`https://spooool.com` by default. Set the optional comma-separated
+`MCP_ALLOWED_ORIGINS` secret to replace that list. Server-to-server clients may
+omit `Origin`, but all non-preflight requests require
+`Authorization: Bearer <MCP_SERVER_TOKEN>`.
+
 ## Features
 
 ### MVP Features

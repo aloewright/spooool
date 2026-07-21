@@ -31,6 +31,7 @@ not_found_handling = "single-page-application"
 # them here the SPA fallback would shadow them with index.html.
 run_worker_first = [
   "/api/*",
+  "/mcp",
   "/robots.txt",
   "/sitemap.xml",
   "/sitemap-static.xml",
@@ -275,6 +276,9 @@ migrations_dir = "src/db/migrations"
 # CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL)
 # CF_GATEWAY_ID           (e.g. "x"; the gateway slug used in CLAUDE.md)
 # CF_AIG_TOKEN            (Bearer token from CF dashboard → AI → AI Gateway)
+# MCP_SERVER_TOKEN        (dedicated bearer credential for the /mcp endpoint)
+# MCP_OWNER_EMAIL         (Spooool account whose data /mcp may read)
+# MCP_ALLOWED_ORIGINS     (optional comma-separated browser origin override)
 #
 # Transactional email is sent via the Cloudflare `send_email` binding above
 # (no API key needed). One-time setup: `npx wrangler email sending enable

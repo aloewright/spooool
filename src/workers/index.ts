@@ -59,6 +59,7 @@ import { videoRoutes, type VideoRoutesEnv } from './videos';
 import { watchHistoryRoutes } from './watch-history';
 import { payoutsRoutes, type PayoutsEnv } from './payouts';
 import { monetizeRoutes, type MonetizeEnv } from './monetize';
+import { handleSpoooolMcpRequest, type SpoooolMcpEnv } from './mcp';
 import * as Sentry from '@sentry/cloudflare';
 
 type SessionUser = {
@@ -68,7 +69,7 @@ type SessionUser = {
   emailVerified: boolean;
 };
 
-type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & {
+type EnvBindings = AuthEnv & VideoRoutesEnv & RenderEnv & CreateEnv & StudioEnv & StudioAnimationEnv & StreamUploadEnv & FeedsEnv & PayoutsEnv & MonetizeEnv & WaitlistEnv & TurnstileEnv & SpoooolMcpEnv & {
   ENCODE_CONTAINER: DurableObjectNamespace;
   RATE_LIMITER?: DurableObjectNamespace;
   CF_STREAM_WEBHOOK_SECRET?: string;
@@ -123,6 +124,11 @@ app.use('*', async (c, next) => {
 
 app.use('*', securityHeaders());
 app.use('*', cors({ origin: (origin) => origin, credentials: true }));
+
+// Streamable HTTP MCP endpoint for the trusted agent.fly.pm service. It has
+// dedicated bearer auth and owner scoping; it intentionally sits outside the
+// browser-session CSRF and Better Auth middleware below.
+app.all('/mcp', (c) => handleSpoooolMcpRequest(c.req.raw, c.env));
 
 app.use('/api/*', async (c, next) => {
   const allowedOrigins = parseAllowedOrigins(c.env.ALLOWED_ORIGINS);

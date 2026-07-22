@@ -14,6 +14,8 @@ export default defineConfig(async () => {
             TEST_MIGRATIONS: migrations,
             KEYRING_MASTER_KEY: "test-keyring-master-key",
             GOOGLE_CLIENT_SECRET: "test-google-client-secret",
+            AI_GATEWAY_BASE_URL: "",
+            AI_GATEWAY_TOKEN: "",
           },
         },
       }),
@@ -21,6 +23,9 @@ export default defineConfig(async () => {
     test: {
       include: ["../../tests/integration/**/*.test.ts"],
       setupFiles: ["../../tests/integration/setup.ts"],
+      // Worker startup and D1 migrations can push request-heavy cases past
+      // Vitest's 5s default when the integration files run in parallel.
+      testTimeout: 15_000,
     },
   };
 });

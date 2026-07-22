@@ -1,3 +1,4 @@
+import type { EditorAiRequest, EditorAiRevision } from "@/shared/editor-ai";
 import { QueryClient } from "@tanstack/react-query";
 import { withBase } from "./app-base";
 
@@ -7,11 +8,22 @@ export const queryClient = new QueryClient({
 
 let redirectingToSignIn = false;
 
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly body: unknown,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(withBase(path), {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
     ...init,
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
   if (res.status === 401) {
     if (
@@ -26,9 +38,11 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(
-      `${res.status}: ${(body as { error?: { message?: string } }).error?.message ?? res.statusText}`,
-    );
+    const message =
+      typeof (body as { error?: unknown }).error === "string"
+        ? (body as { error: string }).error
+        : ((body as { error?: { message?: string } }).error?.message ?? res.statusText);
+    throw new ApiError(res.status, body, `${res.status}: ${message}`);
   }
   return res.json() as Promise<T>;
 }
@@ -103,6 +117,9 @@ export type BlogPost = {
   summary: string;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   status: "planned" | "drafting" | "drafted" | "published";
   emdash_post_id?: string | null;
   published_at?: number | null;
@@ -134,6 +151,9 @@ export type ScriptScene = {
   summary: string;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   status: "planned" | "drafting" | "drafted";
   created_at: number;
   updated_at: number;
@@ -200,6 +220,9 @@ export type Chapter = {
   target_words: number;
   draft_json?: unknown;
   draft_md: string;
+  draft_version: number;
+  draft_session_id?: string | null;
+  draft_sequence: number;
   created_at: number;
   updated_at: number;
 };
@@ -432,6 +455,18 @@ export type GtmBrief = {
 };
 
 export const api = {
+  runEditorAiCommand: (
+    input: EditorAiRequest,
+    options?: { signal?: AbortSignal; idempotencyKey?: string },
+  ) =>
+    fetchJson<{ revision: EditorAiRevision }>("/api/v1/editor/ai", {
+      method: "POST",
+      headers: {
+        "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+      },
+      body: JSON.stringify(input),
+      signal: options?.signal,
+    }),
   listProjects: () => fetchJson<{ items: Project[] }>("/api/v1/projects"),
   listDeletedProjects: () =>
     fetchJson<{ items: Project[]; retention_days: number }>("/api/v1/projects/deleted/recent"),
@@ -542,11 +577,14 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: BlogPost["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/blogs/${id}/posts/${postId}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/blogs/${id}/posts/${postId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,
@@ -590,11 +628,14 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: ScriptScene["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/scripts/${id}/scenes/${sceneId}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/scripts/${id}/scenes/${sceneId}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,
@@ -712,9 +753,13 @@ export const api = {
       text: string;
       context_md?: string;
     },
+    options?: { idempotencyKey?: string },
   ) =>
     fetchJson<{ revision: Revision }>(`/api/v1/chapters/${id}/revise`, {
       method: "POST",
+      headers: {
+        "Idempotency-Key": options?.idempotencyKey ?? crypto.randomUUID(),
+      },
       body: JSON.stringify(input),
     }),
   updateChapter: (
@@ -724,11 +769,14 @@ export const api = {
       summary?: string;
       draft_json?: unknown;
       draft_md?: string;
+      draft_version?: number;
+      draft_session_id?: string;
+      draft_sequence?: number;
       status?: Chapter["status"];
     },
     options?: { signal?: AbortSignal },
   ) =>
-    fetchJson<{ ok: true }>(`/api/v1/chapters/${id}`, {
+    fetchJson<{ ok: true; draft_version: number }>(`/api/v1/chapters/${id}`, {
       method: "PATCH",
       body: JSON.stringify(input),
       signal: options?.signal,

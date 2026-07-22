@@ -15,6 +15,12 @@ import {
   queryKeys,
 } from "../../lib/api";
 import { useDarkMode } from "../../lib/use-theme-mode";
+import { BlockNoteAiCommands } from "../editor-ai/blocknote-ai-commands";
+import {
+  DraftConflictError,
+  DraftConflictNotice,
+  getDraftConflictError,
+} from "../editor-ai/draft-conflict";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
@@ -22,9 +28,13 @@ import { Textarea } from "../ui/textarea";
 export default function ChapterEditorPanel({
   projectId,
   chapterId,
+  embedded = false,
+  theme,
 }: {
   projectId: string;
   chapterId: string;
+  embedded?: boolean;
+  theme?: "dark" | "light";
 }) {
   const chapter = useQuery({
     queryKey: queryKeys.chapter(chapterId),
@@ -37,6 +47,22 @@ export default function ChapterEditorPanel({
 
   if (chapter.isLoading || !chapter.data) {
     return <p className="px-6 py-12 text-muted-foreground">Loading chapter...</p>;
+  }
+
+  const chapterEditor = (
+    <ChapterEditor
+      chapter={chapter.data}
+      sections={sections.data?.items ?? []}
+      blockNoteTheme={theme}
+    />
+  );
+
+  if (embedded) {
+    return (
+      <div className={`mx-auto w-full max-w-4xl px-2 py-2 ${theme === "dark" ? "dark" : ""}`}>
+        {chapterEditor}
+      </div>
+    );
   }
 
   return (
@@ -67,8 +93,7 @@ export default function ChapterEditorPanel({
             <ChapterStats chapter={chapter.data} />
           </div>
         </div>
-
-        <ChapterEditor chapter={chapter.data} sections={sections.data?.items ?? []} />
+        {chapterEditor}
       </div>
     </main>
   );
@@ -86,11 +111,34 @@ function ChapterStats({ chapter }: { chapter: Chapter }) {
   );
 }
 
-function ChapterEditor({ chapter, sections }: { chapter: Chapter; sections: Section[] }) {
-  return <ChapterEditorInner key={chapter.id} chapter={chapter} sections={sections} />;
+function ChapterEditor({
+  chapter,
+  sections,
+  blockNoteTheme,
+}: {
+  chapter: Chapter;
+  sections: Section[];
+  blockNoteTheme?: "dark" | "light";
+}) {
+  return (
+    <ChapterEditorInner
+      key={chapter.id}
+      chapter={chapter}
+      sections={sections}
+      blockNoteTheme={blockNoteTheme}
+    />
+  );
 }
 
-function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections: Section[] }) {
+function ChapterEditorInner({
+  chapter,
+  sections,
+  blockNoteTheme,
+}: {
+  chapter: Chapter;
+  sections: Section[];
+  blockNoteTheme?: "dark" | "light";
+}) {
   const queryClient = useQueryClient();
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lastSavedWords, setLastSavedWords] = useState(wordCount(chapter.draft_md));
@@ -105,6 +153,11 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   } | null>(null);
   const [redraftInstructions, setRedraftInstructions] = useState<Record<string, string>>({});
   const pendingSave = useRef<number | undefined>(undefined);
+  const draftVersion = useRef(chapter.draft_version);
+  const draftSequence = useRef(0);
+  const [draftSessionId] = useState(() => crypto.randomUUID());
+  const draftConflict = useRef(false);
+  const [hasDraftConflict, setHasDraftConflict] = useState(false);
   // Tracks the in-flight autosave so a newer save can abort an older one
   // before it lands — without this an earlier (slow) request could resolve
   // last and clobber the editor's latest content on the server.
@@ -114,8 +167,21 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
     initialContent: initialContent(chapter),
   });
 
+  function enterDraftConflict() {
+    draftConflict.current = true;
+    editor.isEditable = false;
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    setSaveState("error");
+    setSelectedText("");
+    setHasDraftConflict(true);
+  }
+
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (draftConflict.current) throw new DraftConflictError();
       // Supersede any save still in flight so out-of-order responses can't
       // overwrite newer content.
       inFlightSave.current?.abort();
@@ -124,19 +190,35 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
       const draftJson = editor.document;
       const draftMd = await editor.blocksToMarkdownLossy(editor.document);
       const words = wordCount(draftMd);
-      await api.updateChapter(
-        chapter.id,
-        {
-          draft_json: draftJson,
-          draft_md: draftMd,
-          status: words > 0 ? "drafting" : "pending",
-        },
-        { signal: controller.signal },
-      );
-      return words;
+      const expectedDraftVersion = draftVersion.current;
+      const sequence = ++draftSequence.current;
+      try {
+        const response = await api.updateChapter(
+          chapter.id,
+          {
+            draft_json: draftJson,
+            draft_md: draftMd,
+            draft_version: expectedDraftVersion,
+            draft_session_id: draftSessionId,
+            draft_sequence: sequence,
+            status: words > 0 ? "drafting" : "pending",
+          },
+          { signal: controller.signal },
+        );
+        return { draftVersion: response.draft_version, sequence, words };
+      } catch (error) {
+        const conflictError = getDraftConflictError(error);
+        if (conflictError) {
+          enterDraftConflict();
+          throw conflictError;
+        }
+        throw error;
+      }
     },
     onMutate: () => setSaveState("saving"),
-    onSuccess: async (words) => {
+    onSuccess: async ({ draftVersion: savedDraftVersion, sequence, words }) => {
+      draftVersion.current = Math.max(draftVersion.current, savedDraftVersion);
+      if (sequence !== draftSequence.current) return;
       setLastSavedWords(words);
       setSaveState("saved");
       await queryClient.invalidateQueries({ queryKey: queryKeys.chapter(chapter.id) });
@@ -177,16 +259,21 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   const inlineEditMutation = useMutation({
     mutationFn: async (input: {
       action: InlineEditAction;
+      idempotencyKey: string;
       tone?: InlineEditTone;
       text: string;
     }) => {
       const contextMd = await editor.blocksToMarkdownLossy(editor.document);
-      return api.reviseChapterSelection(chapter.id, {
-        action: input.action,
-        tone: input.tone,
-        text: input.text,
-        context_md: contextMd,
-      });
+      return api.reviseChapterSelection(
+        chapter.id,
+        {
+          action: input.action,
+          tone: input.tone,
+          text: input.text,
+          context_md: contextMd,
+        },
+        { idempotencyKey: input.idempotencyKey },
+      );
     },
     onSuccess: async (data, variables) => {
       setInlineReview({
@@ -198,6 +285,7 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
     },
   });
   const darkMode = useDarkMode();
+  const resolvedBlockNoteTheme = blockNoteTheme ?? (darkMode ? "dark" : "light");
 
   useEffect(() => {
     return () => {
@@ -227,13 +315,29 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   }, []);
 
   const statusText = useMemo(() => {
+    if (hasDraftConflict || saveState === "error") return "Save failed";
     if (saveState === "saving") return "Saving...";
     if (saveState === "saved") return "Saved";
-    if (saveState === "error") return "Save failed";
     return "Ready";
-  }, [saveState]);
+  }, [hasDraftConflict, saveState]);
+
+  async function saveNow() {
+    if (draftConflict.current) throw new DraftConflictError();
+    if (pendingSave.current) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = undefined;
+    }
+    return saveMutation.mutateAsync();
+  }
+
+  function scheduleExistingChapterSave() {
+    if (draftConflict.current) return;
+    if (pendingSave.current) window.clearTimeout(pendingSave.current);
+    pendingSave.current = window.setTimeout(() => saveMutation.mutate(), 1000);
+  }
 
   async function acceptSection(section: Section) {
+    if (draftConflict.current) return;
     const markdown = review?.sectionId === section.id ? review.after : section.draft_md;
     if (!markdown.trim()) return;
 
@@ -251,6 +355,7 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   }
 
   async function rejectSection(section: Section) {
+    if (draftConflict.current) return;
     await updateSectionMutation.mutateAsync({
       sectionId: section.id,
       input: { status: "pending", draft_md: "" },
@@ -259,13 +364,20 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
   }
 
   async function runInlineEdit(action: InlineEditAction, tone?: InlineEditTone) {
+    if (draftConflict.current) return;
     const text = getSelectedText(editorRoot.current) || selectedText;
     if (!text.trim()) return;
     setSelectedText(text);
-    await inlineEditMutation.mutateAsync({ action, tone, text });
+    await inlineEditMutation.mutateAsync({
+      action,
+      idempotencyKey: crypto.randomUUID(),
+      tone,
+      text,
+    });
   }
 
   async function acceptInlineEdit() {
+    if (draftConflict.current) return;
     if (!inlineReview?.after.trim()) return;
     editor.insertInlineContent(inlineReview.after, { updateSelection: true });
     setSelectedText(inlineReview.after);
@@ -275,11 +387,14 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
 
   return (
     <div className="space-y-4">
+      {hasDraftConflict ? <DraftConflictNotice onReload={() => window.location.reload()} /> : null}
+
       <SectionDraftPanel
         sections={sections}
         activeSectionId={draftMutation.variables?.sectionId}
         redraftInstructions={redraftInstructions}
         review={review}
+        disabled={hasDraftConflict}
         isDrafting={draftMutation.isPending}
         isUpdating={updateSectionMutation.isPending || saveMutation.isPending}
         onInstructionChange={(sectionId, value) =>
@@ -302,13 +417,20 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
             <span aria-hidden>·</span>
             <span>{lastSavedWords.toLocaleString()} saved words</span>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={() => saveMutation.mutate()}>
-            Save now
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={hasDraftConflict}
+            onClick={() => void saveNow()}
+          >
+            {saveState === "error" && !hasDraftConflict ? "Retry save" : "Save now"}
           </Button>
         </div>
         <InlineAiPanel
           selectedText={selectedText}
           review={inlineReview}
+          disabled={hasDraftConflict}
           isLoading={inlineEditMutation.isPending || saveMutation.isPending}
           onRun={runInlineEdit}
           onAccept={acceptInlineEdit}
@@ -317,13 +439,21 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
         <div className="min-h-[560px] px-4 py-5" data-testid="chapter-editor">
           <div ref={editorRoot}>
             <BlockNoteView
+              editable={!hasDraftConflict}
               editor={editor}
-              theme={darkMode ? "dark" : "light"}
-              onChange={() => {
-                if (pendingSave.current) window.clearTimeout(pendingSave.current);
-                pendingSave.current = window.setTimeout(() => saveMutation.mutate(), 1000);
-              }}
-            />
+              formattingToolbar={false}
+              slashMenu={false}
+              theme={resolvedBlockNoteTheme}
+              onChange={scheduleExistingChapterSave}
+            >
+              <BlockNoteAiCommands
+                disabled={hasDraftConflict}
+                editor={editor}
+                resourceId={chapter.id}
+                resourceKind="chapter"
+                saveNow={saveNow}
+              />
+            </BlockNoteView>
           </div>
         </div>
       </section>
@@ -334,6 +464,7 @@ function ChapterEditorInner({ chapter, sections }: { chapter: Chapter; sections:
 function InlineAiPanel({
   selectedText,
   review,
+  disabled,
   isLoading,
   onRun,
   onAccept,
@@ -341,6 +472,7 @@ function InlineAiPanel({
 }: {
   selectedText: string;
   review: { before: string; after: string; action: InlineEditAction } | null;
+  disabled: boolean;
   isLoading: boolean;
   onRun: (action: InlineEditAction, tone?: InlineEditTone) => void;
   onAccept: () => void;
@@ -357,7 +489,7 @@ function InlineAiPanel({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={!hasSelection || isLoading}
+          disabled={disabled || !hasSelection || isLoading}
           onMouseDown={preventSelectionLoss}
           onClick={() => onRun("rewrite")}
         >
@@ -368,7 +500,7 @@ function InlineAiPanel({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={!hasSelection || isLoading}
+          disabled={disabled || !hasSelection || isLoading}
           onMouseDown={preventSelectionLoss}
           onClick={() => onRun("tighten")}
         >
@@ -379,7 +511,7 @@ function InlineAiPanel({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={!hasSelection || isLoading}
+          disabled={disabled || !hasSelection || isLoading}
           onMouseDown={preventSelectionLoss}
           onClick={() => onRun("expand")}
         >
@@ -389,7 +521,7 @@ function InlineAiPanel({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={!hasSelection || isLoading}
+          disabled={disabled || !hasSelection || isLoading}
           onMouseDown={preventSelectionLoss}
           onClick={() => onRun("change-tone", "punchy")}
         >
@@ -399,7 +531,7 @@ function InlineAiPanel({
           type="button"
           size="sm"
           variant="secondary"
-          disabled={!hasSelection || isLoading}
+          disabled={disabled || !hasSelection || isLoading}
           onMouseDown={preventSelectionLoss}
           onClick={() => onRun("fix-grammar")}
         >
@@ -419,7 +551,7 @@ function InlineAiPanel({
             <Button
               type="button"
               size="sm"
-              disabled={isLoading}
+              disabled={disabled || isLoading}
               onMouseDown={preventSelectionLoss}
               onClick={onAccept}
             >
@@ -430,7 +562,7 @@ function InlineAiPanel({
               type="button"
               size="sm"
               variant="outline"
-              disabled={isLoading}
+              disabled={disabled || isLoading}
               onMouseDown={preventSelectionLoss}
               onClick={onReject}
             >
@@ -449,6 +581,7 @@ function SectionDraftPanel({
   activeSectionId,
   redraftInstructions,
   review,
+  disabled,
   isDrafting,
   isUpdating,
   onInstructionChange,
@@ -460,6 +593,7 @@ function SectionDraftPanel({
   activeSectionId?: string;
   redraftInstructions: Record<string, string>;
   review: { sectionId: string; before: string; after: string } | null;
+  disabled: boolean;
   isDrafting: boolean;
   isUpdating: boolean;
   onInstructionChange: (sectionId: string, value: string) => void;
@@ -478,7 +612,7 @@ function SectionDraftPanel({
         {sections.map((section) => {
           const activeReview = review?.sectionId === section.id ? review : null;
           const generated = activeReview?.after ?? section.draft_md;
-          const busy = (isDrafting && activeSectionId === section.id) || isUpdating;
+          const busy = disabled || (isDrafting && activeSectionId === section.id) || isUpdating;
           return (
             <div key={section.id} className="space-y-3 px-4 py-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -571,7 +705,9 @@ function DiffPreview({ before, after }: { before: string; after: string }) {
 }
 
 function initialContent(chapter: Chapter) {
-  if (Array.isArray(chapter.draft_json)) return chapter.draft_json;
+  if (Array.isArray(chapter.draft_json) && looksLikeBlocks(chapter.draft_json)) {
+    return chapter.draft_json;
+  }
   if (chapter.draft_md.trim()) {
     return [
       {
@@ -591,6 +727,22 @@ function initialContent(chapter: Chapter) {
       content: "",
     },
   ];
+}
+
+// Only trust persisted draft_json if it looks like a BlockNote document, so a
+// bad payload can never keep the editor from opening (markdown is the
+// fallback).
+function looksLikeBlocks(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every(
+      (block) =>
+        typeof block === "object" &&
+        block !== null &&
+        typeof (block as { type?: unknown }).type === "string",
+    )
+  );
 }
 
 function wordCount(text: string) {

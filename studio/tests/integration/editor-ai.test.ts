@@ -97,7 +97,7 @@ const payload = (resource_kind: ResourceKind, resource_id: string) => ({
 async function signUp(plan: "free" | "pro" = "pro") {
   const email = `editor-ai-${crypto.randomUUID()}@x.test`;
   const password = "correct-horse-battery-staple";
-  const response = await SELF.fetch("http://x/api/auth/sign-up/email", {
+  const response = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -119,7 +119,7 @@ async function signUp(plan: "free" | "pro" = "pro") {
   // Create a fresh session after the server-side plan assignment so the
   // authenticated user reflects the persisted plan without trusting sign-up
   // input for privileged fields.
-  const signIn = await SELF.fetch("http://x/api/auth/sign-in/email", {
+  const signIn = await SELF.fetch("http://localhost:5173/api/auth/sign-in/email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
@@ -215,7 +215,7 @@ async function requestEditorAi(cookie: string, body: unknown, headers: HeadersIn
 }
 
 async function requestEditorAiRaw(cookie: string, body: BodyInit, headers: HeadersInit = {}) {
-  return SELF.fetch("http://x/api/v1/editor/ai", {
+  return SELF.fetch("http://localhost:5173/api/v1/editor/ai", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -236,7 +236,7 @@ async function requestInlineRevision(
   },
   headers: HeadersInit = {},
 ) {
-  return SELF.fetch(`http://x/api/v1/chapters/${fixture.resourceIds.chapter}/revise`, {
+  return SELF.fetch(`http://localhost:5173/api/v1/chapters/${fixture.resourceIds.chapter}/revise`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -275,7 +275,7 @@ async function requestDraftPatch(
   resourceKind: ResourceKind,
   body: Record<string, unknown>,
 ) {
-  return SELF.fetch(`http://x${draftPath(fixture, resourceKind)}`, {
+  return SELF.fetch(`http://localhost:5173${draftPath(fixture, resourceKind)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json", cookie: fixture.cookie },
     body: JSON.stringify(body),

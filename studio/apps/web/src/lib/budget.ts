@@ -196,7 +196,7 @@ export async function reserveAiBudgetRequest(
   const retried = await db
     .prepare(
       `UPDATE ai_budget_requests
-      SET route = ?, reserved_cents = ?, actual_cents = NULL, status = 'pending',
+      SET route = ?, usage_date = ?, reserved_cents = ?, actual_cents = NULL, status = 'pending',
           revision_id = NULL, response_json = NULL, updated_at = ?, expires_at = ?
       WHERE request_id = ?
         AND user_id = ?
@@ -220,6 +220,7 @@ export async function reserveAiBudgetRequest(
     )
     .bind(
       input.route,
+      usageDate,
       input.reservedCents,
       now,
       expiresAt,

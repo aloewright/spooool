@@ -460,7 +460,11 @@ export function BlockNoteAiCommands({
     }
 
     lockEditor();
-    void runRequest(current.run);
+    void runRequest(
+      current.stage === "review"
+        ? { ...current.run, idempotencyKey: crypto.randomUUID() }
+        : current.run,
+    );
   }, [
     editor,
     lockEditor,

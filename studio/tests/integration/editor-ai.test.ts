@@ -356,11 +356,12 @@ async function seedBudgetUsage(userId: string, cents: number): Promise<void> {
 
 async function budgetRequest(requestId: string) {
   return env.DB.prepare(
-    `SELECT status, reserved_cents, actual_cents, revision_id, response_json
+    `SELECT usage_date, status, reserved_cents, actual_cents, revision_id, response_json
     FROM ai_budget_requests WHERE request_id = ?`,
   )
     .bind(requestId)
     .first<{
+      usage_date: string;
       status: string;
       reserved_cents: number;
       actual_cents: number | null;
@@ -529,6 +530,32 @@ describe("editor AI", () => {
     expect(replay.status).toBe(200);
     await expect(replay.json()).resolves.toEqual(retriedBody);
     expect(gatewayCalls).toBe(2);
+  });
+
+  it("moves a failed retry into the current usage day", async () => {
+    const fixture = await createFixture();
+    const resourceId = fixture.resourceIds.chapter;
+    const requestId = crypto.randomUUID();
+    gatewayStatus = 503;
+
+    const failed = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(failed.status).toBe(500);
+    await env.DB.prepare("UPDATE ai_budget_requests SET usage_date = ? WHERE request_id = ?")
+      .bind("2000-01-01", requestId)
+      .run();
+
+    gatewayStatus = 200;
+    const retried = await requestEditorAi(fixture.cookie, payload("chapter", resourceId), {
+      "Idempotency-Key": requestId,
+    });
+    expect(retried.status).toBe(200);
+    expect(await budgetRequest(requestId)).toMatchObject({
+      usage_date: todayIso(),
+      status: "succeeded",
+    });
+    expect(await budgetUsageCents(fixture.userId)).toBe(1);
   });
 
   it("keeps a failed reservation released when its retry no longer fits the cap", async () => {

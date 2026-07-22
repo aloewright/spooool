@@ -6,10 +6,12 @@ test.describe("BlockNote AI controller", () => {
   test("retains default controls and restores an exact cross-block selection", async ({ page }) => {
     const fixture = await createBlogFixture(page);
     const aiRequests: Array<Record<string, unknown>> = [];
+    const idempotencyKeys: string[] = [];
 
     await page.route("**/api/v1/editor/ai", async (route) => {
       const request = route.request().postDataJSON() as Record<string, unknown>;
       aiRequests.push(request);
+      idempotencyKeys.push(route.request().headers()["idempotency-key"] ?? "");
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -38,10 +40,12 @@ test.describe("BlockNote AI controller", () => {
     await expect(slashMenu.getByRole("option", { name: /^Heading 1\b/ })).toBeVisible();
     await expect(slashMenu.getByRole("option", { name: /^Paragraph\b/ })).toBeVisible();
     await slashMenu.getByRole("option", { name: /^Proofread\b/ }).click();
-    await page
-      .getByRole("dialog", { name: "Ready to review" })
-      .getByRole("button", { name: "Reject", exact: true })
-      .click();
+    const initialReview = page.getByRole("dialog", { name: "Ready to review" });
+    await initialReview.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect.poll(() => aiRequests.length).toBe(2);
+    expect(idempotencyKeys[0]).not.toBe("");
+    expect(idempotencyKeys[1]).not.toBe(idempotencyKeys[0]);
+    await initialReview.getByRole("button", { name: "Reject", exact: true }).click();
 
     // Let the slash-trigger transaction settle before measuring the Apply save.
     await page.waitForTimeout(1_100);

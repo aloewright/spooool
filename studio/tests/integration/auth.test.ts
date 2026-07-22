@@ -20,7 +20,7 @@ describe("auth", () => {
 
   it("does not accept server-owned account fields during public sign-up", async () => {
     const email = `account-fields-${crypto.randomUUID()}@example.com`;
-    const res = await SELF.fetch("http://x/api/auth/sign-up/email", {
+    const res = await SELF.fetch("http://localhost:5173/api/auth/sign-up/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

@@ -23,6 +23,9 @@ export default defineConfig(async () => {
     test: {
       include: ["../../tests/integration/**/*.test.ts"],
       setupFiles: ["../../tests/integration/setup.ts"],
+      // Worker startup and D1 migrations can push request-heavy cases past
+      // Vitest's 5s default when the integration files run in parallel.
+      testTimeout: 15_000,
     },
   };
 });

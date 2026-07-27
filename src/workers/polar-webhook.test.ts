@@ -447,3 +447,164 @@ describe('handlePolarWebhook', () => {
     expect(JSON.parse(rows[0].meta_json).metadata).toMatchObject({ video_id: 42, gift: true });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Earnings processing — tests processEarningsEvent via the full handler.
+// These use a richer fake DB that routes queries by table name.
+// ---------------------------------------------------------------------------
+
+interface FakeEarningsRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  amount_cents: number;
+  platform_fee_cents: number;
+  currency: string;
+  polar_order_id: string | null;
+  description: string | null;
+  created_at: number;
+}
+
+function makeFakeDBFull(channelProducts: Array<{ polar_product_id: string; user_id: string }> = []): {
+  ledgerRows: FakeLedgerRow[];
+  earningsRows: FakeEarningsRow[];
+  binding: D1Database;
+} {
+  const ledgerRows: FakeLedgerRow[] = [];
+  const earningsRows: FakeEarningsRow[] = [];
+
+  const db = {
+    prepare(query: string) {
+      const q = query.trim().toLowerCase().replace(/\s+/g, ' ');
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...values: unknown[]) {
+          bound = values;
+          return stmt;
+        },
+        async run() {
+          if (q.includes('into polar_ledger')) {
+            const [id, webhook_id, event_type, polar_object_id, polar_customer_id,
+                  polar_user_id, amount_cents, currency, status, meta_json, created_at] =
+              bound as [string, string, string, string | null, string | null,
+                         string | null, number | null, string | null, string, string, number];
+            const exists = ledgerRows.some((r) => r.webhook_id === webhook_id);
+            if (exists) return { meta: { changes: 0 } };
+            ledgerRows.push({ id, webhook_id, event_type, polar_object_id, polar_customer_id,
+                               polar_user_id, amount_cents, currency, status, meta_json, created_at });
+            return { meta: { changes: 1 } };
+          }
+          if (q.includes('into creator_earnings')) {
+            const [id, user_id, kind, amount_cents, platform_fee_cents, currency,
+                  polar_order_id, description, created_at] =
+              bound as [string, string, string, number, number, string,
+                         string | null, string | null, number];
+            const exists = earningsRows.some((r) => r.polar_order_id === polar_order_id && polar_order_id !== null);
+            if (exists) return { meta: { changes: 0 } };
+            earningsRows.push({ id, user_id, kind, amount_cents, platform_fee_cents,
+                                 currency, polar_order_id, description, created_at });
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 1 } };
+        },
+        async first() {
+          if (q.includes('channel_products') && q.includes('polar_product_id')) {
+            const productId = bound[0] as string;
+            const match = channelProducts.find((p) => p.polar_product_id === productId);
+            return match ? { user_id: match.user_id } : null;
+          }
+          // payout user lookup
+          if (q.includes('user') && q.includes('polar_account_id')) {
+            return null;
+          }
+          return null;
+        },
+      };
+      return stmt;
+    },
+  } as unknown as D1Database;
+
+  return { ledgerRows, earningsRows, binding: db };
+}
+
+describe('earnings processing', () => {
+  it('credits creator_earnings on order.paid with metadata', async () => {
+    const { ledgerRows, earningsRows, binding } = makeFakeDBFull();
+    const app = buildApp(NOW);
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: {
+        id: 'ord_001',
+        amount: 500,
+        currency: 'usd',
+        metadata: { creator_user_id: 'u_creator', kind: 'tip', video_id: 'vid_abc' },
+      },
+    });
+    const headers = await makeHeaders(payload);
+    const res = await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(res.status).toBe(200);
+    expect(ledgerRows).toHaveLength(1);
+    expect(earningsRows).toHaveLength(1);
+    expect(earningsRows[0].user_id).toBe('u_creator');
+    expect(earningsRows[0].kind).toBe('tip');
+    expect(earningsRows[0].amount_cents).toBe(500);
+    expect(earningsRows[0].platform_fee_cents).toBe(50); // 10% of 500
+    expect(earningsRows[0].currency).toBe('usd');
+    expect(earningsRows[0].description).toContain('vid_abc');
+  });
+
+  it('credits creator_earnings via product lookup on renewal order.paid without metadata', async () => {
+    // Simulates a subscription renewal where Polar sends order.paid without
+    // echoing our checkout metadata. The handler must fall back to looking up
+    // the creator via product_id → channel_products.
+    const { ledgerRows, earningsRows, binding } = makeFakeDBFull([
+      { polar_product_id: 'prod_membership_001', user_id: 'u_creator' },
+    ]);
+    const app = buildApp(NOW);
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: {
+        id: 'ord_renewal_002',
+        amount: 999,
+        currency: 'usd',
+        product_id: 'prod_membership_001',
+        subscription_id: 'sub_xyz',
+        // no metadata field — simulates a renewal order
+      },
+    });
+    const headers = await makeHeaders(payload, NOW, 'msg_renewal_002');
+    const res = await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(res.status).toBe(200);
+    expect(ledgerRows).toHaveLength(1);
+    expect(earningsRows).toHaveLength(1);
+    expect(earningsRows[0].user_id).toBe('u_creator');
+    // subscription_id present → kind must be 'membership'
+    expect(earningsRows[0].kind).toBe('membership');
+    expect(earningsRows[0].amount_cents).toBe(999);
+    expect(earningsRows[0].platform_fee_cents).toBe(100); // 10% of 999 rounded
+  });
+
+  it('does not credit earnings on order.paid with no metadata and no product_id', async () => {
+    const { earningsRows, binding } = makeFakeDBFull();
+    const app = buildApp(NOW);
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: { id: 'ord_unknown', amount: 300, currency: 'usd' },
+    });
+    const headers = await makeHeaders(payload, NOW, 'msg_unknown');
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(earningsRows).toHaveLength(0);
+  });
+});

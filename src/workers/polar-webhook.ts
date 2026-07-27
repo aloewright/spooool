@@ -114,6 +114,12 @@ const polarDataSchema = z
     user_id: z.string().optional(),
     // for payout events: which payout account received the funds
     account_id: z.string().optional(),
+    // product reference — present on order events; used to look up the creator
+    // when metadata is absent (e.g. subscription renewal orders).
+    product_id: z.string().optional(),
+    // subscription reference — present on order events that originate from a
+    // recurring subscription (first payment and renewals).
+    subscription_id: z.string().optional(),
     // metadata we attach when creating checkouts. Polar echoes values back with
     // their original JSON type (strings, numbers, booleans), so the value schema
     // must accept all three or validation 400s and Polar retries forever.
@@ -225,12 +231,31 @@ async function processEarningsEvent(
 
   // order.paid → tip or membership earning
   if (et === 'order.paid') {
-    const creatorUserId = meta.creator_user_id;
-    if (!creatorUserId || !amountCents || !currency) return;
+    if (!amountCents || !currency) return;
+
+    // Primary: creator_user_id from checkout metadata.
+    // Fallback: look up via product_id → channel_products for renewal orders
+    // where Polar may not echo our checkout metadata.
+    let creatorUserId = typeof meta.creator_user_id === 'string' ? meta.creator_user_id : null;
+    if (!creatorUserId && data.product_id) {
+      const row = await db
+        .prepare(
+          `SELECT user_id FROM channel_products
+           WHERE polar_product_id = ? AND active = 1
+           LIMIT 1`,
+        )
+        .bind(data.product_id)
+        .first<{ user_id: string }>()
+        .catch(() => null);
+      if (row) creatorUserId = row.user_id;
+    }
+    if (!creatorUserId) return;
 
     const kind = (meta.kind === 'tip' || meta.kind === 'membership' || meta.kind === 'gift')
       ? (meta.kind as 'tip' | 'membership' | 'gift')
-      : 'tip';
+      : data.subscription_id
+        ? 'membership'
+        : 'tip';
     const feeCents = Math.round(amountCents * PLATFORM_FEE_RATE);
 
     let description: string | null = null;

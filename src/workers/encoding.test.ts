@@ -131,10 +131,11 @@ describe('handleEncodingMessage', () => {
       requireSignedURLs: false,
     });
 
-    // Two UPDATE runs: queued→encoding, then encoding→encoding with stream uid.
+    // One UPDATE: queued→encoding with stream_video_id set atomically.
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates).toHaveLength(2);
-    expect(updates[1].bound[1]).toBe('stream-uid-42');
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('encoding');
+    expect(updates[0].bound[1]).toBe('stream-uid-42');
   });
 
   it('marks the video failed and rethrows when Stream config is missing', async () => {
@@ -146,12 +147,11 @@ describe('handleEncodingMessage', () => {
       ),
     ).rejects.toThrow(/Encoding failed/);
 
-    // queued→encoding fires before the config check in sendToStream throws,
-    // so we always observe both transitions even when no API call goes out.
+    // sendToStream throws before any DB write, so only the catch-path
+    // failed transition fires — queued→failed in a single UPDATE.
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates).toHaveLength(2);
-    expect(updates[0].bound[0]).toBe('encoding');
-    expect(updates[1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('failed');
   });
 
   it('marks the video failed when the Stream API responds non-2xx', async () => {
@@ -173,9 +173,8 @@ describe('handleEncodingMessage', () => {
     ).rejects.toThrow(/Stream API failed: 429/);
 
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates).toHaveLength(2);
-    expect(updates[0].bound[0]).toBe('encoding');
-    expect(updates[1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('failed');
   });
 
   it('marks the video failed when the Stream API response is missing the uid', async () => {
@@ -196,8 +195,7 @@ describe('handleEncodingMessage', () => {
       ),
     ).rejects.toThrow(/missing video uid/);
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
-    expect(updates).toHaveLength(2);
-    expect(updates[0].bound[0]).toBe('encoding');
-    expect(updates[1].bound[0]).toBe('failed');
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('failed');
   });
 });

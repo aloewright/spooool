@@ -65,10 +65,9 @@ export async function handleEncodingMessage(env: EncodingEnv, body: unknown): Pr
 
   try {
     if (env.STREAM_ENABLED === 'true') {
-      await transitionVideoStatus(env.DB, videoId, 'encoding');
       const streamVideoId = await sendToStream(env, r2Key);
-      // Stream now owns the row; the webhook will flip us to ready/failed.
-      // Re-assert encoding so we capture the stream uid.
+      // Set status and stream_video_id in one write so the webhook handler
+      // (which matches on stream_video_id) never races against a nil value.
       await transitionVideoStatus(env.DB, videoId, 'encoding', { streamVideoId });
       return;
     }

@@ -180,6 +180,24 @@ describe('parseChunkMetadataFromFormData', () => {
 
     expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
   });
+
+  it('rejects an uploadId with disallowed characters (e.g. colon)', () => {
+    const fd = new FormData();
+    fd.set('uploadId', 'bad:id:with:colons');
+    fd.set('chunkIndex', '1');
+    fd.set('chunkCount', '3');
+
+    expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
+  });
+
+  it('rejects an uploadId that exceeds 64 characters', () => {
+    const fd = new FormData();
+    fd.set('uploadId', 'a'.repeat(65));
+    fd.set('chunkIndex', '1');
+    fd.set('chunkCount', '3');
+
+    expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

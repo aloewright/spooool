@@ -66,7 +66,7 @@
     "@tabler/icons-react": "^3.44.0",
     "@tanstack/ai": "^0.26.1",
     "@tanstack/ai-react": "^0.15.1",
-    "better-auth": "^1.6.11",
+    "better-auth": "^1.6.22",
     "buffer-image-size": "file:buffer-image-size-0.6.4.tgz",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

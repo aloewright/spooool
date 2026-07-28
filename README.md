@@ -1,4 +1,4 @@
-# spooool
+# Spooool
 
 [![CI](https://github.com/aloewright/spooool/actions/workflows/ci.yml/badge.svg)](https://github.com/aloewright/spooool/actions/workflows/ci.yml)
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/aloewright/spooool)

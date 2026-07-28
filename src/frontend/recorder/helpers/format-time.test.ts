@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration } from './format-time';
+import { formatDuration, formatMilliseconds } from './format-time';
 
 describe('formatDuration', () => {
   it('formats sub-second durations with one decimal', () => {
@@ -32,5 +32,35 @@ describe('formatDuration', () => {
     expect(() => formatDuration(Number.NEGATIVE_INFINITY)).toThrow(TypeError);
     expect(() => formatDuration(Number.NaN)).toThrow(TypeError);
     expect(() => formatDuration('1000' as unknown as number)).toThrow(TypeError);
+  });
+});
+
+describe('formatMilliseconds', () => {
+  it('formats zero as 00:00', () => {
+    expect(formatMilliseconds(0)).toBe('00:00');
+  });
+
+  it('truncates sub-second values and pads to two digits', () => {
+    expect(formatMilliseconds(400)).toBe('00:00');
+    expect(formatMilliseconds(999)).toBe('00:00');
+    expect(formatMilliseconds(1000)).toBe('00:01');
+    expect(formatMilliseconds(59000)).toBe('00:59');
+  });
+
+  it('formats minutes and seconds', () => {
+    expect(formatMilliseconds(60000)).toBe('01:00');
+    expect(formatMilliseconds(61000)).toBe('01:01');
+    expect(formatMilliseconds(185000)).toBe('03:05');
+  });
+
+  it('includes hours when present', () => {
+    expect(formatMilliseconds(3600000)).toBe('01:00:00');
+    expect(formatMilliseconds(3661000)).toBe('01:01:01');
+    expect(formatMilliseconds(7200000)).toBe('02:00:00');
+  });
+
+  it('does not wrap at 24 hours', () => {
+    expect(formatMilliseconds(86400000)).toBe('24:00:00');
+    expect(formatMilliseconds(90061000)).toBe('25:01:01');
   });
 });

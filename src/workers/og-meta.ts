@@ -1,10 +1,12 @@
 // ALO-158: per-video Open Graph + Twitter card meta tags injected into the
-// SPA HTML for /watch/:id. We don't render a custom card image — the video's
-// existing thumbnail is the right preview surface, and serving it directly
-// avoids a round-trip through ImageResponse / Browser Rendering for the
-// common case. (A title-overlay variant can be a follow-up if/when needed.)
+// SPA HTML for /watch/:id.
 //
-// Strategy: worker fetches index.html from the assets binding, runs an
+// OG image strategy:
+//   - Videos with a thumbnail → use the thumbnail URL directly (works on all platforms).
+//   - Videos without a thumbnail → serve a branded SVG card from /api/og/video/:id
+//     (works on Twitter/X, LinkedIn, and other SVG-capable crawlers).
+//
+// SPA injection: worker fetches index.html from the assets binding, runs an
 // HTMLRewriter pass that strips any existing site-wide og:* / twitter:*
 // tags and inserts per-video tags into <head>. Falls back to the
 // untouched HTML on any failure (missing video, bad id, asset hiccup) so
@@ -15,6 +17,74 @@ import { Hono } from 'hono';
 export interface OgMetaEnv {
   DB: D1Database;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
+}
+
+// ─── OG Card Image Generator ──────────────────────────────────────────────────
+
+function escapeXml(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Greedy word-wrap for SVG <text> elements. Returns at most `maxLines` lines.
+export function wrapSvgText(text: string, maxCharsPerLine: number, maxLines: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  return lines.length > 0 ? lines : [''];
+}
+
+// Generates a 1200×630 branded SVG card for sharing when no thumbnail exists.
+export function buildOgCardSvg(args: { title: string; channelName?: string | null }): string {
+  const FONT = 'system-ui,-apple-system,sans-serif';
+  const titleLines = wrapSvgText(args.title || 'Spooool', 26, 2);
+  const TITLE_Y = 230;
+  const TITLE_LINE_HEIGHT = 82;
+  const TITLE_FONT = 64;
+
+  const titleEls = titleLines
+    .map(
+      (line, i) =>
+        `  <text x="72" y="${TITLE_Y + i * TITLE_LINE_HEIGHT}" font-family="${FONT}" font-size="${TITLE_FONT}" font-weight="700" fill="#f1f5f9">${escapeXml(line)}</text>`,
+    )
+    .join('\n');
+
+  const channelY = TITLE_Y + titleLines.length * TITLE_LINE_HEIGHT + 28;
+  const channelEl = args.channelName
+    ? `  <text x="72" y="${channelY}" font-family="${FONT}" font-size="32" fill="#a78bfa">${escapeXml(args.channelName)}</text>`
+    : '';
+
+  return [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">`,
+    `  <defs>`,
+    `    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">`,
+    `      <stop offset="0%" stop-color="#0c0a1e"/>`,
+    `      <stop offset="100%" stop-color="#1e0a3c"/>`,
+    `    </linearGradient>`,
+    `  </defs>`,
+    `  <rect width="1200" height="630" fill="url(#bg)"/>`,
+    `  <rect x="0" y="0" width="8" height="630" fill="#7c3aed"/>`,
+    titleEls,
+    channelEl,
+    `  <text x="72" y="596" font-family="${FONT}" font-size="20" fill="#6b7280" letter-spacing="3">SPOOOOL.COM</text>`,
+    `</svg>`,
+  ].join('\n');
 }
 
 interface VideoMetaRow {
@@ -47,15 +117,18 @@ export function clampForMeta(value: string | null | undefined, max: number): str
 export function buildOgMetaTags(args: {
   origin: string;
   watchUrl: string;
+  videoId: string;
   video: Pick<VideoMetaRow, 'title' | 'description' | 'thumbnail_url' | 'channel_name'>;
 }): string {
-  const { origin, watchUrl, video } = args;
+  const { origin, watchUrl, videoId, video } = args;
   const title = clampForMeta(video.title, TITLE_MAX) || 'Spooool';
   const description = clampForMeta(
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // Use the video thumbnail when available (raster, works on all platforms).
+  // Fall back to a branded SVG card generated on-the-fly when there is none.
+  const image = video.thumbnail_url ?? `${origin}/api/og/video/${encodeURIComponent(videoId)}`;
 
   const escape = (v: string): string =>
     v
@@ -133,7 +206,7 @@ ogMetaRoutes.get('/watch/:id', async (c) => {
 
   const origin = new URL(c.req.url).origin;
   const watchUrl = `${origin}/watch/${encodeURIComponent(video.id)}`;
-  const tags = buildOgMetaTags({ origin, watchUrl, video });
+  const tags = buildOgMetaTags({ origin, watchUrl, videoId: video.id, video });
 
   // Strip any pre-existing og:* / twitter:* meta from the static HTML so we
   // don't emit duplicates. Then inject the per-video tags before </head>.
@@ -150,4 +223,38 @@ ogMetaRoutes.get('/watch/:id', async (c) => {
     });
 
   return rewriter.transform(assetRes);
+});
+
+// /api/og/video/:id — branded SVG card for videos that have no thumbnail.
+// Used as the og:image fallback so sharers always get a usable preview image
+// rather than the generic site icon. Cached at the edge for 24 h.
+ogMetaRoutes.get('/api/og/video/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!id || id.length > 128) return c.text('Not found', 404);
+
+  let title = 'Spooool';
+  let channelName: string | null = null;
+
+  try {
+    const row = await c.env.DB.prepare(
+      `SELECT v.title, u.name AS channel_name
+       FROM videos v
+       LEFT JOIN user u ON u.id = v.user_id
+       WHERE v.id = ? AND v.deleted_at IS NULL`,
+    )
+      .bind(id)
+      .first<{ title: string; channel_name: string | null }>();
+    if (row) {
+      title = row.title;
+      channelName = row.channel_name;
+    }
+  } catch {
+    // Serve generic branded card on any DB error.
+  }
+
+  const svg = buildOgCardSvg({ title, channelName });
+  return c.body(svg, 200, {
+    'Content-Type': 'image/svg+xml; charset=utf-8',
+    'Cache-Control': 'public, max-age=86400, stale-while-revalidate=3600',
+  });
 });

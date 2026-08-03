@@ -1,5 +1,60 @@
 import { describe, expect, it } from 'vitest';
-import { buildOgMetaTags, clampForMeta, isPublicViewable } from './og-meta';
+import { buildOgCardSvg, buildOgMetaTags, clampForMeta, isPublicViewable, wrapSvgText } from './og-meta';
+
+describe('wrapSvgText', () => {
+  it('returns the input as a single line when it fits', () => {
+    expect(wrapSvgText('short', 20, 3)).toEqual(['short']);
+  });
+
+  it('wraps on word boundaries when the line is too long', () => {
+    const lines = wrapSvgText('one two three four five', 10, 3);
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(11);
+    }
+  });
+
+  it('caps at maxLines', () => {
+    const text = 'word '.repeat(20).trim();
+    const lines = wrapSvgText(text, 10, 2);
+    expect(lines.length).toBeLessThanOrEqual(2);
+  });
+
+  it('returns a single empty string for empty input', () => {
+    expect(wrapSvgText('', 20, 3)).toEqual(['']);
+  });
+});
+
+describe('buildOgCardSvg', () => {
+  it('returns valid SVG markup', () => {
+    const svg = buildOgCardSvg({ title: 'My Video', channelName: 'Alice' });
+    expect(svg).toMatch(/^<svg /);
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(svg).toContain('width="1200"');
+    expect(svg).toContain('height="630"');
+  });
+
+  it('includes the video title', () => {
+    const svg = buildOgCardSvg({ title: 'Hello World', channelName: null });
+    expect(svg).toContain('Hello World');
+  });
+
+  it('includes the channel name when provided', () => {
+    const svg = buildOgCardSvg({ title: 'T', channelName: 'Bob' });
+    expect(svg).toContain('Bob');
+  });
+
+  it('escapes XML characters in title and channel name', () => {
+    const svg = buildOgCardSvg({ title: 'A & B <test>', channelName: '"quoted"' });
+    expect(svg).toContain('A &amp; B &lt;test&gt;');
+    expect(svg).toContain('&quot;quoted&quot;');
+    expect(svg).not.toContain('<test>');
+  });
+
+  it('works without a channel name', () => {
+    expect(() => buildOgCardSvg({ title: 'T' })).not.toThrow();
+  });
+});
 
 describe('clampForMeta', () => {
   it('returns the empty string for null/undefined/empty input', () => {
@@ -41,6 +96,7 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://spooool.com',
       watchUrl: 'https://spooool.com/watch/abc',
+      videoId: 'abc',
       video: baseVideo,
     });
     expect(out).toContain('<meta property="og:type" content="video.other" />');
@@ -56,25 +112,28 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, title: 'A & B "fun"', description: '<script>x</script>' },
     });
     expect(out).toContain('A &amp; B &quot;fun&quot;');
     expect(out).toContain('&lt;script&gt;x&lt;/script&gt;');
   });
 
-  it('falls back to a thumbnail of /icon.png when none is set', () => {
+  it('falls back to the generated OG card when no thumbnail is set', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: 'vid-abc',
       video: { ...baseVideo, thumbnail_url: null },
     });
-    expect(out).toContain('og:image" content="https://x.test/icon.png"');
+    expect(out).toContain('og:image" content="https://x.test/api/og/video/vid-abc"');
   });
 
   it('falls back the description to a sensible default when null', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, description: null },
     });
     expect(out).toContain('Watch on Spooool — Alice');
@@ -84,6 +143,7 @@ describe('buildOgMetaTags', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
+      videoId: '1',
       video: { ...baseVideo, title: 'a'.repeat(120), description: 'b'.repeat(500) },
     });
     expect(out).toMatch(/og:title" content="a{69}…/);

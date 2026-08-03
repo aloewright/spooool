@@ -8,6 +8,15 @@ export interface SendToStreamEnv {
   R2_BUCKET?: string;
 }
 
+// 30 min cap matches stream-upload.ts MAX_DURATION_SECONDS and Stream's basic ingest ceiling.
+const STREAM_MAX_DURATION_SECONDS = 60 * 30;
+const STREAM_ALLOWED_ORIGINS = ['spooool.com', 'www.spooool.com', '*.workers.dev'];
+
+interface MinimalVideoRow {
+  status: string;
+  stream_video_id: string | null;
+}
+
 interface EncodingEnv extends SendToStreamEnv {
   DB: D1Database;
   STREAM_ENABLED?: string;
@@ -37,6 +46,8 @@ export async function sendToStream(env: SendToStreamEnv, r2Key: string): Promise
       body: JSON.stringify({
         url: `r2://${env.R2_BUCKET ?? 'spooool-videos'}/${r2Key}`,
         requireSignedURLs: false,
+        maxDurationSeconds: STREAM_MAX_DURATION_SECONDS,
+        allowedOrigins: STREAM_ALLOWED_ORIGINS,
       }),
     },
   );
@@ -66,6 +77,16 @@ export async function handleEncodingMessage(env: EncodingEnv, body: unknown): Pr
   try {
     if (env.STREAM_ENABLED === 'true') {
       await transitionVideoStatus(env.DB, videoId, 'encoding');
+
+      // Idempotency: if the queue message is retried after sendToStream() already
+      // succeeded (e.g. worker crashed before ack), the row will already have a
+      // stream_video_id. Skip the API call to avoid creating a duplicate Stream
+      // video — the existing webhook delivery will complete the transition.
+      const existing = await env.DB.prepare(
+        'SELECT status, stream_video_id FROM videos WHERE id = ?',
+      ).bind(videoId).first<MinimalVideoRow>();
+      if (existing?.stream_video_id) return;
+
       const streamVideoId = await sendToStream(env, r2Key);
       // Stream now owns the row; the webhook will flip us to ready/failed.
       // Re-assert encoding so we capture the stream uid.

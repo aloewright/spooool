@@ -6,14 +6,17 @@ interface FakeDB {
   prepare: (sql: string) => {
     bind: (...values: unknown[]) => {
       run: () => Promise<{ meta: { changes: number } }>;
+      first: <T>() => Promise<T | null>;
     };
   };
   runs: Array<{ sql: string; bound: unknown[] }>;
   setStatus: (status: VideoStatus) => void;
+  setStreamVideoId: (id: string | null) => void;
 }
 
 function fakeDB(initialStatus: VideoStatus = 'queued'): FakeDB {
   let status: VideoStatus = initialStatus;
+  let streamVideoId: string | null = null;
   const runs: Array<{ sql: string; bound: unknown[] }> = [];
   const prepare = (sql: string) => {
     let bound: unknown[] = [];
@@ -32,6 +35,10 @@ function fakeDB(initialStatus: VideoStatus = 'queued'): FakeDB {
         }
         return { meta: { changes: 0 } };
       },
+      first: async <T>() => {
+        // Used by the idempotency check: SELECT status, stream_video_id FROM videos WHERE id = ?
+        return { status, stream_video_id: streamVideoId } as T;
+      },
     };
     return stmt;
   };
@@ -40,9 +47,8 @@ function fakeDB(initialStatus: VideoStatus = 'queued'): FakeDB {
     get runs() {
       return runs;
     },
-    setStatus: (s: VideoStatus) => {
-      status = s;
-    },
+    setStatus: (s: VideoStatus) => { status = s; },
+    setStreamVideoId: (id: string | null) => { streamVideoId = id; },
   } as unknown as FakeDB;
 }
 
@@ -126,15 +132,42 @@ describe('handleEncodingMessage', () => {
     expect(url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/stream');
     const headers = init.headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer tok');
-    expect(JSON.parse(init.body as string)).toEqual({
+    expect(JSON.parse(init.body as string)).toMatchObject({
       url: 'r2://spooool-videos/videos/v1.mp4',
       requireSignedURLs: false,
+      maxDurationSeconds: 1800,
+      allowedOrigins: ['spooool.com', 'www.spooool.com', '*.workers.dev'],
     });
 
     // Two UPDATE runs: queued→encoding, then encoding→encoding with stream uid.
     const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
     expect(updates).toHaveLength(2);
     expect(updates[1].bound[1]).toBe('stream-uid-42');
+  });
+
+  it('skips the Stream API call when stream_video_id is already set (queue retry idempotency)', async () => {
+    const db = fakeDB('encoding');
+    db.setStreamVideoId('existing-uid');
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await handleEncodingMessage(
+      {
+        DB: db as unknown as D1Database,
+        STREAM_ENABLED: 'true',
+        CLOUDFLARE_ACCOUNT_ID: 'acct',
+        CF_STREAM_API_TOKEN: 'tok',
+        ENCODE_CONTAINER: FAKE_ENCODE_CONTAINER,
+      },
+      { videoId: 'v1', r2Key: 'videos/v1.mp4' },
+    );
+
+    // Stream API must not be called; the existing webhook delivery will finish the transition.
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Only the queued→encoding transition fires; no second update.
+    const updates = db.runs.filter((r) => r.sql.includes('UPDATE videos'));
+    expect(updates).toHaveLength(1);
+    expect(updates[0].bound[0]).toBe('encoding');
   });
 
   it('marks the video failed and rethrows when Stream config is missing', async () => {

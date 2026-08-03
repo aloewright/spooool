@@ -75,7 +75,7 @@ async function sendChunkWithRetry(
   throw lastErr ?? new Error('chunk upload failed after retries');
 }
 
-// Returns a stable sessionStorage key for the given file, used to persist
+// Returns a stable localStorage key for the given file, used to persist
 // partial upload progress across page reloads.
 function resumeKey(file: Blob): string {
   const name = (file as File).name ?? 'blob';
@@ -88,7 +88,7 @@ type StoredProgress = { uploadId: string; nextChunk: number; chunkCount: number 
 
 function loadProgress(key: string, chunkCount: number): { uploadId: string; nextChunk: number } | null {
   try {
-    const raw = sessionStorage.getItem(key);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const stored = JSON.parse(raw) as StoredProgress;
     if (stored.chunkCount !== chunkCount || stored.nextChunk <= 0 || stored.nextChunk >= chunkCount) {
@@ -102,12 +102,12 @@ function loadProgress(key: string, chunkCount: number): { uploadId: string; next
 
 function saveProgress(key: string, uploadId: string, nextChunk: number, chunkCount: number): void {
   try {
-    sessionStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount } satisfies StoredProgress));
+    localStorage.setItem(key, JSON.stringify({ uploadId, nextChunk, chunkCount } satisfies StoredProgress));
   } catch { /* QuotaExceededError or SSR env — ignore */ }
 }
 
 function removeProgress(key: string): void {
-  try { sessionStorage.removeItem(key); } catch { /* ignore */ }
+  try { localStorage.removeItem(key); } catch { /* ignore */ }
 }
 
 export async function uploadInChunks(opts: UploadOptions): Promise<UploadResult> {

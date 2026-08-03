@@ -4,10 +4,10 @@ import { uploadInChunks, CHUNK_SIZE, type UploadTarget } from './chunked-upload'
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; });
 
-// Provide a no-op sessionStorage stub so tests run in happy-dom.
+// Provide a no-op localStorage stub so tests run in happy-dom.
 const ssMap = new Map<string, string>();
 beforeEach(() => ssMap.clear());
-vi.stubGlobal('sessionStorage', {
+vi.stubGlobal('localStorage', {
   getItem: (k: string) => ssMap.get(k) ?? null,
   setItem: (k: string, v: string) => ssMap.set(k, v),
   removeItem: (k: string) => ssMap.delete(k),
@@ -111,7 +111,7 @@ describe('uploadInChunks', () => {
     expect(callCount).toBe(3);
   });
 
-  it('persists uploadId to sessionStorage after chunk 0 and clears on completion', async () => {
+  it('persists uploadId to localStorage after chunk 0 and clears on completion', async () => {
     let call = 0;
     mockFetch(async () => {
       call++;
@@ -125,12 +125,12 @@ describe('uploadInChunks', () => {
       _sleep: noSleep,
     });
     expect(result.videoId).toBe('vid-abc');
-    // sessionStorage should be cleared after successful upload
+    // localStorage should be cleared after successful upload
     const stored = ssMap.get(`chunk-upload:big.mp4:${file.size}:${file.lastModified}`);
     expect(stored).toBeUndefined();
   });
 
-  it('reports pre-existing progress fraction when resuming via sessionStorage', async () => {
+  it('reports pre-existing progress fraction when resuming via localStorage', async () => {
     const file = makeFile(30 * 1024 * 1024, 'resume.mp4', 'video/mp4'); // 3 chunks
     const key = `chunk-upload:resume.mp4:${file.size}:${file.lastModified}`;
     ssMap.set(key, JSON.stringify({ uploadId: 'stored-id', nextChunk: 2, chunkCount: 3 }));
@@ -191,6 +191,7 @@ describe('uploadInChunks', () => {
       _sleep: noSleep,
     })).rejects.toThrow();
     // Progress should be kept so the user can retry
+    // Progress should be kept in localStorage so the user can retry
     expect(ssMap.has(key)).toBe(true);
   });
 

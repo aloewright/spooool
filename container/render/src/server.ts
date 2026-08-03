@@ -277,21 +277,20 @@ async function bootstrap(): Promise<void> {
     return { ok: false, error: heavyServerError ?? 'unknown init failure' };
   }
 
-  app.post('/render', async (c) => {
-    // Buffer the body so we can both inspect it (for the failure callback
-    // path) and forward an intact stream to the inner heavy server.
-    const rawBody = await c.req.text();
-    let parsedJobId: string | undefined;
-    try {
-      parsedJobId = (JSON.parse(rawBody) as { jobId?: string }).jobId;
-    } catch { /* malformed JSON — leave parsedJobId undefined */ }
-
+  // Proxy a POST to the inner heavy server, calling a failure webhook if
+  // the heavy deps haven't loaded. Strips framing headers so the
+  // already-decoded body doesn't trigger length/encoding mismatches.
+  async function proxyToHeavy(
+    c: Parameters<Parameters<typeof app.post>[1]>[0],
+    rawBody: string,
+    failPath: string,
+  ): Promise<Response> {
     const init = await ensureHeavyServer();
     if (!init.ok) {
-      if (parsedJobId) {
+      if (failPath) {
         const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
         const callbackSecret = process.env.RENDER_CALLBACK_SECRET ?? '';
-        void fetch(`${workerBase}/api/render/jobs/${parsedJobId}/fail`, {
+        void fetch(`${workerBase}${failPath}`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
           body: JSON.stringify({ error: `Container init failed: ${init.error.slice(0, 800)}` }),
@@ -299,16 +298,6 @@ async function bootstrap(): Promise<void> {
       }
       return c.json({ error: 'container init failed', detail: init.error.slice(0, 800) }, 503);
     }
-    // Reconstruct the inner Request with the body buffered above. The
-    // original c.req.raw has been consumed by the .text() read.
-    //
-    // Strip framing headers from the original request: content-length,
-    // content-encoding, and transfer-encoding all describe the *original*
-    // wire framing. The body we forward is the already-decoded string from
-    // c.req.text(), so the old framing no longer applies — leaving these
-    // headers in place causes length mismatches, double-decoding, or a
-    // hung/truncated read on the inner server. Let the Request constructor
-    // recompute content-length from the new body.
     const innerHeaders = new Headers(c.req.raw.headers);
     innerHeaders.delete('content-length');
     innerHeaders.delete('content-encoding');
@@ -319,6 +308,26 @@ async function bootstrap(): Promise<void> {
       body: rawBody,
     });
     return init.app.fetch(innerReq);
+  }
+
+  app.post('/render', async (c) => {
+    const rawBody = await c.req.text();
+    let parsedJobId: string | undefined;
+    try {
+      parsedJobId = (JSON.parse(rawBody) as { jobId?: string }).jobId;
+    } catch { /* malformed JSON — leave parsedJobId undefined */ }
+    const failPath = parsedJobId ? `/api/render/jobs/${parsedJobId}/fail` : '';
+    return proxyToHeavy(c, rawBody, failPath);
+  });
+
+  app.post('/encode', async (c) => {
+    const rawBody = await c.req.text();
+    let parsedVideoId: string | undefined;
+    try {
+      parsedVideoId = (JSON.parse(rawBody) as { videoId?: string }).videoId;
+    } catch { /* malformed JSON — leave parsedVideoId undefined */ }
+    const failPath = parsedVideoId ? `/api/webhooks/encode/${parsedVideoId}/fail` : '';
+    return proxyToHeavy(c, rawBody, failPath);
   });
 
   serve({ fetch: app.fetch, port });

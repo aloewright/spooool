@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { purgeTrendingEdgeCache } from './edge-cache';
+import { purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
 import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
@@ -60,6 +60,7 @@ import { watchHistoryRoutes } from './watch-history';
 import { payoutsRoutes, type PayoutsEnv } from './payouts';
 import { monetizeRoutes, type MonetizeEnv } from './monetize';
 import { handleSpoooolMcpRequest, type SpoooolMcpEnv } from './mcp';
+import { videoMetaCacheKey } from './video-meta-cache';
 import * as Sentry from '@sentry/cloudflare';
 
 type SessionUser = {
@@ -183,10 +184,12 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
     .bind(playbackHlsUrl, thumbnailUrl, thumbnailCandidates, videoId)
     .run();
 
-  // Invalidate caches: the video is now ready with a thumbnail, so both the
+  // Invalidate caches: the video is now ready with a thumbnail, so the
   // trending list and any cached video-metadata KV entries are stale.
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
+  waitUntilBackground(c, c.env.CACHE.delete(videoMetaCacheKey(videoId)));
   purgeTrendingEdgeCache(c);
+  purgeEdgeCache(c, `${new URL(c.req.url).origin}/api/videos/${videoId}`);
 
   // Notify subscribers by email now that the video is actually watchable.
   waitUntilBackground(c, (async () => {

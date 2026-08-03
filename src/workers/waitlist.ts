@@ -1,9 +1,12 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { isAdmin, type RolesEnv } from './roles';
+import { sendWaitlistInviteEmail, type EmailEnv } from './email';
 
-export interface WaitlistEnv extends RolesEnv {
+export interface WaitlistEnv extends RolesEnv, EmailEnv {
   DB: D1Database;
+  /** Canonical origin used to build the signup URL in invite emails. */
+  CANONICAL_ORIGIN?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string } | null;
@@ -57,11 +60,42 @@ waitlistRoutes.get('/api/admin/waitlist', async (c) => {
 
   const [{ results }, total] = await Promise.all([
     c.env.DB.prepare(
-      `SELECT id, email, name, source, created_at FROM waitlist
+      `SELECT id, email, name, source, created_at, invited_at FROM waitlist
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    ).bind(limit, offset).all<{ id: string; email: string; name: string | null; source: string; created_at: string }>(),
+    ).bind(limit, offset).all<{ id: string; email: string; name: string | null; source: string; created_at: string; invited_at: string | null }>(),
     c.env.DB.prepare(`SELECT COUNT(*) AS n FROM waitlist`).first<{ n: number }>(),
   ]);
 
   return c.json({ page, limit, total: total?.n ?? 0, entries: results ?? [] });
+});
+
+waitlistRoutes.post('/api/admin/waitlist/:id/invite', async (c) => {
+  const user = c.get('user');
+  if (!(await isAdmin(c.env, user))) return c.json({ error: 'Forbidden' }, 403);
+
+  const { id } = c.req.param();
+  const entry = await c.env.DB.prepare(
+    `SELECT id, email, name, invited_at FROM waitlist WHERE id = ?`,
+  ).bind(id).first<{ id: string; email: string; name: string | null; invited_at: string | null }>();
+
+  if (!entry) return c.json({ error: 'Not found' }, 404);
+  if (entry.invited_at) return c.json({ error: 'Already invited' }, 409);
+
+  const origin = c.env.CANONICAL_ORIGIN ?? 'https://spooool.com';
+  const result = await sendWaitlistInviteEmail(c.env, {
+    to: entry.email,
+    name: entry.name,
+    signupUrl: `${origin}/signup`,
+  });
+
+  if (!result.ok && !('skipped' in result && result.skipped)) {
+    console.error('[waitlist] invite email failed', { id, error: 'message' in result ? result.message : 'skipped' });
+    return c.json({ error: 'Failed to send invite email' }, 500);
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE waitlist SET invited_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?`,
+  ).bind(id).run();
+
+  return c.json({ ok: true, skipped: 'skipped' in result && result.skipped });
 });

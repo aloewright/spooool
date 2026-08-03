@@ -66,6 +66,11 @@ const FeedView = lazy(() => import('./pages/FeedView').then((m) => ({ default: m
 const Discover = lazy(() => import('./pages/Discover').then((m) => ({ default: m.Discover })));
 const Embed = lazy(() => import('./pages/Embed').then((m) => ({ default: m.Embed })));
 const Waitlist = lazy(() => import('./pages/Waitlist').then((m) => ({ default: m.Waitlist })));
+const Help = lazy(() => import('./pages/Help').then((m) => ({ default: m.Help })));
+const Press = lazy(() => import('./pages/Press').then((m) => ({ default: m.Press })));
+const AdminWaitlist = lazy(() =>
+  import('./pages/AdminWaitlist').then((m) => ({ default: m.AdminWaitlist })),
+);
 
 function RouteFallback(): JSX.Element {
   return (
@@ -650,6 +655,8 @@ export function SiteFooter(): JSX.Element {
       <Link to="/pricing">Pricing</Link>
       <Link to="/legal/dmca">DMCA</Link>
       <Link to="/status">Status</Link>
+      <Link to="/help">Help</Link>
+      <Link to="/press">Press</Link>
     </footer>
   );
 }
@@ -852,6 +859,16 @@ export default function App(): JSX.Element {
             }
           />
           <Route path="/waitlist" element={<Waitlist />} />
+          <Route path="/help" element={<Help />} />
+          <Route path="/press" element={<Press />} />
+          <Route
+            path="/admin/waitlist"
+            element={
+              <RequireAuth>
+                <AdminWaitlist />
+              </RequireAuth>
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>

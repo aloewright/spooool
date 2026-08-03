@@ -196,6 +196,37 @@ function escapeHtml(s: string): string {
     .replace(/'/g, '&#39;');
 }
 
+export function buildWaitlistInviteEmail(args: {
+  name: string | null;
+  signupUrl: string;
+}): { subject: string; html: string; text: string } {
+  const { name, signupUrl } = args;
+  const greet = name ? `Hey ${name},` : 'Hey there,';
+  return {
+    subject: 'Your Spooool spot is ready',
+    text:
+      `${greet}\n\n` +
+      `Good news — your spot on the Spooool waitlist is ready. You can sign up now:\n\n` +
+      `${signupUrl}\n\n` +
+      `Spooool is a creator-first video host. No ads, no algorithm fighting you — just your videos and your audience.\n\n` +
+      `Questions? Reply to this email or contact us at hello@spooool.com.\n\n` +
+      `— The Spooool team`,
+    html:
+      `<p>${escapeHtml(greet)}</p>` +
+      `<p>Good news — your spot on the Spooool waitlist is ready.</p>` +
+      `<p><a href="${escapeHtml(signupUrl)}">Create your account</a></p>` +
+      `<p>Spooool is a creator-first video host. No ads, no algorithm fighting you — just your videos and your audience.</p>` +
+      `<p>Questions? Reply to this email or contact us at <a href="mailto:hello@spooool.com">hello@spooool.com</a>.</p>`,
+  };
+}
+
+export async function sendWaitlistInviteEmail(
+  env: EmailEnv,
+  args: { to: string; name: string | null; signupUrl: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildWaitlistInviteEmail(args) });
+}
+
 export async function sendCostAlertEmail(
   env: EmailEnv,
   args: { to: string; props: Record<string, string | number> },

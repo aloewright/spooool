@@ -29,8 +29,8 @@ interface ChannelProduct {
 interface EarningsSummary {
   year: number;
   currency: string;
-  grossEarningsUsd: number | null;
-  netPayoutsUsd: number | null;
+  grossEarningsUsd: number;
+  netPayoutsUsd: number;
   taxDocStatus: 'polar-pending' | 'polar-issues';
   polar: {
     organizationId: string | null;

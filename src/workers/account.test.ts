@@ -276,6 +276,107 @@ function userApp(store: FakeStore, asUser: { id: string } | null) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// GET /api/account/earnings — D1-backed year-to-date earnings
+// ---------------------------------------------------------------------------
+
+interface EarningsDBOpts {
+  polarOrgId?: string | null;
+  polarStatus?: string;
+  grossCents?: number;
+  netPaidCents?: number;
+}
+
+function earningsApp(opts: EarningsDBOpts = {}, asUser: { id: string } | null = { id: 'u1' }) {
+  const {
+    polarOrgId = null,
+    polarStatus = 'active',
+    grossCents = 0,
+    netPaidCents = 0,
+  } = opts;
+
+  const db = {
+    prepare(sql: string) {
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...v: unknown[]) {
+          bound = v;
+          return stmt;
+        },
+        async first() {
+          void bound;
+          if (sql.includes('polar_organization_id') && sql.includes('FROM user')) {
+            return { polar_organization_id: polarOrgId, polar_account_status: polarStatus };
+          }
+          if (sql.includes('FROM creator_earnings')) {
+            return { gross: grossCents };
+          }
+          if (sql.includes('FROM creator_payouts')) {
+            return { total: netPaidCents };
+          }
+          return null;
+        },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+  } as unknown as D1Database;
+
+  type EarningsCtx = { Variables: { user: { id: string; email: string; name: string } | null } };
+  const app = new Hono<EarningsCtx>();
+  app.use('*', async (c, next) => {
+    c.set('user', asUser ? { id: asUser.id, email: 'a@b.com', name: 'A' } : null);
+    await next();
+  });
+  app.route('/', accountRoutes);
+  return (path: string) => app.fetch(new Request(`http://t${path}`), { DB: db } as never);
+}
+
+describe('GET /api/account/earnings', () => {
+  it('returns 401 when not signed in', async () => {
+    const req = earningsApp({}, null);
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns zero earnings as numbers (not null) when creator has no transactions', async () => {
+    const req = earningsApp({ grossCents: 0, netPaidCents: 0 });
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(body.grossEarningsUsd).toBe(0);
+    expect(body.netPayoutsUsd).toBe(0);
+  });
+
+  it('converts cents to dollars correctly', async () => {
+    const req = earningsApp({ grossCents: 15099, netPaidCents: 8500 });
+    const res = await req('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const body = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(body.grossEarningsUsd).toBeCloseTo(150.99);
+    expect(body.netPayoutsUsd).toBeCloseTo(85);
+  });
+
+  it('includes polar status and current year', async () => {
+    const req = earningsApp({ polarStatus: 'active', polarOrgId: 'org_123' });
+    const res = await req('/api/account/earnings');
+    const body = await res.json() as {
+      year: number;
+      polar: { accountStatus: string; organizationId: string | null; needsOnboarding: boolean };
+    };
+    expect(body.year).toBe(new Date().getUTCFullYear());
+    expect(body.polar.accountStatus).toBe('active');
+    expect(body.polar.needsOnboarding).toBe(false);
+    expect(body.polar.organizationId).toBe('org_123');
+  });
+
+  it('sets needsOnboarding true when not yet active', async () => {
+    const req = earningsApp({ polarStatus: 'not_connected' });
+    const res = await req('/api/account/earnings');
+    const body = await res.json() as { polar: { needsOnboarding: boolean } };
+    expect(body.polar.needsOnboarding).toBe(true);
+  });
+});
+
 describe('account delete + cancel window', () => {
   it('schedules deletion 30 days out', async () => {
     const store = makeStore();

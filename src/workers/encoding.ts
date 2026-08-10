@@ -55,6 +55,30 @@ export async function sendToStream(env: SendToStreamEnv, r2Key: string): Promise
   return streamId;
 }
 
+/**
+ * Transition videos that have been stuck in `encoding` or `queued` without
+ * progressing for longer than `timeoutMs` to `failed`. Called from the
+ * every-5-minute cron so stuck jobs (container crash, dropped Stream webhook)
+ * are surfaced rather than silently blocking forever.
+ */
+export async function runStuckEncodingSweep(
+  db: D1Database,
+  timeoutMs = 4 * 60 * 60 * 1000,
+): Promise<{ failed: number }> {
+  // SQLite datetime arithmetic: 'now' minus the timeout in seconds.
+  const timeoutSeconds = Math.floor(timeoutMs / 1000);
+  const { meta } = await db
+    .prepare(
+      `UPDATE videos
+         SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+       WHERE status IN ('encoding', 'queued')
+         AND updated_at < datetime('now', ? || ' seconds')`,
+    )
+    .bind(`-${timeoutSeconds}`)
+    .run();
+  return { failed: (meta?.changes as number | undefined) ?? 0 };
+}
+
 export async function handleEncodingMessage(env: EncodingEnv, body: unknown): Promise<void> {
   const parsed = queueMessageSchema.safeParse(body);
   if (!parsed.success) {

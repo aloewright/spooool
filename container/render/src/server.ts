@@ -321,6 +321,41 @@ async function bootstrap(): Promise<void> {
     return init.app.fetch(innerReq);
   });
 
+  // R2+FFmpeg encode path. Missing from the original bootstrap; without this
+  // route the EncoderContainer DO's fetch lands here and returns 404, silently
+  // breaking the fallback encoding path.
+  app.post('/encode', async (c) => {
+    const rawBody = await c.req.text();
+    let parsedVideoId: string | undefined;
+    try {
+      parsedVideoId = (JSON.parse(rawBody) as { videoId?: string }).videoId;
+    } catch { /* malformed JSON */ }
+
+    const init = await ensureHeavyServer();
+    if (!init.ok) {
+      if (parsedVideoId) {
+        const workerBase = process.env.WORKER_BASE_URL ?? 'https://spooool.com';
+        const callbackSecret = process.env.RENDER_CALLBACK_SECRET ?? '';
+        void fetch(`${workerBase}/api/webhooks/encode/${parsedVideoId}/fail`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-render-secret': callbackSecret },
+          body: JSON.stringify({ error: `Container init failed: ${init.error.slice(0, 800)}` }),
+        }).catch(() => {});
+      }
+      return c.json({ error: 'container init failed', detail: init.error.slice(0, 800) }, 503);
+    }
+    const innerHeaders = new Headers(c.req.raw.headers);
+    innerHeaders.delete('content-length');
+    innerHeaders.delete('content-encoding');
+    innerHeaders.delete('transfer-encoding');
+    const innerReq = new Request(c.req.raw.url, {
+      method: 'POST',
+      headers: innerHeaders,
+      body: rawBody,
+    });
+    return init.app.fetch(innerReq);
+  });
+
   serve({ fetch: app.fetch, port });
   console.log(`[render-container] listening on :${port}`);
 }

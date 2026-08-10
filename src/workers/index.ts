@@ -8,7 +8,8 @@ import { accountRoutes, runDeletionSweep } from './account';
 import { ChannelSubscriberDO } from './channel-do';
 import { costsRoutes, runCostMonitorSweep } from './costs';
 import { dmcaRoutes, runDmcaRestoreSweep } from './dmca';
-import { handleEncodingMessage } from './encoding';
+import { handleEncodingMessage, runStuckEncodingSweep } from './encoding';
+import { videoMetaCacheKey } from './video-meta-cache';
 import { transitionVideoStatus } from './video-status';
 import { handleAiGenMessage } from './ai-video-consumer';
 import { createAuth, type AuthEnv } from '../auth';
@@ -187,6 +188,12 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
   // trending list and any cached video-metadata KV entries are stale.
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
   purgeTrendingEdgeCache(c);
+  // Clear video-specific KV caches so the next status poll returns 'ready'
+  // rather than the previously cached 'encoding' value.
+  waitUntilBackground(c, Promise.all([
+    c.env.CACHE.delete(videoMetaCacheKey(videoId)),
+    c.env.CACHE.delete(`hls-auth:${videoId}`),
+  ]));
 
   // Notify subscribers by email now that the video is actually watchable.
   waitUntilBackground(c, (async () => {
@@ -353,6 +360,8 @@ const workerHandlers = {
           if (controller.cron === '*/5 * * * *') {
             // Frequent sweep: render-job timeout cleanup + abandoned create_sessions
             await runStuckJobSweep(env.DB);
+            const stuckEncoding = await runStuckEncodingSweep(env.DB);
+            if (stuckEncoding.failed > 0) console.log('[encoding-sweep]', stuckEncoding);
             await runAbandonedSessionsSweep(env.DB);
             // Store a health snapshot so /api/status/uptime has data to plot.
             const healthReport = await buildHealthReport(env);

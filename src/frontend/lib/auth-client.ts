@@ -35,7 +35,10 @@ export async function resetPassword(args: {
 }
 
 export async function resendVerificationEmail(email: string): Promise<AuthResponse> {
-  return postAuth('/api/auth/send-verification-email', { email });
+  const callbackURL = typeof window !== 'undefined'
+    ? `${window.location.origin}/settings/account`
+    : '/settings/account';
+  return postAuth('/api/auth/send-verification-email', { email, callbackURL });
 }
 
 async function postAuth(path: string, body: unknown, captchaToken?: string | null): Promise<AuthResponse> {

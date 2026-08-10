@@ -47,6 +47,7 @@ function makeFakeDB(seed: FakeLedgerRow[] = []): {
           bound = values;
           return stmt;
         },
+        async first() { return null; },
         async run() {
           // INSERT OR IGNORE: skip if webhook_id already present.
           const [id, webhook_id, event_type, polar_object_id, polar_customer_id,
@@ -445,5 +446,274 @@ describe('handlePolarWebhook', () => {
     const json = await res.json() as { inserted: boolean };
     expect(json.inserted).toBe(true);
     expect(JSON.parse(rows[0].meta_json).metadata).toMatchObject({ video_id: 42, gift: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// processEarningsEvent — secondary writes (creator_earnings / creator_payouts)
+// ---------------------------------------------------------------------------
+//
+// These tests use a full fake DB that separates ledger rows from earnings and
+// payout rows so we can assert the secondary writes independently.
+
+interface FakeEarningsRow {
+  id: string;
+  user_id: string;
+  kind: string;
+  amount_cents: number;
+  platform_fee_cents: number;
+  currency: string;
+  polar_order_id: string | null;
+  description: string | null;
+  created_at: number;
+}
+
+interface FakePayoutRow {
+  id: string;
+  user_id: string;
+  amount_cents: number;
+  currency: string;
+  polar_payout_id: string | null;
+  status: string;
+  paid_at: number | null;
+  created_at: number;
+}
+
+function makeFullFakeDB(opts: { userByPolarAccountId?: { id: string } | null } = {}): {
+  ledgerRows: FakeLedgerRow[];
+  earningsRows: FakeEarningsRow[];
+  payoutRows: FakePayoutRow[];
+  binding: D1Database;
+} {
+  const { userByPolarAccountId = null } = opts;
+  const ledgerRows: FakeLedgerRow[] = [];
+  const earningsRows: FakeEarningsRow[] = [];
+  const payoutRows: FakePayoutRow[] = [];
+
+  const db = {
+    prepare(sql: string) {
+      let bound: unknown[] = [];
+      const stmt = {
+        bind(...values: unknown[]) { bound = values; return stmt; },
+        async first() {
+          if (sql.includes('polar_account_id') && sql.includes('FROM user')) {
+            return userByPolarAccountId;
+          }
+          return null;
+        },
+        async run() {
+          if (sql.includes('polar_ledger')) {
+            const [id, webhook_id, event_type, polar_object_id, polar_customer_id,
+                  polar_user_id, amount_cents, currency, status, meta_json, created_at] =
+              bound as [string, string, string, string | null, string | null,
+                         string | null, number | null, string | null, string, string, number];
+            const exists = ledgerRows.some((r) => r.webhook_id === webhook_id);
+            if (exists) return { meta: { changes: 0 } };
+            ledgerRows.push({ id, webhook_id, event_type, polar_object_id, polar_customer_id,
+                             polar_user_id, amount_cents, currency, status, meta_json, created_at });
+            return { meta: { changes: 1 } };
+          }
+          if (sql.includes('creator_earnings')) {
+            const [id, user_id, kind, amount_cents, platform_fee_cents, currency,
+                  polar_order_id, description, created_at] =
+              bound as [string, string, string, number, number, string,
+                         string | null, string | null, number];
+            earningsRows.push({ id, user_id, kind, amount_cents, platform_fee_cents,
+                               currency, polar_order_id: polar_order_id ?? null,
+                               description: description ?? null, created_at });
+            return { meta: { changes: 1 } };
+          }
+          if (sql.includes('creator_payouts')) {
+            const [id, user_id, amount_cents, currency, polar_payout_id, status, paid_at, created_at] =
+              bound as [string, string, number, string, string | null, string, number | null, number];
+            const existingIdx = payoutRows.findIndex((r) => r.polar_payout_id === polar_payout_id);
+            if (existingIdx >= 0) {
+              payoutRows[existingIdx].status = status;
+              if (paid_at !== null) payoutRows[existingIdx].paid_at = paid_at;
+              return { meta: { changes: 1 } };
+            }
+            payoutRows.push({ id, user_id, amount_cents, currency,
+                             polar_payout_id: polar_payout_id ?? null,
+                             status, paid_at: paid_at ?? null, created_at });
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 1 } };
+        },
+      };
+      return stmt as unknown as D1PreparedStatement;
+    },
+  } as unknown as D1Database;
+
+  return { ledgerRows, earningsRows, payoutRows, binding: db };
+}
+
+describe('processEarningsEvent (via handlePolarWebhook)', () => {
+  it('credits creator_earnings when order.paid has valid metadata', async () => {
+    const app = buildApp(NOW);
+    const { earningsRows, binding } = makeFullFakeDB();
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: {
+        id: 'ord_123',
+        amount: 1000,
+        currency: 'usd',
+        metadata: { kind: 'tip', creator_user_id: 'u_creator', video_id: 'vid_1' },
+      },
+    });
+    const headers = await makeHeaders(payload);
+    const res = await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(res.status).toBe(200);
+    expect(earningsRows).toHaveLength(1);
+    expect(earningsRows[0].user_id).toBe('u_creator');
+    expect(earningsRows[0].kind).toBe('tip');
+    expect(earningsRows[0].amount_cents).toBe(1000);
+    expect(earningsRows[0].platform_fee_cents).toBe(100); // 10% of 1000
+    expect(earningsRows[0].currency).toBe('usd');
+    expect(earningsRows[0].polar_order_id).toBe('ord_123');
+    expect(earningsRows[0].description).toContain('vid_1');
+  });
+
+  it('sets membership description for membership orders', async () => {
+    const app = buildApp(NOW);
+    const { earningsRows, binding } = makeFullFakeDB();
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: {
+        id: 'ord_mem',
+        amount: 500,
+        currency: 'usd',
+        metadata: { kind: 'membership', creator_user_id: 'u_creator' },
+      },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(earningsRows).toHaveLength(1);
+    expect(earningsRows[0].kind).toBe('membership');
+    expect(earningsRows[0].description).toBe('Membership payment');
+  });
+
+  it('includes tip message in description when provided', async () => {
+    const app = buildApp(NOW);
+    const { earningsRows, binding } = makeFullFakeDB();
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: {
+        id: 'ord_msg',
+        amount: 200,
+        currency: 'usd',
+        metadata: { kind: 'tip', creator_user_id: 'u_creator', video_id: 'vid_2', message: 'Great work!' },
+      },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(earningsRows[0].description).toContain('Great work!');
+  });
+
+  it('skips creator_earnings when order.paid has no creator_user_id', async () => {
+    const app = buildApp(NOW);
+    const { earningsRows, binding } = makeFullFakeDB();
+    const payload = JSON.stringify({
+      type: 'order.paid',
+      data: { id: 'ord_123', amount: 1000, currency: 'usd' },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(earningsRows).toHaveLength(0);
+  });
+
+  it('inserts creator_payouts as pending for payout.created', async () => {
+    const app = buildApp(NOW);
+    const { payoutRows, binding } = makeFullFakeDB({ userByPolarAccountId: { id: 'u_creator' } });
+    const payload = JSON.stringify({
+      type: 'payout.created',
+      data: { id: 'po_abc', amount: 8000, currency: 'usd', account_id: 'acct_123' },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(payoutRows).toHaveLength(1);
+    expect(payoutRows[0].user_id).toBe('u_creator');
+    expect(payoutRows[0].status).toBe('pending');
+    expect(payoutRows[0].polar_payout_id).toBe('po_abc');
+    expect(payoutRows[0].amount_cents).toBe(8000);
+    expect(payoutRows[0].paid_at).toBeNull();
+  });
+
+  it('records paid_at when payout.paid is received', async () => {
+    const app = buildApp(NOW);
+    const { payoutRows, binding } = makeFullFakeDB({ userByPolarAccountId: { id: 'u_creator' } });
+    const payload = JSON.stringify({
+      type: 'payout.paid',
+      data: { id: 'po_xyz', amount: 5000, currency: 'usd', account_id: 'acct_123' },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(payoutRows[0].status).toBe('paid');
+    expect(payoutRows[0].paid_at).not.toBeNull();
+  });
+
+  it('advances payout from pending to paid on payout.paid for same payout id', async () => {
+    const app = buildApp(NOW);
+    const { payoutRows, binding } = makeFullFakeDB({ userByPolarAccountId: { id: 'u_creator' } });
+
+    const created = JSON.stringify({
+      type: 'payout.created',
+      data: { id: 'po_seq', amount: 3000, currency: 'usd', account_id: 'acct_123' },
+    });
+    const paid = JSON.stringify({
+      type: 'payout.paid',
+      data: { id: 'po_seq', amount: 3000, currency: 'usd', account_id: 'acct_123' },
+    });
+
+    const h1 = await makeHeaders(created, NOW, 'wh_1');
+    const h2 = await makeHeaders(paid, NOW, 'wh_2');
+    const env = { DB: binding, POLAR_WEBHOOK_SECRET: SECRET };
+
+    await app.request('/api/webhooks/polar', { method: 'POST', headers: h1, body: created }, env);
+    await app.request('/api/webhooks/polar', { method: 'POST', headers: h2, body: paid }, env);
+
+    // Only one payout row, status advanced to paid.
+    expect(payoutRows).toHaveLength(1);
+    expect(payoutRows[0].status).toBe('paid');
+    expect(payoutRows[0].paid_at).not.toBeNull();
+  });
+
+  it('skips creator_payouts when no user matches the polar account_id', async () => {
+    const app = buildApp(NOW);
+    const { payoutRows, binding } = makeFullFakeDB({ userByPolarAccountId: null });
+    const payload = JSON.stringify({
+      type: 'payout.created',
+      data: { id: 'po_abc', amount: 8000, currency: 'usd', account_id: 'acct_unknown' },
+    });
+    const headers = await makeHeaders(payload);
+    await app.request(
+      '/api/webhooks/polar',
+      { method: 'POST', headers, body: payload },
+      { DB: binding, POLAR_WEBHOOK_SECRET: SECRET },
+    );
+    expect(payoutRows).toHaveLength(0);
   });
 });

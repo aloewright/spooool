@@ -276,3 +276,35 @@ export async function sendDmcaUploaderNotifyEmail(
 ): Promise<EmailResult> {
   return send(env, { to: args.to, ...buildDmcaUploaderNotifyEmail(args) });
 }
+
+// LEGAL-REVIEW: placeholder copy — ALO-170. Counsel must approve before launch.
+export function buildDmcaAcknowledgmentEmail(args: {
+  claimId: string;
+  videoId: string;
+}): { subject: string; html: string; text: string } {
+  const { claimId, videoId } = args;
+  return {
+    subject: 'Spooool DMCA takedown notice received',
+    text:
+      `Thank you for submitting a DMCA takedown notice.\n\n` +
+      `We have received your claim (ID: ${claimId}) regarding video ID: ${videoId}.\n\n` +
+      `We will review your notice and take appropriate action within 5–10 business days. ` +
+      `If the content is found to infringe your copyright, it will be disabled.\n\n` +
+      `For questions, contact dmca@spooool.com.`,
+    html:
+      `<p>Thank you for submitting a DMCA takedown notice.</p>` +
+      `<p>We have received your claim (ID: <code>${escapeHtml(claimId)}</code>) ` +
+      `regarding video ID: <code>${escapeHtml(videoId)}</code>.</p>` +
+      `<p>We will review your notice and take appropriate action within 5–10 business days. ` +
+      `If the content is found to infringe your copyright, it will be disabled.</p>` +
+      `<p>For questions, contact ` +
+      `<a href="mailto:dmca@spooool.com">dmca@spooool.com</a>.</p>`,
+  };
+}
+
+export async function sendDmcaAcknowledgmentEmail(
+  env: EmailEnv,
+  args: { to: string; claimId: string; videoId: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildDmcaAcknowledgmentEmail(args) });
+}

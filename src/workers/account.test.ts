@@ -344,3 +344,102 @@ describe('account delete + cancel window', () => {
     expect(args.cancelUrl).toBe('http://t/settings');
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/account/earnings — YTD aggregation from creator_earnings / creator_payouts
+// ---------------------------------------------------------------------------
+
+interface EarningsStore {
+  polarStatus: string;
+  polarOrgId: string | null;
+  earningsGrossCents: number;
+  payoutsPaidCents: number;
+}
+
+function earningsApp(store: EarningsStore, asUser: { id: string } | null) {
+  const app = new Hono<AccountCtx>();
+  app.use('*', async (c, next) => {
+    c.set('user', asUser ? { id: asUser.id, email: 'x@x.com', name: 'X' } : null);
+    await next();
+  });
+
+  const stmt = (sql: string) => {
+    let bound: unknown[] = [];
+    const norm = sql.replace(/\s+/g, ' ').trim();
+    const api = {
+      bind(...v: unknown[]) { bound = v; return api; },
+      async first() {
+        if (norm.startsWith('SELECT polar_organization_id, polar_account_status')) {
+          return { polar_organization_id: store.polarOrgId, polar_account_status: store.polarStatus };
+        }
+        if (norm.startsWith('SELECT COALESCE(SUM(amount_cents), 0) AS gross FROM creator_earnings')) {
+          return { gross: store.earningsGrossCents };
+        }
+        if (norm.startsWith('SELECT COALESCE(SUM(amount_cents), 0) AS total FROM creator_payouts')) {
+          return { total: store.payoutsPaidCents };
+        }
+        void bound;
+        return null;
+      },
+      async all() { return { results: [] }; },
+      async run() { return { success: true, meta: { changes: 0 } }; },
+    };
+    return api as unknown as PreparedStmt;
+  };
+
+  app.route('/', accountRoutes);
+  const env = { DB: { prepare: stmt } as unknown as D1Database, CACHE: fakeKV([]), VIDEOS: fakeR2([]) };
+  return {
+    async get(path: string) {
+      return app.fetch(new Request(`http://t${path}`), env as never);
+    },
+  };
+}
+
+describe('GET /api/account/earnings', () => {
+  it('returns 401 when unauthenticated', async () => {
+    const app = earningsApp({ polarStatus: 'not_connected', polarOrgId: null, earningsGrossCents: 0, payoutsPaidCents: 0 }, null);
+    expect((await app.get('/api/account/earnings')).status).toBe(401);
+  });
+
+  it('returns zero earnings when no transactions exist', async () => {
+    const app = earningsApp({ polarStatus: 'active', polarOrgId: 'org_1', earningsGrossCents: 0, payoutsPaidCents: 0 }, { id: 'u1' });
+    const res = await app.get('/api/account/earnings');
+    expect(res.status).toBe(200);
+    const data = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(data.grossEarningsUsd).toBe(0);
+    expect(data.netPayoutsUsd).toBe(0);
+  });
+
+  it('converts cents to dollars correctly', async () => {
+    const app = earningsApp({ polarStatus: 'active', polarOrgId: 'org_1', earningsGrossCents: 5050, payoutsPaidCents: 4500 }, { id: 'u1' });
+    const res = await app.get('/api/account/earnings');
+    const data = await res.json() as { grossEarningsUsd: number; netPayoutsUsd: number };
+    expect(data.grossEarningsUsd).toBeCloseTo(50.50);
+    expect(data.netPayoutsUsd).toBeCloseTo(45.00);
+  });
+
+  it('includes polar status and org ID in response', async () => {
+    const app = earningsApp({ polarStatus: 'active', polarOrgId: 'org_abc', earningsGrossCents: 0, payoutsPaidCents: 0 }, { id: 'u1' });
+    const res = await app.get('/api/account/earnings');
+    const data = await res.json() as { polar: { accountStatus: string; organizationId: string | null; needsOnboarding: boolean } };
+    expect(data.polar.accountStatus).toBe('active');
+    expect(data.polar.organizationId).toBe('org_abc');
+    expect(data.polar.needsOnboarding).toBe(false);
+  });
+
+  it('sets needsOnboarding=true for non-active accounts', async () => {
+    const app = earningsApp({ polarStatus: 'pending', polarOrgId: null, earningsGrossCents: 0, payoutsPaidCents: 0 }, { id: 'u1' });
+    const res = await app.get('/api/account/earnings');
+    const data = await res.json() as { polar: { needsOnboarding: boolean } };
+    expect(data.polar.needsOnboarding).toBe(true);
+  });
+
+  it('includes year and taxDocStatus in response', async () => {
+    const app = earningsApp({ polarStatus: 'active', polarOrgId: null, earningsGrossCents: 0, payoutsPaidCents: 0 }, { id: 'u1' });
+    const res = await app.get('/api/account/earnings');
+    const data = await res.json() as { year: number; taxDocStatus: string };
+    expect(data.year).toBe(new Date().getUTCFullYear());
+    expect(data.taxDocStatus).toBe('polar-pending');
+  });
+});

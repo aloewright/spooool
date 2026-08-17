@@ -407,16 +407,32 @@ accountRoutes.get('/api/account/earnings', async (c) => {
 
   const polarStatus = (row?.polar_account_status ?? 'not_connected') as PolarAccountStatus;
 
-  // ALO-TODO: replace grossEarningsUsd / netPayoutsUsd with real Polar payout
-  // webhook aggregation once the partner-payout integration is live.
   const year = new Date().getUTCFullYear();
+  const yearStartMs = Date.UTC(year, 0, 1);
+  const yearEndMs = Date.UTC(year + 1, 0, 1);
+
+  const [earningsRow, payoutsRow] = await Promise.all([
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS gross
+       FROM creator_earnings
+       WHERE user_id = ? AND created_at >= ? AND created_at < ?`,
+    )
+      .bind(user.id, yearStartMs, yearEndMs)
+      .first<{ gross: number }>(),
+    c.env.DB.prepare(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total
+       FROM creator_payouts
+       WHERE user_id = ? AND status = 'paid'`,
+    )
+      .bind(user.id)
+      .first<{ total: number }>(),
+  ]);
+
   return c.json({
     year,
     currency: 'USD',
-    // Gross earnings before Spooool's 10% platform fee and Polar processing fees.
-    grossEarningsUsd: null as number | null,
-    // Net creator payout — what Polar actually transfers to the creator's bank.
-    netPayoutsUsd: null as number | null,
+    grossEarningsUsd: Number(earningsRow?.gross ?? 0) / 100,
+    netPayoutsUsd: Number(payoutsRow?.total ?? 0) / 100,
     // 'polar-pending' = Polar has not yet issued 1099 forms for creator partners.
     // Update to 'polar-issues' once Polar confirms 1099-K / 1099-MISC delivery.
     taxDocStatus: 'polar-pending' as 'polar-pending' | 'polar-issues',

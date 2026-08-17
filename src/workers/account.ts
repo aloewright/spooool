@@ -122,7 +122,11 @@ accountRoutes.put('/api/account/email', async (c) => {
     .first();
   if (taken) return c.json({ error: 'Email already in use' }, 409);
 
-  await c.env.DB.prepare('UPDATE user SET email = ?, updatedAt = ? WHERE id = ?')
+  // Reset emailVerified so the new address must be confirmed. The user can
+  // re-send via the "Resend verification email" button in account settings.
+  await c.env.DB.prepare(
+    'UPDATE user SET email = ?, emailVerified = 0, updatedAt = ? WHERE id = ?',
+  )
     .bind(parsed.data.email, Date.now(), user.id)
     .run();
 

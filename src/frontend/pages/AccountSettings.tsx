@@ -271,7 +271,7 @@ export function AccountSettings(): JSX.Element {
         body: JSON.stringify({ email: emailDraft }),
       });
       if (!r.ok) throw new Error(((await r.json()) as { error: string }).error);
-      setEmailInfo('Email updated.');
+      setEmailInfo('Email updated. Check your inbox to verify the new address.');
       await reload();
     } catch (err) {
       setEmailError(err instanceof Error ? err.message : 'Failed');
@@ -428,7 +428,9 @@ export function AccountSettings(): JSX.Element {
               className="btn btn--ghost btn--sm"
               onClick={() => {
                 setResendStatus(null);
-                void resendVerificationEmail(session.user.email).then((r) =>
+                // Use emailDraft (updated by reload() after save) rather
+                // than session.user.email which may be cached and stale.
+                void resendVerificationEmail(emailDraft || session.user.email).then((r) =>
                   setResendStatus(r.ok ? 'Verification email sent.' : r.error ?? 'Failed'),
                 );
               }}

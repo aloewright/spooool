@@ -78,10 +78,12 @@ export function createAuth(env: AuthEnv) {
     secret: env.BETTER_AUTH_SECRET,
     baseURL,
     plugins: [
-      captcha({
-        provider: 'cloudflare-turnstile',
-        secretKey: env.TURNSTILE_SECRET_KEY || '',
-      }),
+      // Only register when the secret is actually set. Without a key the
+      // plugin requires x-captcha-response on every auth request but the
+      // frontend never renders the widget, blocking all auth silently.
+      ...(env.TURNSTILE_SECRET_KEY
+        ? [captcha({ provider: 'cloudflare-turnstile', secretKey: env.TURNSTILE_SECRET_KEY })]
+        : []),
     ],
     emailAndPassword: {
       enabled: true,

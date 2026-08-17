@@ -228,6 +228,9 @@ export function Watch(): JSX.Element {
   const upNextRef = useRef<UpNextVideo[]>([]);
   const autoAdvanceRef = useRef<boolean>(false);
   const [video, setVideo] = useState<VideoResponse | null>(null);
+  // E7 signed playback token for R2-backed HLS. Fetched lazily when the video
+  // metadata confirms HLS is the active path (stream_video_id is absent).
+  const [hlsToken, setHlsToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [likes, setLikes] = useState<{ count: number; liked: boolean } | null>(null);
   const [likeBusy, setLikeBusy] = useState(false);
@@ -291,6 +294,24 @@ export function Watch(): JSX.Element {
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Unknown error'));
   }, [id]);
+
+  // Fetch a signed playback token once we know the video uses the R2/HLS path
+  // (stream_video_id is absent). The token is embedded in the manifest URL so
+  // every subsequent segment request carries it automatically.
+  useEffect(() => {
+    if (!id || !video) return;
+    if (video.stream_video_id || video.status !== 'ready') return;
+    void fetch(`/api/videos/${id}/playback-token`, {
+      method: 'POST',
+      credentials: 'same-origin',
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        const data = (await r.json()) as { token: string };
+        setHlsToken(data.token);
+      })
+      .catch(() => undefined);
+  }, [id, video?.stream_video_id, video?.status]);
 
   // Poll for status updates while the video is being processed. Stops
   // automatically once the video reaches a terminal state (ready or failed).
@@ -715,11 +736,21 @@ export function Watch(): JSX.Element {
             onTeardown={handlePlayerTeardown}
           />
         ) : !video.stream_video_id && video.status === 'ready' ? (
-          <HlsPlayer
-            src={`/api/videos/${video.id}/hls/master.m3u8`}
-            startTime={startAt ?? undefined}
-            onReady={() => setPlayerEpoch((n) => n + 1)}
-          />
+          hlsToken ? (
+            <HlsPlayer
+              src={`/api/videos/${video.id}/hls/master.m3u8?t=${hlsToken}`}
+              startTime={startAt ?? undefined}
+              onReady={() => setPlayerEpoch((n) => n + 1)}
+            />
+          ) : (
+            <div
+              className="ds-empty"
+              style={{ aspectRatio: '16 / 9', display: 'flex', alignItems: 'center',
+                       justifyContent: 'center', color: 'white', padding: 'var(--space-3)' }}
+            >
+              Loading player…
+            </div>
+          )
         ) : (
           <div
             className="ds-empty"

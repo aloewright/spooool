@@ -17,6 +17,7 @@ import {
 import { verifyTurnstile, type TurnstileEnv } from './turnstile';
 import { edgeCache, purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
+import { verifyPlaybackToken, rewriteM3u8, playbackTokenRoutes } from './playback-token';
 import { parseRangeHeader } from './video-range';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
 import {
@@ -39,6 +40,7 @@ export interface VideoRoutesEnv extends TurnstileEnv {
   RATE_LIMITER?: DurableObjectNamespace;
   VIDEO_ENCODING: Queue;
   ANALYTICS?: AnalyticsEngineDataset;
+  BETTER_AUTH_SECRET?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string; emailVerified?: boolean } | null;
@@ -307,14 +309,24 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   });
 });
 
-// HLS proxy for the R2+FFmpeg fallback path (ALO-136). The encoder stores
-// playlists and segments under hls/{videoId}/ in R2. Relative URLs inside
-// the playlists resolve correctly through this proxy because the browser
-// resolves them against the response URL (e.g. master.m3u8 → 1080p.m3u8
-// → /api/videos/:id/hls/1080p.m3u8, then 1080p_seg000.ts resolves too).
+// HLS proxy for the R2+FFmpeg fallback path (ALO-136 / E7). The encoder stores
+// playlists and segments under hls/{videoId}/ in R2.
+//
+// Signed playback tokens (E7 abuse defense): every HLS request must carry a
+// short-lived JWT in the `?t=` query param. The token is issued by
+// POST /api/videos/:id/playback-token (see playback-token.ts). When the proxy
+// serves a .m3u8 playlist, it rewrites all relative URL lines to absolute
+// Worker paths that carry the same token — this propagates auth to every
+// subsequent segment request without the player needing to add headers.
 videoRoutes.get('/api/videos/:id/hls/*', async (c) => {
   const id = c.req.param('id');
   const rest = c.req.path.slice(`/api/videos/${id}/hls/`.length);
+
+  // Validate playback token before touching D1 or R2.
+  const token = c.req.query('t');
+  if (!token) return c.json({ error: 'Playback token required' }, 401);
+  const tokenResult = await verifyPlaybackToken(token, id, c.env);
+  if (!tokenResult.valid) return c.json({ error: 'Invalid or expired playback token' }, 401);
 
   // HLS players fire one request per segment; hitting D1 on every one would
   // exhaust the database under load. The auth row is tiny and changes rarely,
@@ -349,14 +361,32 @@ videoRoutes.get('/api/videos/:id/hls/*', async (c) => {
   if (!object) return c.json({ error: 'Segment not found' }, 404);
 
   const isPlaylist = rest.endsWith('.m3u8');
-  const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/MP2T';
-  return new Response(object.body, {
+  if (!isPlaylist) {
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': 'video/MP2T',
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    });
+  }
+
+  // For playlists: read, rewrite relative URLs to embed the token, then serve.
+  const raw = await object.text();
+  const origin = new URL(c.req.url).origin;
+  const restDir = rest.includes('/') ? rest.slice(0, rest.lastIndexOf('/') + 1) : '';
+  const rewritten = rewriteM3u8(raw, id, restDir, token, origin);
+  return new Response(rewritten, {
     headers: {
-      'Content-Type': contentType,
-      'Cache-Control': isPlaylist ? 'public, max-age=60' : 'public, max-age=31536000, immutable',
+      'Content-Type': 'application/vnd.apple.mpegurl',
+      // Short TTL: playlists reference segments by name and the token embeds
+      // the same expiry, so serving stale manifests with an expired token
+      // would break playback.
+      'Cache-Control': 'private, max-age=60',
     },
   });
 });
+
+videoRoutes.route('/', playbackTokenRoutes);
 
 type VideoRoutesContext = Context<{
   Bindings: VideoRoutesEnv;

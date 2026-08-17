@@ -668,6 +668,71 @@ describe('POST /api/videos/upload multi-chunk (target=video)', () => {
   });
 });
 
+describe('GET /api/videos/:id returns thumbnail_url and playback_hls_url', () => {
+  it('includes thumbnail_url and playback_hls_url in the response', async () => {
+    const videoId = 'vid-thumb';
+    const ownerId = 'owner-thumb';
+
+    const fakeVideo = {
+      id: videoId,
+      user_id: ownerId,
+      title: 'Test Video',
+      description: '',
+      r2_key: `${ownerId}/${videoId}/raw.mp4`,
+      stream_video_id: null,
+      playback_hls_url: `/api/videos/${videoId}/hls/master.m3u8`,
+      thumbnail_url: `/api/thumbnails/${ownerId}/${videoId}/auto.jpg`,
+      status: 'ready',
+      view_count: 0,
+      created_at: '2025-01-01T00:00:00Z',
+      updated_at: '2025-01-01T00:00:00Z',
+      channel_name: 'Test Channel',
+      channel_username: 'test',
+      hidden_at: null,
+      dmca_status: null,
+    };
+
+    const DB = {
+      prepare(sql: string) {
+        let bound: unknown[] = [];
+        const stmt = {
+          bind(...v: unknown[]) { bound = v; return stmt; },
+          async first() {
+            if (sql.includes('FROM videos v') && sql.includes('playback_hls_url')) return fakeVideo;
+            if (sql.includes('UPDATE videos SET view_count')) return { success: true };
+            if (sql.includes('INSERT INTO views')) return { success: true };
+            return null;
+          },
+          async run() { return { success: true }; },
+        };
+        void bound;
+        return stmt;
+      },
+    } as unknown as D1Database;
+
+    const CACHE = {
+      get: async () => null,
+      put: async () => {},
+      delete: async () => {},
+    } as unknown as KVNamespace;
+
+    const env = {
+      DB,
+      CACHE,
+      VIDEOS: {} as R2Bucket,
+      SESSIONS: {} as KVNamespace,
+      VIDEO_ENCODING: { send: async () => {} } as unknown as Queue,
+    };
+
+    const fetcher = mountWithUser(env, { id: ownerId, email: 'o@t.com', name: 'Owner', emailVerified: true });
+    const res = await fetcher(`/api/videos/${videoId}`);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.thumbnail_url).toBe(`/api/thumbnails/${ownerId}/${videoId}/auto.jpg`);
+    expect(body.playback_hls_url).toBe(`/api/videos/${videoId}/hls/master.m3u8`);
+  });
+});
+
 describe('DELETE /api/videos/:id cache invalidation (ALO-431)', () => {
   it('deletes videoMetaCacheKey from KV when the owner deletes their video', async () => {
     const cacheDeletes: string[] = [];

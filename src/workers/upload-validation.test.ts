@@ -180,6 +180,35 @@ describe('parseChunkMetadataFromFormData', () => {
 
     expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
   });
+
+  it('accepts a UUID-format uploadId', () => {
+    const fd = new FormData();
+    fd.set('uploadId', '550e8400-e29b-41d4-a716-446655440000');
+    fd.set('chunkIndex', '1');
+    fd.set('chunkCount', '3');
+
+    const result = parseChunkMetadataFromFormData(fd);
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects an uploadId with path-traversal characters', () => {
+    const badIds = ['../escape', 'has space', 'has/slash', '<script>', 'id;rm'];
+    for (const id of badIds) {
+      const fd = new FormData();
+      fd.set('uploadId', id);
+      fd.set('chunkIndex', '1');
+      fd.set('chunkCount', '2');
+      expect(parseChunkMetadataFromFormData(fd).success, `expected false for uploadId="${id}"`).toBe(false);
+    }
+  });
+
+  it('rejects an uploadId longer than 64 characters', () => {
+    const fd = new FormData();
+    fd.set('uploadId', 'a'.repeat(65));
+    fd.set('chunkIndex', '1');
+    fd.set('chunkCount', '2');
+    expect(parseChunkMetadataFromFormData(fd).success).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

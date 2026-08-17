@@ -51,6 +51,8 @@ type CachedVideoMeta = {
   description: string;
   r2_key: string;
   stream_video_id: string | null;
+  playback_hls_url: string | null;
+  thumbnail_url: string | null;
   status: string;
   view_count: number;
   created_at: string;
@@ -136,7 +138,7 @@ videoRoutes.get('/api/videos', edgeCache({ ttl: 30, swr: 60 }), async (c) => {
   const offset = (page - 1) * limit;
 
   const { results } = await c.env.DB.prepare(
-    `SELECT id, user_id, title, description, r2_key, stream_video_id, status, view_count, created_at, updated_at
+    `SELECT id, user_id, title, description, r2_key, stream_video_id, thumbnail_url, status, view_count, created_at, updated_at
      FROM videos
      WHERE deleted_at IS NULL AND hidden_at IS NULL AND status != 'uploading'
      ORDER BY created_at DESC
@@ -157,7 +159,8 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
 
   if (!video) {
     video = await c.env.DB.prepare(
-      `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id, v.status,
+      `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id,
+              v.playback_hls_url, v.thumbnail_url, v.status,
               v.view_count, v.created_at, v.updated_at, v.hidden_at, v.dmca_status,
               u.name AS channel_name, u.username AS channel_username
        FROM videos v
@@ -574,10 +577,16 @@ videoRoutes.post('/api/videos/upload', async (c) => {
       return c.json({ error: captcha.error ?? 'Captcha verification failed' }, 403);
     }
 
+    // For multi-chunk uploads, the server doesn't receive the total file size
+    // directly. Use chunk-0 size × chunkCount as a conservative upper bound:
+    // every chunk except the last is exactly rawFile.size, so the true total
+    // is at most rawFile.size * chunkCount. Catch obvious overages before any
+    // R2 work or quota queries fire.
+    const estimatedTotalSize = chunkCount === 1 ? rawFile.size : rawFile.size * chunkCount;
     const initialError = validateInitialFile({
       fileName: rawFile.name,
       mimeType: rawFile.type,
-      totalSize: chunkCount === 1 ? rawFile.size : undefined,
+      totalSize: estimatedTotalSize,
     });
     if (initialError) {
       return c.json({ error: initialError.message, code: initialError.code }, 400);
@@ -789,6 +798,17 @@ videoRoutes.post('/api/videos/upload', async (c) => {
     return c.json({ error: 'Upload session no longer valid.', code: 'upload_session_invalid' }, 409);
   }
 
+  // Write the done-sentinel BEFORE deleting session keys. If the delete
+  // succeeds but the sentinel write fails (or the response is dropped before
+  // both finish), a client retry would find no session AND no sentinel and get
+  // a 400. Writing the sentinel first means the worst case on a write failure
+  // is that the session keys stick around briefly — harmless, TTL cleans them.
+  await env.SESSIONS.put(
+    `upload-done:${user.id}:${resolvedUploadId}`,
+    JSON.stringify({ videoId: uploadMeta.videoId }),
+    { expirationTtl: 300 },
+  );
+
   await env.VIDEO_ENCODING.send({ videoId: uploadMeta.videoId, r2Key: uploadMeta.r2Key });
   await triggerFanOut(env.CHANNEL_SUBSCRIBER_DO, {
     videoId: uploadMeta.videoId,
@@ -798,15 +818,6 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   purgeTrendingEdgeCache(c);
 
   await Promise.all([env.SESSIONS.delete(mpidKey), env.SESSIONS.delete(metaKey), env.SESSIONS.delete(partsKey)]);
-
-  // Write a short-lived sentinel so a retry of the final chunk (e.g. when
-  // the 201 response was dropped in transit) gets the same 201 rather than
-  // a 400 "Missing upload session". 300 s is well within any retry window.
-  await env.SESSIONS.put(
-    `upload-done:${user.id}:${resolvedUploadId}`,
-    JSON.stringify({ videoId: uploadMeta.videoId }),
-    { expirationTtl: 300 },
-  );
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);
 });

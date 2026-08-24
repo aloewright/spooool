@@ -1,5 +1,41 @@
 import { describe, expect, it } from 'vitest';
-import { buildOgMetaTags, clampForMeta, isPublicViewable } from './og-meta';
+import { buildOgMetaTags, clampForMeta, isPublicViewable, ogImageUrl } from './og-meta';
+
+describe('ogImageUrl', () => {
+  it('appends resize params to videodelivery.net thumbnails', () => {
+    const url = ogImageUrl(
+      'https://videodelivery.net/abc123/thumbnails/thumbnail.jpg',
+      'https://spooool.com',
+    );
+    expect(url).toBe(
+      'https://videodelivery.net/abc123/thumbnails/thumbnail.jpg?width=1200&height=630&fit=crop',
+    );
+  });
+
+  it('appends resize params to customer cloudflarestream.com subdomains', () => {
+    const url = ogImageUrl(
+      'https://customer-abc.cloudflarestream.com/abc123/thumbnails/thumbnail.jpg',
+      'https://spooool.com',
+    );
+    expect(url).toBe(
+      'https://customer-abc.cloudflarestream.com/abc123/thumbnails/thumbnail.jpg?width=1200&height=630&fit=crop',
+    );
+  });
+
+  it('passes non-Stream URLs through unchanged', () => {
+    const raw = 'https://r2.example.com/thumbs/vid.jpg';
+    expect(ogImageUrl(raw, 'https://spooool.com')).toBe(raw);
+  });
+
+  it('falls back to /icon.png when thumbnail is null', () => {
+    expect(ogImageUrl(null, 'https://x.test')).toBe('https://x.test/icon.png');
+  });
+
+  it('returns the raw value when the URL is not parseable', () => {
+    const bad = 'not a url';
+    expect(ogImageUrl(bad, 'https://x.test')).toBe(bad);
+  });
+});
 
 describe('clampForMeta', () => {
   it('returns the empty string for null/undefined/empty input', () => {

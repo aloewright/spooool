@@ -32,6 +32,26 @@ interface VideoMetaRow {
 const TITLE_MAX = 70;
 const DESCRIPTION_MAX = 200;
 
+// Cloudflare Stream CDN hostnames that accept thumbnail resize parameters.
+// Requesting 1200×630 ensures social crawlers get a properly sized OG card
+// instead of whatever resolution the Stream encoder chose for the player.
+const CF_STREAM_HOSTS = ['videodelivery.net', 'cloudflarestream.com'];
+
+export function ogImageUrl(thumbnailUrl: string | null, origin: string): string {
+  if (!thumbnailUrl) return `${origin}/icon.png`;
+  try {
+    const u = new URL(thumbnailUrl);
+    const isStream = CF_STREAM_HOSTS.some((h) => u.hostname === h || u.hostname.endsWith(`.${h}`));
+    if (!isStream) return thumbnailUrl;
+    u.searchParams.set('width', '1200');
+    u.searchParams.set('height', '630');
+    u.searchParams.set('fit', 'crop');
+    return u.toString();
+  } catch {
+    return thumbnailUrl;
+  }
+}
+
 export function clampForMeta(value: string | null | undefined, max: number): string {
   if (!value) return '';
   // Iterate code points so emoji at the boundary aren't split into lone
@@ -55,7 +75,7 @@ export function buildOgMetaTags(args: {
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  const image = ogImageUrl(video.thumbnail_url, origin);
 
   const escape = (v: string): string =>
     v

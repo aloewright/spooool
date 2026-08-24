@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { resendVerificationEmail, useSession } from '../lib/auth-client';
 import { signOutWithAnalyticsReset } from '../lib/auth-signout';
 import { ActiveSessions } from '../components/ActiveSessions';
+import { ConnectedAccounts } from '../components/ConnectedAccounts';
 
 interface AccountInfo {
   id: string;
@@ -505,6 +506,8 @@ export function AccountSettings(): JSX.Element {
           <StorageBar used={account.storage.used} quota={account.storage.quota} />
         </section>
       )}
+
+      <ConnectedAccounts />
 
       <ActiveSessions />
 

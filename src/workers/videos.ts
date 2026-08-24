@@ -52,6 +52,9 @@ type CachedVideoMeta = {
   r2_key: string;
   stream_video_id: string | null;
   status: string;
+  bytes: number | null;
+  playback_hls_url: string | null;
+  thumbnail_url: string | null;
   view_count: number;
   created_at: string;
   updated_at: string;
@@ -111,7 +114,7 @@ videoRoutes.get('/api/videos/trending', edgeCache({ ttl: 300, swr: 600 }), async
      LEFT JOIN user u ON u.id = v.user_id
      LEFT JOIN views ON views.video_id = v.id
        AND views.viewed_at >= datetime('now', '-7 days')
-     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.status != 'uploading'
+     WHERE v.deleted_at IS NULL AND v.hidden_at IS NULL AND v.status = 'ready'
      GROUP BY v.id
      ORDER BY recent_views DESC, v.view_count DESC, v.created_at DESC
      LIMIT ?`,
@@ -136,9 +139,10 @@ videoRoutes.get('/api/videos', edgeCache({ ttl: 30, swr: 60 }), async (c) => {
   const offset = (page - 1) * limit;
 
   const { results } = await c.env.DB.prepare(
-    `SELECT id, user_id, title, description, r2_key, stream_video_id, status, view_count, created_at, updated_at
+    `SELECT id, user_id, title, description, r2_key, stream_video_id, status,
+            bytes, thumbnail_url, view_count, created_at, updated_at
      FROM videos
-     WHERE deleted_at IS NULL AND hidden_at IS NULL AND status != 'uploading'
+     WHERE deleted_at IS NULL AND hidden_at IS NULL AND status = 'ready'
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`,
   )
@@ -158,6 +162,7 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
   if (!video) {
     video = await c.env.DB.prepare(
       `SELECT v.id, v.user_id, v.title, v.description, v.r2_key, v.stream_video_id, v.status,
+              v.bytes, v.playback_hls_url, v.thumbnail_url,
               v.view_count, v.created_at, v.updated_at, v.hidden_at, v.dmca_status,
               u.name AS channel_name, u.username AS channel_username
        FROM videos v
@@ -805,7 +810,7 @@ videoRoutes.post('/api/videos/upload', async (c) => {
   await env.SESSIONS.put(
     `upload-done:${user.id}:${resolvedUploadId}`,
     JSON.stringify({ videoId: uploadMeta.videoId }),
-    { expirationTtl: 300 },
+    { expirationTtl: 900 },
   );
 
   return c.json({ id: uploadMeta.videoId, status: 'queued' }, 201);

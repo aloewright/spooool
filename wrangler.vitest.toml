@@ -79,6 +79,7 @@ EMAIL_FROM = "noreply@spooool.com"
 EMAIL_FROM_NAME = "Spooool"
 AI_GATEWAY_MODE = "run-gateway"
 CF_STREAM_WEBHOOK_SECRET = "vitest-webhook-secret"
+RENDER_CALLBACK_SECRET = "vitest-render-secret"
 
 # No [ai] binding here on purpose: AI bindings have no local implementation, so
 # the vitest-pool-workers harness would open a remote proxy session and require

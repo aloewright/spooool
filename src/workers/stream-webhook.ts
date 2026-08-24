@@ -4,6 +4,7 @@ import { buildThumbnailCandidates } from './thumbnails';
 import { VIDEO_STATUSES, canTransition, type VideoStatus } from './video-status';
 import { sendNewUploadEmails, type NotificationDbEnv } from './notification-email';
 import { waitUntilBackground } from './wait-until';
+import { videoMetaCacheKey } from './video-meta-cache';
 
 export const STREAM_WEBHOOK_TOLERANCE_SECONDS = 60 * 5;
 
@@ -116,6 +117,7 @@ export async function verifyWebhookSignature(
 
 export interface StreamWebhookEnv extends NotificationDbEnv {
   CF_STREAM_WEBHOOK_SECRET?: string;
+  CACHE?: KVNamespace;
 }
 
 export interface StreamWebhookDeps {
@@ -200,6 +202,9 @@ export const handleStreamWebhook =
              WHERE v.stream_video_id = ?`,
           ).bind(payload.uid).first<{ id: string; user_id: string; title: string; channel_name: string | null }>();
           if (!video) return;
+          // Invalidate the KV metadata cache so the next GET reflects the
+          // updated status, thumbnail_url and playback_hls_url immediately.
+          await c.env.CACHE?.delete(videoMetaCacheKey(video.id)).catch(() => {});
           await sendNewUploadEmails(c.env, {
             videoId: video.id,
             channelUserId: video.user_id,

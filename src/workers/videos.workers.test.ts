@@ -88,3 +88,74 @@ describe('DELETE /api/videos cache invalidation (ALO-431)', () => {
     expect(videoMetaCacheKey('vid-x')).toBe('video:v1:vid-x');
   });
 });
+
+describe('/api/webhooks/encode/:id/complete and /fail', () => {
+  const ENCODE_SECRET = 'vitest-render-secret';
+  const VIDEO_ID = 'vid-encode-wh';
+
+  beforeAll(async () => {
+    await seedTestCreator(env.DB, 'creator-enc', 'enc@example.com', 'Enc Creator');
+    await env.DB.prepare(
+      `INSERT INTO videos (id, user_id, title, description, r2_key, status, view_count, created_at, updated_at)
+       VALUES (?, 'creator-enc', 'Encode Test', '', 'creator-enc/${VIDEO_ID}/raw.mp4', 'encoding', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO NOTHING`,
+    ).bind(VIDEO_ID).run();
+  });
+
+  it('returns 401 without x-render-secret', async () => {
+    const res = await SELF.fetch(`http://localhost/api/webhooks/encode/${VIDEO_ID}/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ masterKey: `hls/${VIDEO_ID}/master.m3u8` }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 400 when masterKey is missing', async () => {
+    const res = await SELF.fetch(`http://localhost/api/webhooks/encode/${VIDEO_ID}/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-render-secret': ENCODE_SECRET },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('transitions status to ready and sets playback_hls_url on complete', async () => {
+    const masterKey = `hls/${VIDEO_ID}/master.m3u8`;
+    const thumbKey = `thumbnails/creator-enc/${VIDEO_ID}/auto.jpg`;
+    const res = await SELF.fetch(`http://localhost/api/webhooks/encode/${VIDEO_ID}/complete`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-render-secret': ENCODE_SECRET },
+      body: JSON.stringify({ masterKey, thumbnailKey: thumbKey }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    const row = await env.DB.prepare('SELECT status, playback_hls_url, thumbnail_url FROM videos WHERE id = ?')
+      .bind(VIDEO_ID).first<{ status: string; playback_hls_url: string; thumbnail_url: string }>();
+    expect(row?.status).toBe('ready');
+    expect(row?.playback_hls_url).toBe(`/api/videos/${VIDEO_ID}/hls/master.m3u8`);
+    expect(row?.thumbnail_url).toBeTruthy();
+  });
+
+  it('transitions status to failed on /fail', async () => {
+    const failId = 'vid-encode-fail';
+    await env.DB.prepare(
+      `INSERT INTO videos (id, user_id, title, description, r2_key, status, view_count, created_at, updated_at)
+       VALUES (?, 'creator-enc', 'Fail Test', '', 'creator-enc/${failId}/raw.mp4', 'encoding', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO NOTHING`,
+    ).bind(failId).run();
+
+    const res = await SELF.fetch(`http://localhost/api/webhooks/encode/${failId}/fail`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-render-secret': ENCODE_SECRET },
+      body: JSON.stringify({ error: 'ffmpeg exited 1' }),
+    });
+    expect(res.status).toBe(200);
+
+    const row = await env.DB.prepare('SELECT status FROM videos WHERE id = ?')
+      .bind(failId).first<{ status: string }>();
+    expect(row?.status).toBe('failed');
+  });
+});

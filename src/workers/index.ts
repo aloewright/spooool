@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { purgeTrendingEdgeCache } from './edge-cache';
 import { bumpTrendingCacheVersion } from './trending-cache';
+import { videoMetaCacheKey } from './video-meta-cache';
 import { waitUntilBackground } from './wait-until';
 import { analyticsRoutes } from './analytics';
 import { accountRoutes, runDeletionSweep } from './account';
@@ -185,6 +186,7 @@ app.post('/api/webhooks/encode/:id/complete', async (c) => {
 
   // Invalidate caches: the video is now ready with a thumbnail, so both the
   // trending list and any cached video-metadata KV entries are stale.
+  waitUntilBackground(c, c.env.CACHE.delete(videoMetaCacheKey(videoId)));
   waitUntilBackground(c, bumpTrendingCacheVersion(c.env.CACHE));
   purgeTrendingEdgeCache(c);
 

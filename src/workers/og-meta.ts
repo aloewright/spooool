@@ -55,7 +55,13 @@ export function buildOgMetaTags(args: {
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // ALO-E5: use the dedicated OG image endpoint so every video gets a
+  // branded card. Derive the ID from watchUrl (/watch/:id → /api/og/:id)
+  // so we don't need to widen the function signature. For videos with a
+  // thumbnail the endpoint redirects to it (crawlers follow redirects);
+  // for videos without one it returns a generated SVG card.
+  const videoId = watchUrl.slice(watchUrl.lastIndexOf('/') + 1);
+  const image = `${origin}/api/og/${videoId}`;
 
   const escape = (v: string): string =>
     v

@@ -47,7 +47,7 @@ describe('buildOgMetaTags', () => {
     expect(out).toContain('<meta property="og:title" content="My great video" />');
     expect(out).toContain('<meta property="og:description" content="A short summary." />');
     expect(out).toContain('<meta property="og:url" content="https://spooool.com/watch/abc" />');
-    expect(out).toContain('<meta property="og:image" content="https://thumbs.example/abc.jpg" />');
+    expect(out).toContain('<meta property="og:image" content="https://spooool.com/api/og/abc" />');
     expect(out).toContain('<meta property="og:site_name" content="Spooool" />');
     expect(out).toContain('<meta name="twitter:card" content="summary_large_image" />');
   });
@@ -62,13 +62,22 @@ describe('buildOgMetaTags', () => {
     expect(out).toContain('&lt;script&gt;x&lt;/script&gt;');
   });
 
-  it('falls back to a thumbnail of /icon.png when none is set', () => {
-    const out = buildOgMetaTags({
+  it('points og:image to the /api/og/:id endpoint (thumbnail-or-card redirect)', () => {
+    // With thumbnail
+    const withThumb = buildOgMetaTags({
+      origin: 'https://x.test',
+      watchUrl: 'https://x.test/watch/1',
+      video: { ...baseVideo },
+    });
+    expect(withThumb).toContain('og:image" content="https://x.test/api/og/1"');
+
+    // Without thumbnail — same endpoint; the handler returns an SVG card
+    const noThumb = buildOgMetaTags({
       origin: 'https://x.test',
       watchUrl: 'https://x.test/watch/1',
       video: { ...baseVideo, thumbnail_url: null },
     });
-    expect(out).toContain('og:image" content="https://x.test/icon.png"');
+    expect(noThumb).toContain('og:image" content="https://x.test/api/og/1"');
   });
 
   it('falls back the description to a sensible default when null', () => {

@@ -23,6 +23,7 @@ import { likeRoutes } from './likes';
 import { moderationRoutes } from './moderation';
 import { oembedRoutes } from './oembed';
 import { ogMetaRoutes } from './og-meta';
+import { ogImageRoutes } from './og-image';
 import { embedPageRoutes } from './embed-page';
 import {
   AUTH_WRITE_BUCKET,
@@ -315,8 +316,10 @@ app.route('/', tagRoutes);
 app.route('/', feedRoutes);
 app.route('/', discoverRoutes);
 app.route('/', waitlistRoutes);
-// /watch/:id injects per-video OG tags; /embed/:id serves the SPA shell with
-// relaxed framing headers. Both mounted last so /api/* always wins.
+// /api/og/:videoId generates branded OG card images; /watch/:id injects
+// per-video OG tags; /embed/:id serves the SPA shell with relaxed framing
+// headers. All mounted last so other /api/* routes always win.
+app.route('/', ogImageRoutes);
 app.route('/', ogMetaRoutes);
 app.route('/', embedPageRoutes);
 

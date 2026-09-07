@@ -1,8 +1,7 @@
 // ALO-158: per-video Open Graph + Twitter card meta tags injected into the
-// SPA HTML for /watch/:id. We don't render a custom card image — the video's
-// existing thumbnail is the right preview surface, and serving it directly
-// avoids a round-trip through ImageResponse / Browser Rendering for the
-// common case. (A title-overlay variant can be a follow-up if/when needed.)
+// SPA HTML for /watch/:id. The og:image points to /og/:videoId.png (our own
+// image endpoint) which proxies the thumbnail through CF Image Resizing at
+// 1200×630 and falls back to an SVG placeholder with title text.
 //
 // Strategy: worker fetches index.html from the assets binding, runs an
 // HTMLRewriter pass that strips any existing site-wide og:* / twitter:*
@@ -17,7 +16,7 @@ export interface OgMetaEnv {
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }
 
-interface VideoMetaRow {
+export interface VideoMetaRow {
   id: string;
   title: string;
   description: string | null;
@@ -47,7 +46,7 @@ export function clampForMeta(value: string | null | undefined, max: number): str
 export function buildOgMetaTags(args: {
   origin: string;
   watchUrl: string;
-  video: Pick<VideoMetaRow, 'title' | 'description' | 'thumbnail_url' | 'channel_name'>;
+  video: Pick<VideoMetaRow, 'id' | 'title' | 'description' | 'channel_name'>;
 }): string {
   const { origin, watchUrl, video } = args;
   const title = clampForMeta(video.title, TITLE_MAX) || 'Spooool';
@@ -55,7 +54,9 @@ export function buildOgMetaTags(args: {
     video.description ?? `Watch on Spooool${video.channel_name ? ` — ${video.channel_name}` : ''}`,
     DESCRIPTION_MAX,
   );
-  const image = video.thumbnail_url ?? `${origin}/icon.png`;
+  // Use our own OG image endpoint so the image is served from our domain,
+  // properly sized to 1200×630, and cacheable independently of the source thumbnail.
+  const image = `${origin}/og/${encodeURIComponent(video.id)}.png`;
 
   const escape = (v: string): string =>
     v

@@ -31,9 +31,9 @@ describe('clampForMeta', () => {
 
 describe('buildOgMetaTags', () => {
   const baseVideo = {
+    id: 'abc123',
     title: 'My great video',
     description: 'A short summary.',
-    thumbnail_url: 'https://thumbs.example/abc.jpg',
     channel_name: 'Alice',
   };
 
@@ -47,7 +47,7 @@ describe('buildOgMetaTags', () => {
     expect(out).toContain('<meta property="og:title" content="My great video" />');
     expect(out).toContain('<meta property="og:description" content="A short summary." />');
     expect(out).toContain('<meta property="og:url" content="https://spooool.com/watch/abc" />');
-    expect(out).toContain('<meta property="og:image" content="https://thumbs.example/abc.jpg" />');
+    expect(out).toContain('<meta property="og:image" content="https://spooool.com/og/abc123.png" />');
     expect(out).toContain('<meta property="og:site_name" content="Spooool" />');
     expect(out).toContain('<meta name="twitter:card" content="summary_large_image" />');
   });
@@ -62,13 +62,13 @@ describe('buildOgMetaTags', () => {
     expect(out).toContain('&lt;script&gt;x&lt;/script&gt;');
   });
 
-  it('falls back to a thumbnail of /icon.png when none is set', () => {
+  it('uses the /og/:id.png endpoint for og:image (not a raw thumbnail URL)', () => {
     const out = buildOgMetaTags({
       origin: 'https://x.test',
-      watchUrl: 'https://x.test/watch/1',
-      video: { ...baseVideo, thumbnail_url: null },
+      watchUrl: 'https://x.test/watch/abc123',
+      video: baseVideo,
     });
-    expect(out).toContain('og:image" content="https://x.test/icon.png"');
+    expect(out).toContain('og:image" content="https://x.test/og/abc123.png"');
   });
 
   it('falls back the description to a sensible default when null', () => {

@@ -273,8 +273,12 @@ migrations_dir = "src/db/migrations"
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
 # RENDER_CALLBACK_SECRET    (recorder render — random 32+ byte hex, shared with the container service)
 # EMAIL_UNSUBSCRIBE_SECRET  (random 32+ byte string — HMAC key for one-click unsubscribe tokens in emails)
-# CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL)
+# CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL and R2 presigned URLs)
 # CF_GATEWAY_ID           (e.g. "x"; the gateway slug used in CLAUDE.md)
+# R2_ACCESS_KEY_ID        (R2 presigned URLs — create a token at CF dash → R2 → Manage R2 API Tokens
+#                          scoped to spooool-videos with "Object Read" permission; use the Access Key ID)
+# R2_SECRET_ACCESS_KEY    (paired Secret Access Key for R2_ACCESS_KEY_ID)
+# R2_VIDEOS_BUCKET_NAME   (optional — defaults to "spooool-videos"; override for staging: "spooool-videos")
 # CF_AIG_TOKEN            (Bearer token from CF dashboard → AI → AI Gateway)
 # MCP_SERVER_TOKEN        (dedicated bearer credential for the /mcp endpoint)
 # MCP_OWNER_EMAIL         (Spooool account whose data /mcp may read)

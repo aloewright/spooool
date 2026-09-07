@@ -19,6 +19,7 @@ import { edgeCache, purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache'
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
+import { generateR2PresignedUrl } from './r2-presign';
 import {
   TRENDING_CACHE_TTL_SECONDS,
   bumpTrendingCacheVersion,
@@ -39,6 +40,14 @@ export interface VideoRoutesEnv extends TurnstileEnv {
   RATE_LIMITER?: DurableObjectNamespace;
   VIDEO_ENCODING: Queue;
   ANALYTICS?: AnalyticsEngineDataset;
+  // R2 presigned URL credentials (optional: falls back to Worker-proxy if absent).
+  // Set via: wrangler secret put R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
+  // Generate an R2 API token scoped to spooool-videos (Object Read) at
+  // dash.cloudflare.com → R2 → Manage R2 API Tokens.
+  CF_ACCOUNT_ID?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
+  R2_VIDEOS_BUCKET_NAME?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string; emailVerified?: boolean } | null;
@@ -225,6 +234,13 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
 // Stream (e.g. Stream isn't enabled, or the video is still encoding). Browsers
 // require Range support for seekable <video> playback. When stream_video_id is
 // present and status='ready', clients should use the HLS manifest instead.
+//
+// When R2_ACCESS_KEY_ID + R2_SECRET_ACCESS_KEY are set in the Worker env, GET
+// requests redirect (302) to a 1-hour presigned R2 URL so the client fetches
+// the file directly from R2 — no Worker proxy bandwidth for multi-GB uploads.
+// Range requests work transparently: R2 handles them natively on the signed URL.
+// HEAD requests always proxy through the Worker binding (no bandwidth cost).
+// Falls back to Worker-proxy when credentials are absent (dev / forks).
 videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   const id = c.req.param('id');
   const video = await c.env.DB.prepare(
@@ -250,19 +266,13 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
     return c.json({ error: 'Video not found' }, 404);
   }
 
+  // HEAD: return metadata without transferring the body — always use the
+  // Worker binding (free and fast; no presigned URL overhead for a HEAD).
   const head = await c.env.VIDEOS.head(video.r2_key);
   if (!head) return c.json({ error: 'Video object missing' }, 404);
 
   const totalSize = head.size;
   const contentType = head.httpMetadata?.contentType ?? 'video/mp4';
-  const range = parseRangeHeader(c.req.header('Range'), totalSize);
-
-  if (range.kind === 'invalid') {
-    return new Response('Range Not Satisfiable', {
-      status: 416,
-      headers: { 'Content-Range': `bytes */${totalSize}` },
-    });
-  }
 
   if (c.req.method === 'HEAD') {
     return new Response(null, {
@@ -273,6 +283,33 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
         'Accept-Ranges': 'bytes',
         'Cache-Control': 'public, max-age=3600',
       },
+    });
+  }
+
+  // GET: redirect to a presigned R2 URL when credentials are configured,
+  // so the client fetches the body directly from R2 instead of through the Worker.
+  const { CF_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = c.env;
+  if (CF_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+    const bucketName = c.env.R2_VIDEOS_BUCKET_NAME ?? 'spooool-videos';
+    const presignedUrl = await generateR2PresignedUrl({
+      accountId: CF_ACCOUNT_ID,
+      bucketName,
+      key: video.r2_key,
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+      expiresIn: 3600,
+      now: new Date(),
+    });
+    return Response.redirect(presignedUrl, 302);
+  }
+
+  // Fallback: proxy through the Worker binding (dev / unconfigured forks).
+  const range = parseRangeHeader(c.req.header('Range'), totalSize);
+
+  if (range.kind === 'invalid') {
+    return new Response('Range Not Satisfiable', {
+      status: 416,
+      headers: { 'Content-Range': `bytes */${totalSize}` },
     });
   }
 
@@ -345,10 +382,31 @@ videoRoutes.get('/api/videos/:id/hls/*', async (c) => {
   if (video.status !== 'ready' || video.stream_video_id) return c.json({ error: 'HLS not available' }, 404);
 
   const r2Key = `hls/${id}/${rest}`;
+  const isPlaylist = rest.endsWith('.m3u8');
+
+  // TS segments: redirect to presigned R2 URL when credentials are set.
+  // Playlists stay proxied through the Worker so relative segment URLs
+  // resolve correctly against the Worker origin.
+  if (!isPlaylist) {
+    const { CF_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = c.env;
+    if (CF_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+      const bucketName = c.env.R2_VIDEOS_BUCKET_NAME ?? 'spooool-videos';
+      const presignedUrl = await generateR2PresignedUrl({
+        accountId: CF_ACCOUNT_ID,
+        bucketName,
+        key: r2Key,
+        accessKeyId: R2_ACCESS_KEY_ID,
+        secretAccessKey: R2_SECRET_ACCESS_KEY,
+        expiresIn: 300, // 5 min — long enough for a segment download, short enough to limit stale leaks
+        now: new Date(),
+      });
+      return Response.redirect(presignedUrl, 302);
+    }
+  }
+
   const object = await c.env.VIDEOS.get(r2Key);
   if (!object) return c.json({ error: 'Segment not found' }, 404);
 
-  const isPlaylist = rest.endsWith('.m3u8');
   const contentType = isPlaylist ? 'application/vnd.apple.mpegurl' : 'video/MP2T';
   return new Response(object.body, {
     headers: {

@@ -246,6 +246,45 @@ export async function sendAccountDeletionEmail(
   return send(env, { to: args.to, ...buildAccountDeletionEmail(args) });
 }
 
+export function buildDmcaAcknowledgmentEmail(args: {
+  claimId: string;
+  videoId: string;
+}): { subject: string; html: string; text: string } {
+  const { claimId, videoId } = args;
+  return {
+    subject: `DMCA Claim Received — Claim #${claimId}`,
+    text:
+      `We have received your DMCA takedown notice regarding video ${videoId} ` +
+      `(claim ID: ${claimId}).\n\n` +
+      `What happens next:\n` +
+      `1. Our team will review the claim and may disable the content.\n` +
+      `2. The uploader will be notified and given the opportunity to file a counter-notice.\n` +
+      `3. If a counter-notice is filed, you will have 14 calendar days to seek a court order ` +
+      `before the content is restored per 17 U.S.C. § 512(g)(2)(C).\n\n` +
+      `Keep this claim ID for your records: ${claimId}\n\n` +
+      `For questions, contact dmca@spooool.com.`,
+    html:
+      `<p>We have received your DMCA takedown notice regarding video ` +
+      `<code>${escapeHtml(videoId)}</code> (claim ID: <code>${escapeHtml(claimId)}</code>).</p>` +
+      `<p><strong>What happens next:</strong></p>` +
+      `<ol>` +
+      `<li>Our team will review the claim and may disable the content.</li>` +
+      `<li>The uploader will be notified and given the opportunity to file a counter-notice.</li>` +
+      `<li>If a counter-notice is filed, you will have 14 calendar days to seek a court order ` +
+      `before the content is restored per 17 U.S.C. § 512(g)(2)(C).</li>` +
+      `</ol>` +
+      `<p>Keep this claim ID for your records: <code>${escapeHtml(claimId)}</code></p>` +
+      `<p>For questions, contact <a href="mailto:dmca@spooool.com">dmca@spooool.com</a>.</p>`,
+  };
+}
+
+export async function sendDmcaAcknowledgmentEmail(
+  env: EmailEnv,
+  args: { to: string; claimId: string; videoId: string },
+): Promise<EmailResult> {
+  return send(env, { to: args.to, ...buildDmcaAcknowledgmentEmail(args) });
+}
+
 // LEGAL-REVIEW: placeholder copy — ALO-170. Counsel must approve before launch.
 export function buildDmcaUploaderNotifyEmail(args: {
   claimId: string;

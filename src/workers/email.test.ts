@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildDmcaAcknowledgmentEmail,
   buildPasswordResetConfirmationEmail,
   buildPasswordResetEmail,
   buildVerificationEmail,
   buildWelcomeEmail,
+  sendDmcaAcknowledgmentEmail,
   sendPasswordResetConfirmationEmail,
   sendPasswordResetEmail,
   sendVerificationEmail,
@@ -112,5 +114,42 @@ describe('sendWelcomeEmail', () => {
     const binding = fakeBinding();
     await sendWelcomeEmail({ EMAIL: binding }, { to: 'u@x.test', firstName: 'Alice' });
     expect(binding.send.mock.calls[0][0].text).toContain('Hey Alice');
+  });
+});
+
+describe('buildDmcaAcknowledgmentEmail', () => {
+  it('includes claim id, video id, and § 512 reference in both parts', () => {
+    const m = buildDmcaAcknowledgmentEmail({ claimId: 'c-123', videoId: 'v-456' });
+    expect(m.subject).toContain('c-123');
+    expect(m.text).toContain('c-123');
+    expect(m.text).toContain('v-456');
+    expect(m.text).toContain('17 U.S.C. § 512');
+    expect(m.html).toContain('c-123');
+    expect(m.html).toContain('v-456');
+  });
+
+  it('subject line mentions the claim id', () => {
+    const m = buildDmcaAcknowledgmentEmail({ claimId: 'abc', videoId: 'xyz' });
+    expect(m.subject).toMatch(/abc/);
+  });
+});
+
+describe('sendDmcaAcknowledgmentEmail', () => {
+  it('returns skipped when EMAIL binding is missing', async () => {
+    const r = await sendDmcaAcknowledgmentEmail({}, { to: 'c@x.test', claimId: 'c1', videoId: 'v1' });
+    expect(r).toEqual({ ok: false, skipped: true, reason: 'EMAIL binding not configured' });
+  });
+
+  it('sends to complainant with claim and video ids', async () => {
+    const binding = fakeBinding();
+    const r = await sendDmcaAcknowledgmentEmail(
+      { EMAIL: binding },
+      { to: 'c@x.test', claimId: 'c-99', videoId: 'v-77' },
+    );
+    expect(r.ok).toBe(true);
+    const sent = binding.send.mock.calls[0][0];
+    expect(sent.to).toBe('c@x.test');
+    expect(sent.text).toContain('c-99');
+    expect(sent.text).toContain('v-77');
   });
 });

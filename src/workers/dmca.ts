@@ -5,7 +5,7 @@
 // tracked in follow-up issues.
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { type EmailEnv, sendDmcaUploaderNotifyEmail } from './email';
+import { type EmailEnv, sendDmcaAcknowledgmentEmail, sendDmcaUploaderNotifyEmail } from './email';
 
 // Counter-notice waiting period per 17 U.S.C. § 512(g)(2)(C). We use 14
 // business days converted to a flat 14 calendar days for cron simplicity;
@@ -93,15 +93,11 @@ dmcaRoutes.post('/api/dmca/submission', async (c) => {
     )
     .run();
 
-  // LEGAL-REVIEW: replace placeholder auto-acknowledgment email body with
-  // counsel-approved text before launch. The trigger fires here so swapping
-  // the placeholder for a real mailer is a one-line change.
-  console.log('[dmca-acknowledgment]', {
-    claimId: id,
+  // Fail-open: a flaky EMAIL binding must not block the 201 response.
+  await sendDmcaAcknowledgmentEmail(c.env, {
     to: data.complainantEmail,
-    cc: DMCA_NOTICE_EMAIL,
-    template: 'dmca-acknowledgment',
-    placeholder: true,
+    claimId: id,
+    videoId: data.videoId,
   });
 
   return c.json({ id, status: 'pending' }, 201);

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Hono } from 'hono';
 import {
   COUNTER_NOTICE_WAIT_DAYS,
@@ -7,6 +7,7 @@ import {
   runDmcaRestoreSweep,
   type DmcaSweepEnv,
 } from './dmca';
+import type { EmailBinding } from './email';
 
 describe('counter-notice wait constants', () => {
   it('is 14 days in ms', () => {
@@ -184,7 +185,11 @@ function fakeDB(store: FakeStore): D1Database {
 
 type Ctx = { Variables: { user: { id: string; email: string; name: string } | null } };
 
-function appAs(store: FakeStore, user: { id: string } | null) {
+function fakeEmailBinding(): EmailBinding & { send: ReturnType<typeof vi.fn> } {
+  return { send: vi.fn(async () => ({ messageId: 'm1' })) } as never;
+}
+
+function appAs(store: FakeStore, user: { id: string } | null, email?: EmailBinding) {
   const app = new Hono<Ctx>();
   app.use('*', async (c, next) => {
     c.set('user', user ? { id: user.id, email: 'x@y.com', name: 'x' } : null);
@@ -199,7 +204,7 @@ function appAs(store: FakeStore, user: { id: string } | null) {
           headers: { 'content-type': 'application/json' },
           body: body ? JSON.stringify(body) : undefined,
         }),
-        { DB: fakeDB(store), CACHE: fakeKV(store.cacheDeletes) } as never,
+        { DB: fakeDB(store), CACHE: fakeKV(store.cacheDeletes), EMAIL: email } as never,
       );
     },
   };
@@ -254,6 +259,29 @@ describe('DMCA submission validation', () => {
     const app = appAs(store, null);
     const res = await app.post('/api/dmca/submission', { ...VALID_SUBMISSION, videoId: 'missing' });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('DMCA submission acknowledgment email', () => {
+  it('sends an acknowledgment email to the complainant on successful submission', async () => {
+    const store = makeStore();
+    const emailBinding = fakeEmailBinding();
+    const app = appAs(store, null, emailBinding);
+    const res = await app.post('/api/dmca/submission', VALID_SUBMISSION);
+    expect(res.status).toBe(201);
+    expect(emailBinding.send).toHaveBeenCalledTimes(1);
+    const sent = emailBinding.send.mock.calls[0][0];
+    expect(sent.to).toBe('jane@example.com');
+    expect(sent.text).toContain('v1');
+    expect(sent.subject).toMatch(/dmca/i);
+  });
+
+  it('does not block the 201 when EMAIL binding is absent', async () => {
+    const store = makeStore();
+    const app = appAs(store, null);
+    const res = await app.post('/api/dmca/submission', VALID_SUBMISSION);
+    expect(res.status).toBe(201);
+    expect(store.claims.size).toBe(1);
   });
 });
 

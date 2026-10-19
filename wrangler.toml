@@ -270,6 +270,13 @@ migrations_dir = "src/db/migrations"
 # SENTRY_DSN              (worker error tracking — get from sentry.io project settings)
 # RENDER_CALLBACK_SECRET    (recorder render — random 32+ byte hex, shared with the container service)
 # EMAIL_UNSUBSCRIBE_SECRET  (random 32+ byte string — HMAC key for one-click unsubscribe tokens in emails)
+# R2_ACCOUNT_ID           (Cloudflare account ID hex — same value as CF_ACCOUNT_ID)
+# R2_ACCESS_KEY_ID        (R2 API token access key — create via CF dashboard → R2 → Manage API tokens,
+#                          scope: Object-level Read on spooool-videos)
+# R2_SECRET_ACCESS_KEY    (paired secret for R2_ACCESS_KEY_ID)
+# When all three are set, /api/videos/:id/stream redirects to a presigned R2
+# URL (1-hour TTL) instead of proxying bytes through the Worker.
+#
 # CF_ACCOUNT_ID           (set: random hex from CF dashboard; needed for AI Gateway URL)
 # CF_GATEWAY_ID           (e.g. "x"; the gateway slug used in CLAUDE.md)
 # CF_AIG_TOKEN            (Bearer token from CF dashboard → AI → AI Gateway)

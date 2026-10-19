@@ -18,6 +18,7 @@ import { verifyTurnstile, type TurnstileEnv } from './turnstile';
 import { edgeCache, purgeEdgeCache, purgeTrendingEdgeCache } from './edge-cache';
 import { VIDEO_META_CACHE_TTL_SECONDS, videoMetaCacheKey } from './video-meta-cache';
 import { parseRangeHeader } from './video-range';
+import { presignR2GetUrl } from './r2-presigned';
 import { getStorageUsage, hasRoomFor } from './storage-quota';
 import {
   TRENDING_CACHE_TTL_SECONDS,
@@ -39,6 +40,12 @@ export interface VideoRoutesEnv extends TurnstileEnv {
   RATE_LIMITER?: DurableObjectNamespace;
   VIDEO_ENCODING: Queue;
   ANALYTICS?: AnalyticsEngineDataset;
+  // R2 S3-compatible API credentials for presigned URLs (optional).
+  // When set, the stream endpoint redirects the client to a time-limited R2
+  // URL instead of proxying bytes through the Worker.
+  R2_ACCOUNT_ID?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
 }
 
 type SessionUser = { id: string; email: string; name: string; emailVerified?: boolean } | null;
@@ -225,6 +232,12 @@ videoRoutes.get('/api/videos/:id', edgeCache({ ttl: 60, swr: 300 }), async (c) =
 // Stream (e.g. Stream isn't enabled, or the video is still encoding). Browsers
 // require Range support for seekable <video> playback. When stream_video_id is
 // present and status='ready', clients should use the HLS manifest instead.
+//
+// When R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY are configured,
+// the Worker issues a 302 redirect to a time-limited presigned R2 URL so the
+// client streams directly from R2 without piping bytes through Worker CPU.
+// This is the preferred path in production (configure via wrangler secrets).
+// Without those credentials the Worker proxies the stream transparently.
 videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
   const id = c.req.param('id');
   const video = await c.env.DB.prepare(
@@ -250,6 +263,25 @@ videoRoutes.on(['GET', 'HEAD'], '/api/videos/:id/stream', async (c) => {
     return c.json({ error: 'Video not found' }, 404);
   }
 
+  // Presigned redirect path: skip Worker-proxied streaming when R2 API
+  // credentials are present. The signed URL is time-limited (1 hour) so
+  // it can't be hotlinked indefinitely. Use 302 (not 301) — presigned URLs
+  // are one-time / time-limited so caches must not store the redirect.
+  const { R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY } = c.env;
+  if (R2_ACCOUNT_ID && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+    const presignedUrl = await presignR2GetUrl({
+      accountId: R2_ACCOUNT_ID,
+      accessKeyId: R2_ACCESS_KEY_ID,
+      secretAccessKey: R2_SECRET_ACCESS_KEY,
+      bucketName: 'spooool-videos',
+      key: video.r2_key,
+      expiresInSeconds: 3600,
+    });
+    return c.redirect(presignedUrl, 302);
+  }
+
+  // Fallback: proxy the stream through the Worker (used when R2 API
+  // credentials are not configured, e.g. local dev or unprovisioned staging).
   const head = await c.env.VIDEOS.head(video.r2_key);
   if (!head) return c.json({ error: 'Video object missing' }, 404);
 

@@ -267,6 +267,25 @@ studioRoutes.post('/api/studio/video', async (c) => {
   return c.json({ assetId, status: 'queued' }, 202);
 });
 
+studioRoutes.get('/api/studio/assets/:id', async (c) => {
+  const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+
+  const assetId = c.req.param('id');
+  const row = await c.env.DB.prepare(
+    `SELECT id, kind, status, stream_video_id, r2_key, error_message FROM generated_assets WHERE id = ? AND user_id = ?`,
+  ).bind(assetId, user.id).first<{
+    id: string;
+    kind: string;
+    status: string;
+    stream_video_id: string | null;
+    r2_key: string | null;
+    error_message: string | null;
+  }>();
+  if (!row) return c.json({ error: 'Not found' }, 404);
+  return c.json(row);
+});
+
 const metadataBodySchema = z.object({
   videoId: z.string().min(1),
   projectId: z.string().min(1).optional(),

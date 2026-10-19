@@ -130,3 +130,35 @@ export async function generateMetadata(
   await throwIfNotOk(res, route);
   return (await res.json()) as GeneratedMetadata;
 }
+
+export interface VideoGenQueued {
+  assetId: string;
+  status: 'queued';
+}
+
+export interface GeneratedAssetStatus {
+  id: string;
+  kind: string;
+  status: 'queued' | 'processing' | 'ready' | 'failed';
+  stream_video_id: string | null;
+  r2_key: string | null;
+  error_message: string | null;
+}
+
+export async function postVideoGen(prompt: string): Promise<VideoGenQueued> {
+  const route = '/api/studio/video';
+  const res = await timedFetch(route, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  });
+  await throwIfNotOk(res, route);
+  return (await res.json()) as VideoGenQueued;
+}
+
+export async function getGeneratedAsset(assetId: string): Promise<GeneratedAssetStatus> {
+  const route = `/api/studio/assets/${assetId}`;
+  const res = await timedFetch(route, { method: 'GET' });
+  await throwIfNotOk(res, route);
+  return (await res.json()) as GeneratedAssetStatus;
+}

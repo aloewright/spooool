@@ -863,3 +863,68 @@ describe('POST /api/studio/metadata (ALO-649)', () => {
     expect((await res).status).toBe(429);
   });
 });
+
+// ────────────────────────────────────────────────────────────
+// GET /api/studio/assets/:id — asset status polling
+// ────────────────────────────────────────────────────────────
+describe('GET /api/studio/assets/:id', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const assetUser = { id: 'u1', email: 'a@b.com', name: 'A', emailVerified: true };
+
+  function getAsset(user: typeof assetUser | null, assetId: string, dbRow: unknown = null) {
+    const db = makeDbStub();
+    // Override first() to return the specified row for generated_assets lookup
+    const origPrepare = db['prepare'] as (sql: string) => Record<string, unknown>;
+    (db['prepare'] as unknown) = (sql: string) => {
+      const stmt = origPrepare(sql);
+      if (sql.includes('FROM generated_assets WHERE id')) {
+        return {
+          bind: (..._args: unknown[]) => ({
+            first: vi.fn(async () => dbRow),
+          }),
+        };
+      }
+      return stmt;
+    };
+    const videos = makeVideosStub();
+    const app = new Hono<{ Variables: { user: typeof assetUser | null } }>();
+    app.use('*', async (c, next) => { c.set('user', user); await next(); });
+    app.route('/', studioRoutes);
+    const base = {
+      AI: { gateway: () => ({ run: async () => new Response('') }), run: async () => ({}) },
+      DB: db,
+      VIDEOS: videos,
+    };
+    return app.request(`/api/studio/assets/${assetId}`, { method: 'GET' }, base);
+  }
+
+  it('returns 401 when unauthenticated', async () => {
+    const res = await getAsset(null, 'a_abc');
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 when asset not found or not owned', async () => {
+    const res = await getAsset(assetUser, 'a_missing', null);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns asset status when found', async () => {
+    const row = { id: 'a_abc', kind: 'video', status: 'queued', stream_video_id: null, r2_key: null, error_message: null };
+    const res = await getAsset(assetUser, 'a_abc', row);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.id).toBe('a_abc');
+    expect(body.status).toBe('queued');
+    expect(body.kind).toBe('video');
+  });
+
+  it('returns ready status with stream_video_id when complete', async () => {
+    const row = { id: 'a_done', kind: 'video', status: 'ready', stream_video_id: 'stream_xyz', r2_key: 'studio/video/a_done.mp4', error_message: null };
+    const res = await getAsset(assetUser, 'a_done', row);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, unknown>;
+    expect(body.status).toBe('ready');
+    expect(body.stream_video_id).toBe('stream_xyz');
+  });
+});
